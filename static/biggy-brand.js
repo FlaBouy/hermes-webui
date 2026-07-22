@@ -1,0 +1,290 @@
+(() => {
+  'use strict';
+  if (window.__biggyBrandLoaded) return;
+  window.__biggyBrandLoaded = true;
+
+  const DOC_TITLE = 'Biggy — Local Fleet Coordinator';
+  const ROLE = 'Local Fleet Coordinator';
+  const BRAND = 'Biggy';
+  const PLACEHOLDER = 'Message Biggy…';
+  const IWO_CLASS = 'biggy-brand-iwo';
+  const BODY_CLASS = 'biggy-brand';
+
+  const state = {
+    profile: 'biggy',
+    model: '',
+    provider: '',
+    providerLabel: '',
+    ready: false,
+  };
+  let identityTimer = null;
+  let started = false;
+
+  function esc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+
+  function el(tag, className, html) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (html !== undefined) node.innerHTML = html;
+    return node;
+  }
+
+  function providerLabel(id) {
+    const raw = String(id || '').trim();
+    if (!raw) return '';
+    const key = raw.toLowerCase();
+    if (key === 'lmstudio' || key === 'lm-studio' || key === 'lm_studio') return 'LM Studio';
+    if (key === 'openai') return 'OpenAI';
+    if (key === 'anthropic') return 'Anthropic';
+    if (key === 'custom' || key.startsWith('custom:')) return 'Custom';
+    return raw;
+  }
+
+  function brandVisibleText(value) {
+    if (typeof value !== 'string' || !value || !/hermes/i.test(value)) return value;
+    return value
+      .replace(/\bHERMES\b/g, 'BIGGY')
+      .replace(/\bHermes\b/g, 'Biggy')
+      .replace(/\bhermes\b/g, 'biggy');
+  }
+
+  function isBiggyInstance() {
+    if (state.ready && state.profile === 'biggy') return true;
+    try {
+      if (typeof S !== 'undefined' && S && String(S.activeProfile || '').toLowerCase() === 'biggy') {
+        return true;
+      }
+    } catch (_) {}
+    return state.profile === 'biggy';
+  }
+
+  function installDocumentTitle() {
+    document.title = DOC_TITLE;
+    const apple = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    if (apple) apple.setAttribute('content', BRAND);
+  }
+
+  function installComposerBranding() {
+    const composer = document.getElementById('msg');
+    if (!composer) return;
+    if (composer.getAttribute('placeholder') !== PLACEHOLDER) {
+      composer.setAttribute('placeholder', PLACEHOLDER);
+    }
+  }
+
+  function forceChromeLabels() {
+    const title = document.getElementById('appTitlebarTitle');
+    if (title && title.textContent.trim() !== BRAND) title.textContent = BRAND;
+
+    const profileLabel = document.getElementById('profileChipLabel');
+    if (profileLabel && profileLabel.textContent.trim().toLowerCase() === 'default') {
+      profileLabel.textContent = 'biggy';
+    }
+    const titleProfile = document.getElementById('titlebarProfileLabel');
+    if (titleProfile && titleProfile.textContent.trim().toLowerCase() === 'default') {
+      titleProfile.textContent = 'biggy';
+    }
+
+    try {
+      window._botName = BRAND;
+      if (typeof S !== 'undefined' && S) {
+        if (!S.activeProfile || S.activeProfile === 'default') {
+          S.activeProfile = 'biggy';
+          S.activeProfileIsDefault = false;
+        }
+      }
+    } catch (_) {}
+
+    const onboardingTitle = document.getElementById('onboardingTitle');
+    if (onboardingTitle) {
+      const next = brandVisibleText(onboardingTitle.textContent || '');
+      if (next && next !== onboardingTitle.textContent) onboardingTitle.textContent = 'Welcome to Biggy';
+      else if (/hermes/i.test(onboardingTitle.textContent || '')) onboardingTitle.textContent = 'Welcome to Biggy';
+    }
+    const onboardingLead = document.getElementById('onboardingLead');
+    if (onboardingLead && /hermes/i.test(onboardingLead.textContent || '')) {
+      onboardingLead.textContent =
+        'A quick guided setup will check your Biggy install, choose a workspace and model, and optionally protect the app with a password.';
+    }
+
+    // One-shot chrome text replacements for common static labels only.
+    [
+      'appTitlebarTitle',
+      'offlineAutorefresh',
+      'agentHealthTitle',
+    ].forEach((id) => {
+      const node = document.getElementById(id);
+      if (!node || !node.firstChild || node.firstChild.nodeType !== Node.TEXT_NODE) {
+        if (node && typeof node.textContent === 'string' && /hermes/i.test(node.textContent)) {
+          node.textContent = brandVisibleText(node.textContent);
+        }
+        return;
+      }
+      const next = brandVisibleText(node.textContent);
+      if (next !== node.textContent) node.textContent = next;
+    });
+  }
+
+  function removeCaduceus() {
+    document.querySelectorAll('#emptyState .empty-logo').forEach((node) => node.remove());
+  }
+
+  function updateIdentityChip() {
+    const meta = document.getElementById('biggyBrandMeta');
+    const sub = document.getElementById('biggyBrandSubtitle');
+    if (!meta && !sub) return;
+    const model = state.model || '—';
+    const provider = state.providerLabel || providerLabel(state.provider) || '—';
+    const profile = state.profile || 'biggy';
+    // Subtitle stays role-only; identity lives once in the right status chip.
+    if (sub) sub.textContent = ROLE;
+    if (meta) {
+      meta.innerHTML =
+        `<div><span>PROFILE</span> ${esc(profile)}</div>` +
+        `<div><span>PROVIDER</span> ${esc(provider)}</div>` +
+        `<div><span>MODEL</span> ${esc(model)}</div>`;
+    }
+  }
+
+  function syncModelFromDom() {
+    const sel = document.getElementById('modelSelect');
+    if (!sel || !sel.value) return;
+    if (!state.model || state.model === 'Unknown' || /claude|gpt-4|gpt-5|sonnet|opus/i.test(state.model)) {
+      if (sel.value && !/unknown/i.test(sel.value)) state.model = sel.value;
+    }
+    const opt = sel.selectedOptions && sel.selectedOptions[0];
+    const dataProvider = opt && (opt.getAttribute('data-provider') || opt.dataset.provider);
+    if (dataProvider && (!state.provider || state.provider === 'Unknown')) {
+      state.provider = dataProvider;
+      state.providerLabel = providerLabel(dataProvider);
+    }
+  }
+
+  async function jsonGet(path) {
+    if (typeof window.api === 'function') return window.api(path);
+    const response = await fetch(path, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  }
+
+  async function refreshIdentity() {
+    try {
+      const profiles = await jsonGet('/api/profiles');
+      if (profiles && profiles.active) state.profile = String(profiles.active).trim() || 'biggy';
+      const active = Array.isArray(profiles && profiles.profiles)
+        ? profiles.profiles.find((p) => p && p.is_active) || profiles.profiles[0]
+        : null;
+      if (active) {
+        if (active.model) state.model = String(active.model);
+        if (active.provider) {
+          state.provider = String(active.provider);
+          state.providerLabel = providerLabel(active.provider);
+        }
+      }
+      if (profiles && profiles.single_profile_mode) state.ready = true;
+    } catch (_) {}
+
+    try {
+      const onboard = await jsonGet('/api/onboarding/status');
+      const system = onboard && onboard.system ? onboard.system : {};
+      if (system.current_model) state.model = String(system.current_model);
+      if (system.current_provider) {
+        state.provider = String(system.current_provider);
+        state.providerLabel = providerLabel(system.current_provider);
+      }
+      state.ready = true;
+    } catch (_) {}
+
+    try {
+      const settings = await jsonGet('/api/settings');
+      if (settings && settings.default_model_provider && !state.provider) {
+        state.provider = String(settings.default_model_provider);
+        state.providerLabel = providerLabel(settings.default_model_provider);
+      }
+      window._botName = BRAND;
+    } catch (_) {
+      window._botName = BRAND;
+    }
+
+    try {
+      // Populate from backend identity even when window globals were still unset.
+      if (state.model) window._defaultModel = state.model;
+      if (state.provider) window._activeProvider = state.provider;
+      if (typeof S !== 'undefined' && S && state.profile === 'biggy') {
+        S.activeProfile = 'biggy';
+        S.activeProfileIsDefault = false;
+      }
+    } catch (_) {}
+
+    syncModelFromDom();
+    updateIdentityChip();
+    forceChromeLabels();
+    installComposerBranding();
+    removeCaduceus();
+  }
+
+  function makeHeader() {
+    const header = el('div', 'biggy-brand-header');
+    header.innerHTML =
+      `<div class="biggy-brand-cluster">` +
+      `<img class="biggy-brand-ega" src="/static/ega.jpg" alt="EGA">` +
+      `<div class="biggy-brand-heading">` +
+      `<div class="biggy-brand-title">BIGGY</div>` +
+      `<div class="biggy-brand-subtitle" id="biggyBrandSubtitle">${esc(ROLE)}</div>` +
+      `</div>` +
+      `<img class="biggy-brand-ega" src="/static/ega.jpg" alt="EGA">` +
+      `</div>` +
+      `<div class="biggy-brand-status" aria-label="Biggy identity">` +
+      `<div class="biggy-brand-meta" id="biggyBrandMeta">PROFILE biggy</div>` +
+      `</div>`;
+    return header;
+  }
+
+  function applyShell() {
+    const mainChat = document.getElementById('mainChat');
+    if (!mainChat) return false;
+    document.body.classList.add(BODY_CLASS);
+    mainChat.classList.add(IWO_CLASS);
+    // Keep exactly one header; replace any stale/duplicate injects.
+    document.querySelectorAll('.biggy-brand-header').forEach((node) => node.remove());
+    mainChat.insertBefore(makeHeader(), mainChat.firstChild);
+    installDocumentTitle();
+    installComposerBranding();
+    forceChromeLabels();
+    removeCaduceus();
+    updateIdentityChip();
+    return true;
+  }
+
+  async function tryStart() {
+    if (started) return;
+    await refreshIdentity();
+    if (!isBiggyInstance()) return;
+    if (!applyShell()) {
+      setTimeout(() => { tryStart().catch(() => {}); }, 100);
+      return;
+    }
+    started = true;
+    await refreshIdentity();
+    if (identityTimer) clearInterval(identityTimer);
+    identityTimer = setInterval(() => {
+      refreshIdentity().catch(() => {});
+    }, 15000);
+  }
+
+  function start() {
+    // Wait for the core app shell; never install a document-wide MutationObserver
+    // (that froze boot and produced a blank white page).
+    tryStart().catch(() => {});
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();
