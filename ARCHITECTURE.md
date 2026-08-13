@@ -276,7 +276,10 @@ then cleans up. The queue fills and the put_nowait() calls fail silently (queue.
 is caught).
 
 Fallback sync endpoint: POST /api/chat still exists and holds the connection open until
-the agent finishes. The frontend never uses it but it can be useful for debugging.
+the agent finishes. The frontend never uses it but it can be useful for debugging
+(and for external clients such as the Biggy PTT pedal). A disconnected client now
+triggers ``agent.interrupt`` so the upstream provider request is aborted instead of
+pinning a local-model parallel slot until the Agent's request timeout expires.
 
 ### 4.4 Agent Invocation (_run_agent_streaming)
 
@@ -1329,8 +1332,18 @@ Complete list of all HTTP endpoints as of Sprint 1 (v0.3).
     /api/session/delete        {"session_id"} -> {"ok": true}
     /api/chat/start            {"session_id", "message", "model"?, "workspace"?}
                                -> {"stream_id", "session_id"}. Starts agent daemon thread.
-    /api/chat                  (fallback, sync) {"session_id", "message", "model"?, "workspace"?}
-                               -> blocks until agent finishes. Returns full result.
+    /api/chat                  (fallback, sync) {"session_id", "message", "model"?, "workspace"?,
+                               "reasoning_effort"?, "display_message"?, "max_tokens"?}
+                               -> blocks until agent finishes. An explicit reasoning effort
+                               overrides agent.reasoning_effort for that request only.
+                               display_message is persisted/rendered as the user turn while
+                               message remains the agent-facing payload. An explicit
+                               max_tokens caps the completion budget for that request only
+                               (PTT uses a small cap for short spoken replies). If the HTTP
+                               client hangs up mid-turn, the handler interrupts the AIAgent
+                               (same interrupt path streaming cancel uses) so the upstream
+                               provider slot is released instead of pinning until the Agent's
+                               own request timeout. Returns full result.
     /api/share/create          {"session_id"} -> creates or refreshes a public read-only snapshot link
     /api/share/revoke          {"session_id"} -> revokes the current public snapshot link
     /api/approval/respond      {"session_id", "choice": once|session|always|deny}

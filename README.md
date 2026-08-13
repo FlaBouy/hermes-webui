@@ -249,6 +249,43 @@ If an AI assistant is helping with install, reinstall, bootstrap, provider setup
 - Auto-stops after ~2s of silence
 - Appends to existing textarea content (doesn't replace)
 - Hidden when browser doesn't support Web Speech API (Chrome, Edge, Safari)
+- Optional **GPT Voice (Realtime)** control (Settings → Preferences, default off):
+  OpenAI Realtime WebRTC for low-latency mic/speakers only. Spoken turns still
+  go through Hermes chat (session, RAG, approvals, tools). Requires a
+  server-side `OPENAI_API_KEY` or `VOICE_TOOLS_OPENAI_KEY`; the browser receives
+  only a short-lived ephemeral client secret. Does not replace the physical
+  pedal or local dictation/voice-mode paths.
+  - **Push-to-talk is the default.** Hold **Talk** in the GPT Voice bar to
+    capture; release to send. The microphone is hard-muted at the track level
+    whenever Hermes is thinking or speaking, which is what prevents the
+    assistant from hearing its own playback and replying to itself in a loop.
+    The bar shows *Echo protection on* while the mic is muted.
+  - **The button next to Talk is context-sensitive.** While Hermes is thinking
+    or speaking it reads **Stop** and interrupts only that response — playback is
+    cancelled and the run is dropped, but the voice session stays connected and
+    returns to ready. Once idle it reads **End** and disconnects: playback stops
+    and microphone capture is torn down.
+  - The session returns to ready on its own when a reply finishes. If a run ends
+    without producing spoken text, a watchdog clears the echo guard rather than
+    leaving the microphone muted.
+  - **Remote access needs a secure context.** Browsers only expose
+    `navigator.mediaDevices` on HTTPS or `localhost`, so reaching the UI over a
+    plain `http://<lan-or-tailscale-ip>:<port>` address disables the microphone
+    and GPT Voice reports the origin it was loaded from. Serve the UI over
+    HTTPS (`HERMES_WEBUI_TLS_CERT` / `HERMES_WEBUI_TLS_KEY`, or a reverse proxy),
+    or allow the specific origin in the browser's insecure-origin exception
+    list for trusted private networks.
+  -   Hands-free (server VAD, no hold) is **not enabled** and stays behind an
+    explicit opt-in until echo handling is proven on real hardware. To trial it
+    with headphones, set `localStorage['hermes-gpt-voice-handsfree'] = 'true'`
+    and reload. Speakers plus hands-free can reintroduce the feedback loop.
+  - **Local Biggy Owner-ACK propose (same machine):** when Biggy stages a
+    construction ask from GPT Voice, it uses the loopback propose-only gateway
+    (`127.0.0.1:8792`) via `gpt_propose_to_biggy.py` or session-authenticated
+    `POST /api/gpt/propose-task`. Token stays in
+    `GPT_BIGGY_PROPOSE_TOKEN_FILE` on the server. GPT Voice may propose only;
+    Owner approve/reject stays in Biggy. No Cloudflare/tunnel required for this
+    path.
 
 ### Profiles
 - Profile chip in the **composer footer** -- dropdown showing all profiles with gateway status and model info
