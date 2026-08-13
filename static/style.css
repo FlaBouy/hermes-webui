@@ -2711,6 +2711,22 @@
   .voice-mode-btn{transition:color .15s,background .15s;}
   .voice-mode-btn.active{color:var(--accent);background:rgba(var(--accent-rgb,99,102,241),.15);}
   .voice-mode-btn.active svg{filter:drop-shadow(0 0 3px rgba(var(--accent-rgb,99,102,241),.5));}
+  .gpt-voice-btn{transition:color .15s,background .15s;}
+  .gpt-voice-btn.active{color:var(--accent);background:rgba(var(--accent-rgb,99,102,241),.15);}
+  .gpt-voice-btn.active svg{filter:drop-shadow(0 0 3px rgba(var(--accent-rgb,99,102,241),.5));}
+  .gpt-voice-indicator[data-phase="error"]{background:var(--error);}
+  .gpt-voice-indicator[data-phase="processing"]{background:var(--warn, #f0a000);}
+  .gpt-voice-indicator[data-phase="speaking"]{background:var(--accent);}
+  .gpt-voice-indicator[data-phase="listening"]{background:var(--ok, #3fb950);}
+  .gpt-voice-guard{color:var(--warn,#f0a000);font-size:11px;}
+  .gpt-voice-actions{margin-left:auto;display:flex;align-items:center;gap:6px;}
+  .gpt-voice-talk,.gpt-voice-stop{font-size:11px;line-height:1;padding:4px 10px;border-radius:999px;border:1px solid var(--border,rgba(255,255,255,.15));background:transparent;color:var(--muted);cursor:pointer;}
+  .gpt-voice-talk{touch-action:none;user-select:none;-webkit-user-select:none;}
+  .gpt-voice-talk:hover,.gpt-voice-stop:hover{color:var(--fg,inherit);}
+  .gpt-voice-talk.talking{background:var(--ok,#3fb950);border-color:var(--ok,#3fb950);color:#fff;}
+  .gpt-voice-talk:disabled{opacity:.4;cursor:not-allowed;}
+  .gpt-voice-stop{border-color:var(--error);color:var(--error);}
+  .gpt-voice-stop:hover{background:var(--error);color:#fff;}
   .voice-mode-bar{font-size:11px;padding:4px 12px;display:flex;align-items:center;gap:8px;border-bottom:1px solid rgba(255,255,255,.05);}
   .voice-mode-indicator{width:8px;height:8px;border-radius:50%;flex-shrink:0;}
   .voice-mode-indicator.listening{background:var(--error);animation:voice-mode-pulse 1s ease-in-out infinite;}
@@ -3150,7 +3166,7 @@
     .mobile-sidebar-close{display:inline-flex!important;position:absolute;right:4px;top:calc(4px + var(--app-titlebar-safe-top));width:44px;height:44px;z-index:4;background:var(--surface);border:1px solid var(--border);}
     .sidebar .panel-icon-btn{min-width:44px;min-height:44px;width:auto;height:auto;}
     /* Touch targets — minimum 44px */
-    .icon-btn,.mic-btn,.voice-mode-btn{min-width:44px;min-height:44px;}
+    .icon-btn,.mic-btn,.voice-mode-btn,.gpt-voice-btn{min-width:44px;min-height:44px;}
     .app-titlebar-hamburger,
     .app-titlebar-new-chat,
     .app-titlebar-reload,

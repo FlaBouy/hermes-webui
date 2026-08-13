@@ -8,6 +8,8 @@ import json as _json
 import logging
 import os
 import re as _re
+import select
+import socket
 import ssl
 from pathlib import Path
 from api.config import IMAGE_EXTS, MD_EXTS
@@ -25,6 +27,35 @@ _CLIENT_DISCONNECT_ERRORS = (
     TimeoutError,
     ssl.SSLError,
 )
+
+
+def client_connection_lost(handler) -> bool:
+    """Report whether the peer has already closed a request socket.
+
+    A synchronous handler blocks for the whole length of its work and would
+    otherwise only discover an abandoned client when it writes the response.
+    Polling lets long-running handlers stop work nobody will read.
+
+    Returns False whenever liveness cannot be established, so a caller never
+    abandons real work on an inconclusive check.
+    """
+    sock = getattr(handler, "connection", None)
+    if sock is None:
+        return False
+    try:
+        readable, _, _ = select.select([sock], [], [], 0)
+        if not readable:
+            return False
+        # The request body is already consumed, so a readable socket holds
+        # either a pipelined request (bytes) or a closed peer (EOF).
+        return sock.recv(1, socket.MSG_PEEK) == b""
+    except _CLIENT_DISCONNECT_ERRORS:
+        return True
+    except (OSError, ValueError):
+        # select/recv only fail this way once the socket is unusable.
+        return True
+    except Exception:
+        return False
 
 
 def require(body: dict, *fields) -> None:
@@ -143,7 +174,11 @@ def _csp_extra_frame_src() -> str:
 
 
 def _csp_connect_src(extra_connect_src: str = "") -> str:
-    return f"{_CSP_CONNECT_BASE} https://cdn.jsdelivr.net{extra_connect_src}"
+    # api.openai.com: browser WebRTC SDP handshake for opt-in GPT Realtime Voice.
+    return (
+        f"{_CSP_CONNECT_BASE} https://cdn.jsdelivr.net https://api.openai.com"
+        f"{extra_connect_src}"
+    )
 
 
 def _csp_frame_src(extra_frame_src: str = "") -> str:

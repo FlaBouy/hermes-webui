@@ -853,7 +853,9 @@ def _normalize_sidecar_health_path(value: object) -> Optional[str]:
 def _is_valid_sidecar_proxy_path(decoded_path: str) -> bool:
     if any(ch in decoded_path for ch in ("?", "#")):
         return False
-    if any(ch.isspace() for ch in decoded_path):
+    # Allow ASCII space (common in engineering corpus filenames). Reject other
+    # whitespace / controls so request lines stay well-formed after decode.
+    if any((ch.isspace() and ch != " ") or ord(ch) < 32 for ch in decoded_path):
         return False
     if not decoded_path.startswith("/") or decoded_path.startswith("//"):
         return False

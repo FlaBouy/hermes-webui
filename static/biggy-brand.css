@@ -11,7 +11,7 @@ body.biggy-brand > .app-titlebar{display:none!important}
 .biggy-brand-cluster{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
   display:flex;align-items:center;justify-content:center;gap:14px;
-  max-width:calc(100% - 220px);
+  max-width:calc(100% - 430px);
 }
 .biggy-brand-ega{
   height:56px;width:auto;display:block;mix-blend-mode:screen;
@@ -28,6 +28,32 @@ body.biggy-brand > .app-titlebar{display:none!important}
 .biggy-brand-subtitle{
   font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#7d8590;margin-top:3px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:min(420px,46vw)
+}
+.biggy-brand-controls{
+  position:absolute;left:14px;top:50%;transform:translateY(-50%);
+  display:flex;align-items:center;gap:8px;z-index:2;
+}
+.biggy-brand-controls button{
+  flex:0 0 auto;cursor:pointer;
+  padding:5px 10px;border:1px solid #30363d;border-radius:4px;
+  background:#21262d;color:#7d8590;
+  font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+  letter-spacing:.07em;text-transform:uppercase;
+}
+.biggy-brand-controls button.ok{border-color:#2f7d42;color:#55c96b;background:#0d1a10}
+.biggy-brand-controls button.active{border-color:#b0882e;color:#f0c14b;background:#1a1200}
+.biggy-brand-controls button.down{border-color:#8b3030;color:#f06b64;background:#1a0d0d}
+.biggy-brand-controls #biggyOpenSmedley{
+  border-color:#6e3b1e;color:#e6b800;background:#1a1208;
+}
+.biggy-brand-controls #biggyOpenSmedley:hover{
+  border-color:#e6b800;color:#f0c14b;background:#24180a;
+}
+.biggy-brand-header-note{
+  position:absolute;left:0;top:calc(100% + 4px);
+  font:700 8px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
+  letter-spacing:.04em;color:#f0c14b;white-space:nowrap;
+  text-shadow:0 1px 2px rgba(0,0,0,.85);
 }
 .biggy-brand-status{
   position:absolute;right:14px;top:50%;transform:translateY(-50%);
@@ -66,17 +92,195 @@ body.biggy-brand > .app-titlebar{display:none!important}
   backdrop-filter:blur(2px)
 }
 
+
 @media(max-width:1100px){
   .biggy-brand-title{font-size:14px}
-  .biggy-brand-cluster{max-width:calc(100% - 190px);gap:12px}
+  .biggy-brand-cluster{max-width:calc(100% - 390px);gap:12px}
   .biggy-brand-status{width:160px}
 }
 @media(max-width:760px){
   .biggy-brand-header{height:58px;min-height:58px}
-  .biggy-brand-cluster{gap:8px;max-width:calc(100% - 120px)}
+  .biggy-brand-cluster{gap:8px;max-width:calc(100% - 200px)}
   .biggy-brand-ega{height:40px}
   .biggy-brand-title{font-size:11px;letter-spacing:.08em}
   .biggy-brand-subtitle{display:none}
+  .biggy-brand-controls{left:8px;gap:6px}
+  .biggy-brand-controls button{padding:4px 7px;font-size:8px}
   .biggy-brand-status{right:8px;width:100px}
   .biggy-brand-meta{font-size:7px;line-height:1.25}
+  .biggy-brand-header-note{display:none}
+}
+
+/* Docked landing-space travel panel — out of conversation flex flow */
+#mainChat.biggy-brand-iwo .biggy-travel-center-panel-slot{display:none!important}
+#mainChat.biggy-brand-iwo .biggy-travel-dock{
+  position:absolute;
+  /* Align open panel + rail under brand header border (72px header incl. 2px rule). */
+  top:72px;
+  /* Default: clear workspace-panel-edge-toggle (fixed right:~10px, 34px wide, z-index 120).
+     That control otherwise sits on the vertical category rail and obscures Fuel. */
+  right:64px;
+  bottom:auto;
+  z-index:6;
+  display:flex;
+  flex-direction:row;
+  align-items:stretch;
+  max-height:calc(100% - 72px - 120px);
+  pointer-events:auto;
+  background:transparent;
+  border:0;
+  box-shadow:none;
+  overflow:visible;
+}
+/* Workspace panel open → edge reopen control is hidden; reclaim the gutter. */
+html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo .biggy-travel-dock{
+  right:8px;
+}
+#mainChat.biggy-brand-iwo .biggy-travel-dock.has-lodging{
+  max-height:calc(100% - 72px - 100px);
+}
+#mainChat.biggy-brand-iwo .biggy-travel-dock[hidden]{display:none!important}
+
+/* Persistent vertical category rail (always visible when dock mounted). */
+#mainChat.biggy-brand-iwo .biggy-category-rail{
+  order:2;
+  flex:0 0 48px;
+  width:48px;
+  display:flex;
+  flex-direction:column;
+  gap:2px;
+  padding:6px 4px;
+  background:rgba(13,17,23,.94);
+  border:1px solid rgba(148,163,184,.35);
+  border-radius:10px;
+  max-height:100%;
+  overflow:auto;
+  /* Keep rail above chat chrome; spatial gutter (dock right) avoids edge-toggle overlap. */
+  position:relative;
+  z-index:2;
+}
+#mainChat.biggy-brand-iwo .biggy-category-rail-btn{
+  appearance:none;
+  border:0;
+  background:transparent;
+  color:#94a3b8;
+  font:700 9px/1.1 ui-sans-serif,system-ui,sans-serif;
+  letter-spacing:.04em;
+  text-transform:uppercase;
+  writing-mode:vertical-rl;
+  transform:rotate(180deg);
+  padding:8px 3px;
+  cursor:pointer;
+  border-radius:6px;
+  /* Keep all tabs (incl. Fuel) visible without scrolling under edge toggle. */
+  min-height:48px;
+  flex:0 0 auto;
+}
+#mainChat.biggy-brand-iwo .biggy-category-rail-btn:hover{
+  color:#e2e8f0;background:rgba(51,65,85,.45);
+}
+#mainChat.biggy-brand-iwo .biggy-category-rail-btn.is-active{
+  color:#f0c14b;background:rgba(26,18,0,.85);
+  box-shadow:inset 0 0 0 1px rgba(176,136,46,.55);
+}
+
+/* Open panel (+50% vs prior 360px → 540px default). */
+#mainChat.biggy-brand-iwo .biggy-travel-panel{
+  order:1;
+  position:relative;
+  display:flex;
+  flex-direction:column;
+  width:var(--biggy-travel-dock-width, 540px);
+  max-width:calc(100vw - 80px);
+  margin-right:6px;
+  background:rgba(13,17,23,.92);
+  border:1px solid rgba(148,163,184,.35);
+  border-radius:10px;
+  overflow:hidden;
+  min-height:220px;
+}
+#mainChat.biggy-brand-iwo .biggy-travel-dock.is-collapsed .biggy-travel-panel{
+  display:none!important;
+}
+#mainChat.biggy-brand-iwo .biggy-travel-dock-resize{
+  position:absolute;left:0;top:0;bottom:0;width:6px;cursor:ew-resize;z-index:2;
+}
+#mainChat.biggy-brand-iwo .biggy-travel-dock-body{
+  display:flex;flex-direction:column;flex:1 1 auto;min-height:0;overflow:hidden;
+}
+#mainChat.biggy-brand-iwo .biggy-travel-map-chrome{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 10px;border-bottom:1px solid rgba(148,163,184,.25);
+  flex:0 0 auto;
+}
+#mainChat.biggy-brand-iwo .biggy-travel-dock-collapse,
+#mainChat.biggy-brand-iwo .biggy-travel-map-close{
+  border:0;background:transparent;color:#cbd5e1;font-size:14px;cursor:pointer;line-height:1;padding:2px 6px;
+}
+#mainChat.biggy-brand-iwo .biggy-travel-map-title{
+  font:600 11px/1.2 ui-sans-serif,system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase;color:#e2e8f0;
+}
+#mainChat.biggy-brand-iwo .biggy-travel-map-meta{
+  flex:1;font:11px/1.3 ui-sans-serif,system-ui,sans-serif;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+#mainChat.biggy-brand-iwo .biggy-travel-map-canvas{flex:1 1 auto;min-height:160px;width:100%}
+#mainChat.biggy-brand-iwo .biggy-travel-dock.has-lodging .biggy-travel-map-canvas{min-height:140px;flex:1 1 46%}
+#mainChat.biggy-brand-iwo .biggy-travel-map-actions{
+  display:flex;gap:8px;flex-wrap:wrap;padding:8px 10px;border-top:1px solid rgba(148,163,184,.25);
+}
+#mainChat.biggy-brand-iwo .biggy-travel-nav-btn{
+  display:inline-flex;align-items:center;padding:6px 10px;border-radius:6px;
+  background:#1e293b;color:#e2e8f0;text-decoration:none;font:600 11px/1.2 ui-sans-serif,system-ui,sans-serif;
+  border:1px solid rgba(148,163,184,.35);
+}
+#mainChat.biggy-brand-iwo .biggy-travel-nav-btn:hover{background:#334155}
+#mainChat.biggy-brand-iwo .biggy-travel-lodging{
+  flex:1 1 auto;max-height:none;overflow:auto;
+  border-top:1px solid rgba(148,163,184,.25);
+  padding:8px 10px 4px;
+}
+#mainChat.biggy-brand-iwo .biggy-travel-lodging[hidden],
+#mainChat.biggy-brand-iwo .biggy-travel-map-canvas[hidden],
+#mainChat.biggy-brand-iwo .biggy-travel-map-actions[hidden],
+#mainChat.biggy-brand-iwo .biggy-travel-map-note[hidden],
+#mainChat.biggy-brand-iwo .biggy-travel-empty-cat[hidden]{display:none!important}
+#mainChat.biggy-brand-iwo .biggy-travel-empty-cat{
+  padding:16px 12px;font:12px/1.4 ui-sans-serif,system-ui,sans-serif;color:#64748b;
+}
+#mainChat.biggy-brand-iwo .biggy-travel-lodging-title{
+  font:600 10px/1.2 ui-sans-serif,system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase;color:#cbd5e1;margin-bottom:6px;
+}
+#mainChat.biggy-brand-iwo .biggy-travel-lodging-cards{
+  display:grid;grid-template-columns:1fr;gap:8px;
+}
+#mainChat.biggy-brand-iwo .biggy-lodging-card{
+  display:flex;flex-direction:column;gap:4px;padding:8px 10px;border-radius:8px;
+  background:#111827;border:1px solid rgba(148,163,184,.3);color:#e2e8f0;text-decoration:none;
+}
+#mainChat.biggy-brand-iwo .biggy-lodging-card:hover{border-color:#60a5fa;background:#0f172a}
+#mainChat.biggy-brand-iwo .biggy-lodging-card-name{
+  font:600 12px/1.25 ui-sans-serif,system-ui,sans-serif;color:#f8fafc;
+}
+#mainChat.biggy-brand-iwo .biggy-lodging-card-cue{
+  font:11px/1.35 ui-sans-serif,system-ui,sans-serif;color:#94a3b8;
+}
+#mainChat.biggy-brand-iwo .biggy-lodging-card-source{
+  font:10px/1.2 ui-sans-serif,system-ui,sans-serif;color:#64748b;letter-spacing:.02em;
+}
+#mainChat.biggy-brand-iwo .biggy-travel-lodging-note,
+#mainChat.biggy-brand-iwo .biggy-travel-map-note{
+  padding:0 10px 8px;font:11px/1.3 ui-sans-serif,system-ui,sans-serif;color:#64748b;
+}
+@media(max-width:1100px){
+  #mainChat.biggy-brand-iwo .biggy-travel-dock{
+    top:72px;
+    max-height:calc(100% - 72px - 110px);
+    right:64px;
+  }
+  html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo .biggy-travel-dock{
+    right:8px;
+  }
+  #mainChat.biggy-brand-iwo .biggy-travel-panel{
+    width:min(var(--biggy-travel-dock-width, 540px), calc(100vw - 140px));
+  }
 }

@@ -9,18 +9,27 @@ mixed runtime and require a clean WebUI restart instead.
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 import sys
 import subprocess
 import threading
+import time
 
 # Retain the discovered path as a diagnostic/test-visible compatibility value;
 # runtime identity is deliberately captured from the loaded module below.
 from api.config import _AGENT_DIR  # noqa: F401
 
+_logger = logging.getLogger(__name__)
+
 _RESTART_MESSAGE = (
     "Hermes Agent was updated while Hermes WebUI was running. "
     "Restart Hermes WebUI before retrying this action."
 )
+
+# How often a blocked synchronous turn checks that its caller is still there.
+CLIENT_DISCONNECT_POLL_SECONDS = 2.0
+# How long to let an interrupted turn unwind before abandoning its thread.
+INTERRUPT_GRACE_SECONDS = 30.0
 
 
 def _read_agent_revision(
@@ -146,6 +155,71 @@ def require_ai_agent_class():
 
     _capture_loaded_agent_revision()
     return AIAgent
+
+
+class ClientDisconnectedError(Exception):
+    """A synchronous turn was abandoned because its HTTP client went away."""
+
+
+def run_conversation_with_disconnect_guard(agent, handler, **run_kwargs):
+    """Run a blocking agent turn, interrupting it if the caller hangs up.
+
+    The provider request outlives the HTTP client otherwise. An abandoned
+    synchronous turn keeps its upstream generation slot busy until the Agent's
+    own request timeout expires (30 minutes by default), and a handful of those
+    exhaust every parallel slot on a local model server.
+
+    Mirrors the streaming cancel path, which already reaches ``agent.interrupt``
+    to tear down an in-flight provider call.
+    """
+    from api.helpers import client_connection_lost  # noqa: PLC0415
+
+    if getattr(handler, "connection", None) is None:
+        # Nothing to watch (in-process callers, tests). Run inline so the
+        # ordinary path keeps its existing exception and threading semantics.
+        return agent.run_conversation(**run_kwargs)
+
+    outcome: dict = {}
+
+    def _run() -> None:
+        try:
+            outcome["result"] = agent.run_conversation(**run_kwargs)
+        except BaseException as exc:  # re-raised on the handler thread below
+            outcome["error"] = exc
+
+    worker = threading.Thread(target=_run, name="chat-sync-agent", daemon=True)
+    worker.start()
+
+    interrupt_deadline = None
+    while True:
+        worker.join(CLIENT_DISCONNECT_POLL_SECONDS)
+        if not worker.is_alive():
+            break
+        if interrupt_deadline is not None:
+            if time.monotonic() >= interrupt_deadline:
+                # Leave the daemon thread to unwind; the caller is gone anyway.
+                raise ClientDisconnectedError(
+                    "client disconnected; agent turn did not stop in time"
+                )
+            continue
+        if not client_connection_lost(handler):
+            continue
+        interrupt_deadline = time.monotonic() + INTERRUPT_GRACE_SECONDS
+        interrupt = getattr(agent, "interrupt", None)
+        if not callable(interrupt):
+            raise ClientDisconnectedError(
+                "client disconnected; agent does not support interrupt"
+            )
+        try:
+            interrupt("Client disconnected")
+        except Exception:
+            _logger.debug("interrupt failed after client disconnect", exc_info=True)
+
+    if "error" in outcome:
+        raise outcome["error"]
+    if interrupt_deadline is not None and "result" not in outcome:
+        raise ClientDisconnectedError("client disconnected before the turn finished")
+    return outcome.get("result")
 
 
 def get_ai_agent_class():

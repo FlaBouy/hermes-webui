@@ -36,8 +36,10 @@ from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 from api.agent_runtime import (
     AgentRuntimeChangedError,
+    ClientDisconnectedError,
     ensure_agent_runtime_current,
     require_ai_agent_class,
+    run_conversation_with_disconnect_guard,
 )
 from api.agent_sessions import (
     MESSAGING_SOURCES,
@@ -281,6 +283,12 @@ _CLIENT_EVENT_RATE_LIMIT_WINDOW_SECONDS = 60
 _CLIENT_EVENT_RATE_LIMIT_MAX = 30
 _CLIENT_EVENT_MAX_BODY_BYTES = 4 * 1024
 _EXTENSION_SIDECAR_PROXY_MAX_RESPONSE_BYTES = 512 * 1024
+# Binary document/preview bodies are streamed (not fully buffered). Keep a hard
+# ceiling so a runaway sidecar cannot fill memory; corpus PDFs are typically
+# well under this. JSON/API sidecar responses still use the 512 KiB buffer.
+_EXTENSION_SIDECAR_PROXY_STREAM_CHUNK_BYTES = 64 * 1024
+_EXTENSION_SIDECAR_PROXY_STREAM_MAX_BYTES = 64 * 1024 * 1024
+_EXTENSION_SIDECAR_PROXY_STREAM_TIMEOUT_SECONDS = 120
 _CLIENT_EVENT_ALLOWED_FIELDS = {
     "event": 64,
     "source": 80,
@@ -5572,6 +5580,18 @@ def _extension_sidecar_proxy_request_headers(handler) -> dict[str, str]:
     return headers
 
 
+def _extension_sidecar_proxy_should_stream(proxy_path: object) -> bool:
+    """Stream large binary document bodies instead of buffering them.
+
+    Smedley engineering PDF/doc opens use sidecar paths ``doc/`` and
+    ``preview/``. Buffering those into the 512 KiB JSON-oriented limit caused
+    live ``Extension sidecar response too large`` failures for real corpus
+    PDFs. JSON API paths (retrieve, tools, health) stay fully buffered.
+    """
+    path = str(proxy_path or "").lstrip("/")
+    return path.startswith("doc/") or path.startswith("preview/")
+
+
 def _send_extension_sidecar_proxy_response(handler, status: int, body: bytes, headers) -> bool:
     handler.send_response(status)
     sent_content_type = False
@@ -5595,6 +5615,55 @@ def _send_extension_sidecar_proxy_response(handler, status: int, body: bytes, he
     _security_headers(handler)
     handler.end_headers()
     handler.wfile.write(body)
+    return True
+
+
+def _send_extension_sidecar_proxy_stream(handler, status: int, stream, headers) -> bool:
+    """Forward an upstream sidecar body in chunks without full buffering."""
+    handler.send_response(status)
+    sent_content_type = False
+    content_length = None
+    blocked_headers = _connection_bound_header_names(headers)
+    if headers and hasattr(headers, "items"):
+        for name, value in headers.items():
+            lower = str(name).lower()
+            if (
+                lower in blocked_headers
+                or lower in {"content-length", "set-cookie", "transfer-encoding"}
+                or lower.startswith("x-hermes-")
+            ):
+                continue
+            if lower == "content-type":
+                sent_content_type = True
+            handler.send_header(str(name), str(value))
+        if hasattr(headers, "get"):
+            raw_len = headers.get("Content-Length")
+            if raw_len not in (None, ""):
+                try:
+                    content_length = int(str(raw_len).strip())
+                except (TypeError, ValueError):
+                    content_length = None
+    if not sent_content_type:
+        handler.send_header("Content-Type", "application/octet-stream")
+    if content_length is not None:
+        if content_length > _EXTENSION_SIDECAR_PROXY_STREAM_MAX_BYTES:
+            raise ValueError("Extension sidecar response too large")
+        handler.send_header("Content-Length", str(content_length))
+    handler.send_header("Cache-Control", "no-store")
+    _security_headers(handler)
+    handler.end_headers()
+
+    total = 0
+    while True:
+        chunk = stream.read(_EXTENSION_SIDECAR_PROXY_STREAM_CHUNK_BYTES)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _EXTENSION_SIDECAR_PROXY_STREAM_MAX_BYTES:
+            raise ValueError("Extension sidecar response too large")
+        if content_length is not None and total > content_length:
+            raise ValueError("Extension sidecar response too large")
+        handler.wfile.write(chunk)
     return True
 
 
@@ -5694,8 +5763,39 @@ def _handle_extension_sidecar_proxy(
             method=method,
         )
         opener = _extension_sidecar_proxy_same_origin_opener(target["origin"])
-        with opener.open(request, timeout=10) as response:
+        stream_binary = method.upper() == "GET" and _extension_sidecar_proxy_should_stream(
+            proxy_path
+        )
+        proxy_timeout = (
+            _EXTENSION_SIDECAR_PROXY_STREAM_TIMEOUT_SECONDS if stream_binary else 10
+        )
+        with opener.open(request, timeout=proxy_timeout) as response:
+            if stream_binary:
+                return _send_extension_sidecar_proxy_stream(
+                    handler,
+                    getattr(response, "status", 200),
+                    response,
+                    response.headers,
+                )
             body = _read_extension_sidecar_proxy_body(response)
+            try:
+                from api.smedley_document_route import maybe_rewrite_sidecar_rag_json
+
+                ctype = ""
+                if response.headers and hasattr(response.headers, "get"):
+                    ctype = str(response.headers.get("Content-Type") or "")
+                body = maybe_rewrite_sidecar_rag_json(
+                    extension_id,
+                    proxy_path,
+                    body,
+                    ctype,
+                    public_origin=_request_base_url(handler),
+                )
+            except Exception:
+                logger.debug(
+                    "smedley document-route sidecar rewrite skipped",
+                    exc_info=True,
+                )
             return _send_extension_sidecar_proxy_response(
                 handler,
                 getattr(response, "status", 200),
@@ -5711,6 +5811,24 @@ def _handle_extension_sidecar_proxy(
             body = _read_extension_sidecar_proxy_body(exc)
         except ValueError as read_exc:
             return bad(handler, str(read_exc), status=502)
+        try:
+            from api.smedley_document_route import maybe_rewrite_sidecar_rag_json
+
+            ctype = ""
+            if exc.headers and hasattr(exc.headers, "get"):
+                ctype = str(exc.headers.get("Content-Type") or "")
+            body = maybe_rewrite_sidecar_rag_json(
+                extension_id,
+                proxy_path,
+                body,
+                ctype,
+                public_origin=_request_base_url(handler),
+            )
+        except Exception:
+            logger.debug(
+                "smedley document-route sidecar rewrite skipped on error body",
+                exc_info=True,
+            )
         return _send_extension_sidecar_proxy_response(
             handler,
             exc.code,
@@ -12481,6 +12599,39 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/transcribe/capability":
         return handle_transcribe_capability(handler)
 
+    if parsed.path == "/api/realtime/status":
+        return _handle_realtime_voice_status(handler)
+
+    if parsed.path == "/api/biggy/mapbox-public-config":
+        try:
+            from api.biggy_mapbox_config import mapbox_public_config
+
+            cfg = mapbox_public_config(
+                origin=handler.headers.get("Origin"),
+                referer=handler.headers.get("Referer"),
+                host=handler.headers.get("Host"),
+            )
+            return j(handler, cfg)
+        except Exception:
+            logger.exception("biggy mapbox public config failed")
+            return j(
+                handler,
+                {
+                    "schema": "biggy.mapbox_public_config.v1",
+                    "available": False,
+                    "token_env": "BIGGY_MAPBOX_PUBLIC_TOKEN",
+                    "token": None,
+                    "reason": "CONFIG_ERROR",
+                },
+                status=500,
+            )
+
+    if parsed.path == "/api/gpt/propose-status":
+        return _handle_gpt_propose_status(handler)
+
+    if parsed.path == "/api/owner-ack" or parsed.path == "/api/owner-ack/health" or parsed.path.startswith("/api/owner-ack/"):
+        return _handle_owner_ack_proxy(handler, parsed)
+
     if parsed.path == "/api/reasoning":
         # Current reasoning config (shared source of truth with the CLI —
         # reads display.show_reasoning and agent.reasoning_effort from
@@ -13879,6 +14030,148 @@ def handle_post(handler, parsed) -> bool:
         finally:
             if diag:
                 diag.finish()
+    # Lightweight Ask Jarvis client hard-bind/render timing merge (no optimize/rewire).
+
+    # Client render acknowledgement for Ask Jarvis travel visuals (map + recommendation cards).
+    # Required before any text/TTS may claim on-screen/map/visual results for that correlation.
+    if parsed.path == "/api/biggy/ask-jarvis-render-ack":
+        try:
+            from api.ask_jarvis_route import timing_path_for
+            from datetime import datetime, timezone
+
+            raw = handler.rfile.read(int(handler.headers.get("Content-Length") or 0))
+            body = json.loads(raw.decode("utf-8") or "{}")
+            corr = str(body.get("correlation_id") or "").strip()
+            if not corr:
+                return bad(handler, "correlation_id required", 400)
+            map_ok = bool(body.get("map_rendered"))
+            rec_ok = bool(body.get("recommendations_rendered"))
+            cards = body.get("recommendation_card_count")
+            try:
+                cards_n = int(cards) if cards is not None else 0
+            except Exception:
+                cards_n = 0
+            category = str(body.get("category") or "").strip() or None
+            # Positive ack requires map when map was expected, or explicit map_rendered true;
+            # recommendations optional unless category requested with cards.
+            positive = bool(map_ok or rec_ok)
+            path = timing_path_for(corr)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            prev = {}
+            if path.is_file():
+                try:
+                    prev = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    prev = {}
+            now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            ack = {
+                "schema": "jarvis.ask_jarvis_render_ack.v1",
+                "correlation_id": corr,
+                "positive": positive,
+                "map_rendered": map_ok,
+                "recommendations_rendered": rec_ok,
+                "recommendation_card_count": cards_n,
+                "category": category,
+                "client": str(body.get("client") or "biggy_owner_webui")[:64],
+                "acked_at_utc": now,
+                "raw": {
+                    k: body.get(k)
+                    for k in (
+                        "map_rendered",
+                        "recommendations_rendered",
+                        "recommendation_card_count",
+                        "category",
+                        "dialog_visible",
+                        "layout_slot",
+                        "overlay_dialog",
+                        "displaces_conversation",
+                        "panel_visible",
+                        "panel_collapsed",
+                        "error",
+                    )
+                    if k in body
+                },
+            }
+            prev["render_ack"] = ack
+            # Post-ack visual claim line suppressed: Ask Jarvis hard-bind already
+            # speaks exactly one Austin ack + one James Michael final. Extra TTS
+            # overlaps the authoritative Jarvis response.
+            post_ack_tts = {"queued": False, "reason": "suppressed_single_jm_authority"}
+            try:
+                if positive and rec_ok:
+                    # Record-only: do not speak a third line after JM final.
+                    post_ack_tts = {
+                        "queued": False,
+                        "reason": "suppressed_single_jm_authority",
+                        "would_have_spoken": True,
+                        "category": category,
+                        "recommendation_card_count": cards_n,
+                    }
+                else:
+                    post_ack_tts = {"queued": False, "reason": "no_positive_rec_render"}
+            except Exception:
+                logger.exception("ask_jarvis post-ack visual TTS suppress path failed")
+                post_ack_tts = {"queued": False, "reason": "exception"}
+            ack["post_ack_tts"] = post_ack_tts
+            prev["render_ack"] = ack
+            ts = dict(prev.get("timestamps_utc") or {})
+            ts["client_render_ack"] = now
+            prev["timestamps_utc"] = ts
+            segs = dict(prev.get("segments_ms") or {})
+            if body.get("segments_ms") and isinstance(body.get("segments_ms"), dict):
+                segs.update(body.get("segments_ms"))
+            prev["segments_ms"] = segs
+            prev["schema"] = prev.get("schema") or "jarvis.ask_jarvis_correlation_timing.v1"
+            prev["correlation_id"] = corr
+            path.write_text(json.dumps(prev, indent=2) + "\n", encoding="utf-8")
+            return j(
+                handler,
+                {
+                    "ok": True,
+                    "correlation_id": corr,
+                    "positive": positive,
+                    "render_ack": ack,
+                },
+            )
+        except Exception:
+            logger.exception("ask_jarvis render ack merge failed")
+            return bad(handler, "render ack failed", 500)
+
+    if parsed.path == "/api/biggy/ask-jarvis-client-timing":
+        try:
+            from api.ask_jarvis_route import timing_path_for
+
+            raw = handler.rfile.read(int(handler.headers.get("Content-Length") or 0))
+            body = json.loads(raw.decode("utf-8") or "{}")
+            corr = str(body.get("correlation_id") or "").strip()
+            if not corr:
+                return bad(handler, "correlation_id required", 400)
+            path = timing_path_for(corr)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            prev = {}
+            if path.is_file():
+                try:
+                    prev = json.loads(path.read_text(encoding="utf-8"))
+                except Exception:
+                    prev = {}
+            segs = dict(prev.get("segments_ms") or {})
+            segs.update(dict((body.get("segments_ms") or {})))
+            ts = dict(prev.get("timestamps_utc") or {})
+            ts.update(dict((body.get("timestamps_utc") or {})))
+            prev.update(
+                {
+                    "schema": "jarvis.ask_jarvis_correlation_timing.v1",
+                    "correlation_id": corr,
+                    "segments_ms": segs,
+                    "timestamps_utc": ts,
+                    "client_timing": body,
+                }
+            )
+            path.write_text(json.dumps(prev, indent=2) + "\n", encoding="utf-8")
+            return j(handler, {"ok": True, "correlation_id": corr})
+        except Exception:
+            logger.exception("ask_jarvis client timing merge failed")
+            return bad(handler, "timing merge failed", 500)
     # T1 deprecation alias for the legacy ack endpoint that the pre-rename
     # WebUI used to POST to after handling ``process_complete``. The new
     # canonical SSE event is ``bg_task_complete`` and the new ack endpoint
@@ -13950,6 +14243,15 @@ def handle_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/tts":
         return _handle_tts(handler, parsed)
+
+    if parsed.path == "/api/realtime/session":
+        return _handle_realtime_voice_session(handler)
+
+    if parsed.path == "/api/gpt/propose-task":
+        return _handle_gpt_propose_task(handler)
+
+    if parsed.path == "/api/owner-ack" or parsed.path.startswith("/api/owner-ack/"):
+        return _handle_owner_ack_proxy(handler, parsed)
 
     if parsed.path == "/api/client-events/log":
         if diag:
@@ -18351,6 +18653,175 @@ def _tts_open(req, *, timeout=30, opener_factory=None):
     return _urlopen(req, timeout=timeout)
 
 
+def _realtime_voice_auth_ok(handler) -> bool:
+    from api.auth import is_auth_enabled, parse_cookie, verify_session
+
+    if not is_auth_enabled():
+        return True
+    cv = parse_cookie(handler)
+    return bool(cv and verify_session(cv))
+
+
+def _handle_realtime_voice_status(handler):
+    """GET /api/realtime/status — capability probe (no secrets)."""
+    if handler.command not in (None, "GET", "HEAD"):
+        return bad(handler, "GET required for /api/realtime/status", 405)
+    if not _realtime_voice_auth_ok(handler):
+        return bad(handler, "unauthorized", 401)
+    from api.realtime_voice import realtime_voice_status
+
+    j(handler, realtime_voice_status())
+    return True
+
+
+def _handle_realtime_voice_session(handler):
+    """POST /api/realtime/session — mint ephemeral Realtime client secret."""
+    if handler.command != "POST":
+        return bad(handler, "POST required for /api/realtime/session", 405)
+    if not _realtime_voice_auth_ok(handler):
+        return bad(handler, "unauthorized", 401)
+
+    from api.auth import is_auth_enabled, parse_cookie
+    from api.config import load_settings
+    from api.realtime_voice import create_ephemeral_client_secret
+
+    from api.realtime_voice import error_category
+
+    settings = load_settings()
+    if not bool(settings.get("gpt_realtime_voice")):
+        j(
+            handler,
+            {
+                "error": "GPT Realtime Voice is off. Enable it under Settings → Preferences.",
+                "category": "configuration",
+            },
+            status=403,
+        )
+        return True
+
+    safety_seed = None
+    if is_auth_enabled():
+        safety_seed = parse_cookie(handler)
+    try:
+        payload = create_ephemeral_client_secret(safety_seed=safety_seed)
+    except (ValueError, RuntimeError) as exc:
+        status = 503 if isinstance(exc, ValueError) else 502
+        j(handler, {"error": str(exc), "category": error_category(exc)}, status=status)
+        return True
+    j(handler, payload)
+    return True
+
+
+def _handle_gpt_propose_status(handler):
+    """GET /api/gpt/propose-status — local propose gateway readiness (no secrets)."""
+    if handler.command not in (None, "GET", "HEAD"):
+        return bad(handler, "GET required for /api/gpt/propose-status", 405)
+    if not _realtime_voice_auth_ok(handler):
+        return bad(handler, "unauthorized", 401)
+    from api.gpt_propose_handoff import gateway_status
+
+    j(handler, gateway_status())
+    return True
+
+
+def _handle_owner_ack_proxy(handler, parsed):
+    """Same-origin proxy to the Owner-ACK bridge (Smedley :8791).
+
+    Biggy on ThunderDome must not call http://127.0.0.1:8791 in the browser —
+    that hits TD loopback. Authenticated WebUI clients call /api/owner-ack/*
+    and the server forwards to the bridge on Smedley.
+    """
+    method = (handler.command or "GET").upper()
+    if method not in {"GET", "HEAD", "POST"}:
+        return bad(handler, "GET or POST required for /api/owner-ack", 405)
+    if not _realtime_voice_auth_ok(handler):
+        return bad(handler, "unauthorized", 401)
+
+    from api.owner_ack_proxy import bridge_status, proxy_request
+
+    path = parsed.path or ""
+    if path.rstrip("/") in {"/api/owner-ack/health", "/api/owner-ack"} and method in {"GET", "HEAD"}:
+        # /api/owner-ack/health → status probe; bare /api/owner-ack → pending list
+        if path.rstrip("/").endswith("/health"):
+            j(handler, bridge_status())
+            return True
+
+    body = b""
+    content_type = None
+    if method == "POST":
+        try:
+            length = int(handler.headers.get("Content-Length") or "0")
+        except ValueError:
+            return bad(handler, "invalid Content-Length", 400)
+        if length < 0 or length > 64 * 1024:
+            return bad(handler, "body too large", 413)
+        body = handler.rfile.read(length) if length else b"{}"
+        content_type = handler.headers.get("Content-Type") or "application/json"
+
+    # Map /api/owner-ack → /v1/owner-ack, /api/owner-ack/health → /v1/health,
+    # /api/owner-ack/<id>/approve → /v1/owner-ack/<id>/approve
+    upstream_path = path
+    if path.rstrip("/").endswith("/health"):
+        upstream_path = "/v1/health"
+    elif path == "/api/owner-ack" or path == "/api/owner-ack/":
+        upstream_path = "/v1/owner-ack"
+    elif path.startswith("/api/owner-ack/"):
+        upstream_path = "/v1/owner-ack/" + path[len("/api/owner-ack/") :]
+
+    status, payload = proxy_request(
+        method="GET" if method == "HEAD" else method,
+        path=upstream_path,
+        body=body if method == "POST" else None,
+        content_type=content_type,
+    )
+    if isinstance(payload, dict):
+        payload.setdefault("gui_id", "biggy")
+    j(handler, payload, status=status)
+    return True
+
+
+def _handle_gpt_propose_task(handler):
+    """POST /api/gpt/propose-task — local GPT Voice → Owner-ACK propose-only handoff.
+
+    Proxies to loopback propose gateway. Never approves/rejects/enqueues.
+    Token stays server-side. Speak/confirmation fields are for the spoken reply.
+    """
+    if handler.command != "POST":
+        return bad(handler, "POST required for /api/gpt/propose-task", 405)
+    if not _realtime_voice_auth_ok(handler):
+        return bad(handler, "unauthorized", 401)
+
+    from api.gpt_propose_handoff import ProposeHandoffError, propose_task
+
+    try:
+        body = read_body(handler)
+    except ValueError as exc:
+        status = 413 if "too large" in str(exc).lower() else 400
+        return bad(handler, str(exc), status=status)
+    if not isinstance(body, dict):
+        return bad(handler, "JSON object required", 400)
+    try:
+        out = propose_task(body)
+    except ValueError as exc:
+        return bad(handler, str(exc), 400)
+    except ProposeHandoffError as exc:
+        j(
+            handler,
+            {
+                "ok": False,
+                "pending_owner_ack": False,
+                "error": "handoff_unavailable",
+                "message": str(exc),
+                "speak": str(exc),
+                "confirmation": str(exc),
+            },
+            status=503,
+        )
+        return True
+    j(handler, out, status=202)
+    return True
+
+
 def _handle_tts(handler, parsed):
     """Generate TTS audio via supported server TTS engines. POST JSON body only.
 
@@ -18373,6 +18844,7 @@ def _handle_tts(handler, parsed):
     rate_str = ""
     pitch_str = ""
     engine = "edge"  # "edge" | "elevenlabs" | "openai" | "browser" (browser is client-side only)
+    request_voice_id = None
 
     if handler.command != "POST":
         from api.helpers import bad as _bad
@@ -18382,6 +18854,8 @@ def _handle_tts(handler, parsed):
         data = read_body(handler)
         text = (data.get("text") or "").strip()
         voice = data.get("voice") or voice
+        # Optional ElevenLabs voice_id override (Ask Jarvis → documented Jarvis profile).
+        request_voice_id = (data.get("voice_id") or "").strip() or None
         rate_str = _normalize_tts_prosody(data.get("rate"), unit="%")
         pitch_str = _normalize_tts_prosody(data.get("pitch"), unit="Hz")
         engine = (data.get("engine") or "edge").strip().lower()
@@ -18486,6 +18960,14 @@ def _handle_tts(handler, parsed):
                     # ^ treat empty string as "not set" — fall through to default
         except Exception:
             pass  # fall back to defaults
+
+        # Ask Jarvis hard-bind may pass the documented Jarvis (Austin) voice_id.
+        if request_voice_id:
+            if not re.fullmatch(r"[A-Za-z0-9_-]+", request_voice_id):
+                from api.helpers import bad as _bad
+                return _bad(handler, "invalid voice_id", 400)
+            voice_id = request_voice_id
+
 
         # Validate voice_id is a safe path segment (no traversal)
         # fullmatch (not match) so a trailing newline can't slip past the `$`
@@ -22082,6 +22564,676 @@ def _handle_chat_start(handler, body, diag=None):
             return bad(handler, "message is required")
         diag.stage("normalize_attachments") if diag else None
         attachments = _normalize_chat_attachments(body.get("attachments") or [])[:20]
+        # Hard-bind: explicit leading "Ask Jarvis:" → Jarvis PA briefing webhook.
+        # PTT-style two-stage: immediate Austin ack (once), then governed Jarvis
+        # Agent path unchanged; James Michael speaks the final once. No Agent bypass.
+        # Must run before smedley document/engineering RAG routes.
+        if not attachments:
+            try:
+                from api.ask_jarvis_route import (
+                    ack_spoken_text,
+                    austin_voice_id,
+                    is_ask_jarvis_command,
+                    mint_correlation_id,
+                    pending_visual_text,
+                    queue_ask_jarvis_smedley_tts,
+                    queue_biggy_austin_ack,
+                    timing_path_for,
+                    try_ask_jarvis,
+                    wait_ack_playback_complete,
+                )
+            except Exception:
+                logger.exception("ask_jarvis imports failed; falling through to ordinary chat")
+            else:
+                if is_ask_jarvis_command(msg):
+                    _ask_jarvis_ingress_ts = time.time()
+                    corr = mint_correlation_id()
+                    tpath = timing_path_for(corr)
+                    try:
+                        tpath.parent.mkdir(parents=True, exist_ok=True)
+                        tpath.write_text(
+                            json.dumps(
+                                {
+                                    "schema": "jarvis.ask_jarvis_correlation_timing.v1",
+                                    "correlation_id": corr,
+                                    "timestamps_utc": {
+                                        "biggy_ingress": time.strftime(
+                                            "%Y-%m-%dT%H:%M:%SZ",
+                                            time.gmtime(_ask_jarvis_ingress_ts),
+                                        ),
+                                        "ask_jarvis_accepted": time.strftime(
+                                            "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+                                        ),
+                                    },
+                                    "segments_ms": {},
+                                },
+                                indent=2,
+                            )
+                            + "\n",
+                            encoding="utf-8",
+                        )
+                    except Exception:
+                        logger.exception("ask_jarvis timing seed failed")
+
+                    # Stage 1: immediate Austin ack (correlation-bound, once). Does not delay Jarvis.
+                    tts_ack = {"queued": False}
+                    try:
+                        tts_ack = queue_biggy_austin_ack(
+                            correlation_id=corr, timing_path=tpath
+                        )
+                    except Exception:
+                        logger.exception("ask_jarvis Austin ack queue failed")
+                        tts_ack = {"queued": False, "reason": "exception"}
+
+                    now_ts = int(time.time())
+                    pending_text = pending_visual_text()
+                    if not isinstance(getattr(s, "messages", None), list):
+                        s.messages = []
+                    s.messages.extend(
+                        [
+                            {
+                                "role": "user",
+                                "content": msg,
+                                "timestamp": now_ts,
+                                "_ask_jarvis": True,
+                                "_correlation_id": corr,
+                            },
+                            {
+                                "role": "assistant",
+                                "content": pending_text,
+                                "timestamp": now_ts + 1,
+                                "ask_jarvis_hard_bind": True,
+                                "ask_jarvis_pending": True,
+                                "spoken_reply": None,
+                                "spoken_text": None,
+                                "tts_engine": "elevenlabs",
+                                "tts_voice_id": austin_voice_id(),
+                                "tts_voice_profile": "biggy_austin_ack",
+                                "_correlation_id": corr,
+                                "_ack_spoken_text": ack_spoken_text(),
+                                "_tts_ack_server_queued": bool(tts_ack.get("queued")),
+                            },
+                        ]
+                    )
+                    s.pending_user_message = None
+                    # Keep a synthetic active marker so UI shows working until final resolves.
+                    s.active_stream_id = f"ask-jarvis-pending:{corr}"
+                    if hasattr(s, "pending_started_at"):
+                        s.pending_started_at = time.time()
+                    try:
+                        if not getattr(s, "title", None) or str(s.title).strip() in (
+                            "",
+                            "Untitled",
+                            "New chat",
+                        ):
+                            s.title = (msg[:64] or "Ask Jarvis").strip()
+                    except Exception:
+                        pass
+                    try:
+                        s.save()
+                    except Exception:
+                        logger.exception(
+                            "failed to persist ask_jarvis pending turn for %s",
+                            getattr(s, "session_id", None),
+                        )
+                        return bad(handler, "failed to persist ask_jarvis pending turn", 500)
+                    try:
+                        with LOCK:
+                            SESSIONS[s.session_id] = s
+                            SESSIONS.move_to_end(s.session_id)
+                    except Exception:
+                        pass
+
+                    sid = s.session_id
+
+                    def _ask_jarvis_finish_bg(
+                        session_id=sid,
+                        objective=msg,
+                        correlation_id=corr,
+                        ingress_ts=_ask_jarvis_ingress_ts,
+                        timing_file=str(tpath),
+                    ):
+                        import threading
+
+                        def _run():
+                            try:
+                                from pathlib import Path as _Path
+
+                                ask_jarvis = try_ask_jarvis(
+                                    objective,
+                                    biggy_ingress_ts=ingress_ts,
+                                    correlation_id=correlation_id,
+                                )
+                                if not isinstance(ask_jarvis, dict) or not ask_jarvis.get("handled"):
+                                    ask_jarvis = {
+                                        "handled": True,
+                                        "ok": False,
+                                        "reply": "Jarvis briefing failed. Fail closed.",
+                                        "spoken_text": "Jarvis briefing failed.",
+                                        "spoken_reply": "Jarvis briefing failed.",
+                                        "evidence_footer": "",
+                                        "correlation_id": correlation_id,
+                                        "tts_voice_id": None,
+                                        "error": "ask_jarvis_bg_empty",
+                                    }
+                                reply = str(ask_jarvis.get("reply") or "").strip()
+                                spoken_text = str(
+                                    ask_jarvis.get("spoken_text")
+                                    or ask_jarvis.get("spoken_reply")
+                                    or ""
+                                ).strip()
+                                evidence_footer = str(ask_jarvis.get("evidence_footer") or "").strip()
+                                final_msg = {
+                                    "role": "assistant",
+                                    "content": reply,
+                                    "timestamp": int(time.time()),
+                                    "ask_jarvis_hard_bind": True,
+                                    "ask_jarvis_pending": False,
+                                    "spoken_reply": spoken_text or None,
+                                    "spoken_text": spoken_text or None,
+                                    "evidence_footer": evidence_footer or None,
+                                    "tts_engine": ask_jarvis.get("tts_engine"),
+                                    "tts_voice_id": ask_jarvis.get("tts_voice_id"),
+                                    "tts_voice_profile": ask_jarvis.get("tts_voice_profile"),
+                                    "map_view_model": ask_jarvis.get("map_view_model")
+                                    if isinstance(ask_jarvis.get("map_view_model"), dict)
+                                    else None,
+                                    "lodging_view_model": ask_jarvis.get("lodging_view_model")
+                                    if isinstance(ask_jarvis.get("lodging_view_model"), dict)
+                                    else None,
+                                    "recommendation_view_model": ask_jarvis.get("recommendation_view_model")
+                                    if isinstance(ask_jarvis.get("recommendation_view_model"), dict)
+                                    else None,
+                                    "_correlation_id": correlation_id,
+                                    "_receipt": ask_jarvis.get("receipt"),
+                                    "_response_channel": ask_jarvis.get("response_channel"),
+                                    "_transport": ask_jarvis.get("transport"),
+                                    "_correlation_timing": ask_jarvis.get("correlation_timing"),
+                                    "_tts_final_server_queued": False,
+                                    "smedley_document_sidecar": "suppressed",
+                                    "smedley_document_sidecar_reason": "ask_jarvis_no_auto_rag",
+                                }
+                                # If Agent explicitly returned bounded RAG evidence for this correlation, allow sidecar.
+                                try:
+                                    _rag = ask_jarvis.get("rag_evidence") if isinstance(ask_jarvis, dict) else None
+                                    _tools = ask_jarvis.get("tools_selected") if isinstance(ask_jarvis, dict) else None
+                                    _has_agent_rag = False
+                                    if isinstance(_rag, (list, dict)) and _rag:
+                                        _has_agent_rag = True
+                                    if isinstance(_tools, (list, tuple)) and any(
+                                        "rag" in str(x).lower() for x in _tools
+                                    ):
+                                        _has_agent_rag = True
+                                    # Also accept map_view_model-only travel: still suppressed for engineering sidecar.
+                                    if _has_agent_rag:
+                                        final_msg["smedley_document_sidecar"] = "agent_rag"
+                                        final_msg["smedley_document_sidecar_reason"] = (
+                                            "agent_selected_rag_evidence"
+                                        )
+                                        final_msg["rag_evidence"] = _rag
+                                except Exception:
+                                    pass
+                                # Jarvis work finished — hold visual/JM until Austin ack playback completes.
+                                t_jarvis_ready = time.time()
+                                try:
+                                    p = _Path(timing_file)
+                                    prev = {}
+                                    if p.is_file():
+                                        prev = json.loads(p.read_text(encoding="utf-8"))
+                                    ts = dict(prev.get("timestamps_utc") or {})
+                                    segs = dict(prev.get("segments_ms") or {})
+                                    ts["jarvis_final_ready"] = time.strftime(
+                                        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(t_jarvis_ready)
+                                    )
+                                    segs["biggy_ingress_to_jarvis_final_ready_ms"] = int(
+                                        round((t_jarvis_ready - ingress_ts) * 1000)
+                                    )
+                                    prev["timestamps_utc"] = ts
+                                    prev["segments_ms"] = segs
+                                    prev["correlation_timing"] = ask_jarvis.get(
+                                        "correlation_timing"
+                                    )
+                                    p.write_text(json.dumps(prev, indent=2) + "\n", encoding="utf-8")
+                                except Exception:
+                                    logger.exception("ask_jarvis jarvis_final_ready timing failed")
+
+                                ack_gate = wait_ack_playback_complete(
+                                    correlation_id, timeout_s=120.0
+                                )
+                                t_release = time.time()
+                                ack_at = ack_gate.get("ack_complete_at")
+                                release_gap_ms = (
+                                    int(round((t_release - float(ack_at)) * 1000))
+                                    if ack_at
+                                    else None
+                                )
+                                try:
+                                    p = _Path(timing_file)
+                                    prev = {}
+                                    if p.is_file():
+                                        prev = json.loads(p.read_text(encoding="utf-8"))
+                                    ts = dict(prev.get("timestamps_utc") or {})
+                                    segs = dict(prev.get("segments_ms") or {})
+                                    ts["final_release"] = time.strftime(
+                                        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(t_release)
+                                    )
+                                    if ack_gate.get("ack_complete_utc"):
+                                        ts["ack_playback_complete"] = ack_gate.get(
+                                            "ack_complete_utc"
+                                        )
+                                    segs["ack_complete_to_final_release_ms"] = release_gap_ms
+                                    segs["jarvis_ready_to_final_release_ms"] = int(
+                                        round((t_release - t_jarvis_ready) * 1000)
+                                    )
+                                    segs["ack_gate_waited_ms"] = ack_gate.get("waited_ms")
+                                    prev["timestamps_utc"] = ts
+                                    prev["segments_ms"] = segs
+                                    prev["ack_release_gate"] = ack_gate
+                                    p.write_text(json.dumps(prev, indent=2) + "\n", encoding="utf-8")
+                                except Exception:
+                                    logger.exception("ask_jarvis release-gate timing failed")
+                                if ack_gate.get("timed_out"):
+                                    logger.warning(
+                                        "ask_jarvis ack playback wait timed out corr=%s; releasing final",
+                                        correlation_id,
+                                    )
+
+                                # Reload session and replace pending assistant in-place (no duplicate final).
+                                sess = None
+                                try:
+                                    with LOCK:
+                                        sess = SESSIONS.get(session_id)
+                                except Exception:
+                                    sess = None
+                                if sess is None:
+                                    try:
+                                        sess = Session.load(session_id)
+                                    except Exception:
+                                        sess = None
+                                if sess is None:
+                                    logger.error(
+                                        "ask_jarvis finish: session %s missing for %s",
+                                        session_id,
+                                        correlation_id,
+                                    )
+                                    return
+                                if not isinstance(getattr(sess, "messages", None), list):
+                                    sess.messages = []
+                                replaced = False
+                                for idx_m in range(len(sess.messages) - 1, -1, -1):
+                                    m = sess.messages[idx_m] or {}
+                                    if (
+                                        m.get("role") == "assistant"
+                                        and str(m.get("_correlation_id") or "") == correlation_id
+                                        and m.get("ask_jarvis_pending")
+                                    ):
+                                        # Preserve ack audit fields on the resolved message.
+                                        final_msg["_ack_spoken_text"] = m.get("_ack_spoken_text")
+                                        final_msg["_tts_ack_server_queued"] = m.get(
+                                            "_tts_ack_server_queued"
+                                        )
+                                        sess.messages[idx_m] = final_msg
+                                        replaced = True
+                                        break
+                                if not replaced:
+                                    # Idempotent: do not append a second final for same correlation.
+                                    for m in sess.messages:
+                                        if (
+                                            isinstance(m, dict)
+                                            and m.get("role") == "assistant"
+                                            and str(m.get("_correlation_id") or "") == correlation_id
+                                            and not m.get("ask_jarvis_pending")
+                                            and m.get("ask_jarvis_hard_bind")
+                                        ):
+                                            replaced = True
+                                            break
+                                    if not replaced:
+                                        sess.messages.append(final_msg)
+                                        replaced = True
+                                sess.active_stream_id = None
+                                if hasattr(sess, "pending_started_at"):
+                                    sess.pending_started_at = None
+                                try:
+                                    sess.save()
+                                except Exception:
+                                    logger.exception(
+                                        "ask_jarvis finish persist failed for %s", session_id
+                                    )
+                                    return
+                                try:
+                                    with LOCK:
+                                        SESSIONS[session_id] = sess
+                                        SESSIONS.move_to_end(session_id)
+                                except Exception:
+                                    pass
+
+                                tts_final = {"queued": False}
+                                if spoken_text:
+                                    try:
+                                        tts_final = queue_ask_jarvis_smedley_tts(
+                                            spoken_text,
+                                            voice_id=ask_jarvis.get("tts_voice_id"),
+                                            correlation_id=correlation_id,
+                                            timing_path=_Path(timing_file),
+                                            delay_s=0.0,
+                                        )
+                                    except Exception:
+                                        logger.exception("ask_jarvis final JM TTS failed")
+                                        tts_final = {"queued": False, "reason": "exception"}
+                                        try:
+                                            from api.ask_jarvis_route import (
+                                                mark_final_playback_complete as _mfc,
+                                            )
+
+                                            _mfc(correlation_id)
+                                        except Exception:
+                                            pass
+                                else:
+                                    # No compact final — release post-ack waiters immediately.
+                                    try:
+                                        from api.ask_jarvis_route import (
+                                            mark_final_playback_complete as _mfc,
+                                        )
+
+                                        _mfc(correlation_id)
+                                    except Exception:
+                                        pass
+                                # Stamp final-queued on message for client duplicate-audio guard.
+                                try:
+                                    for idx_m in range(len(sess.messages) - 1, -1, -1):
+                                        m = sess.messages[idx_m] or {}
+                                        if (
+                                            m.get("role") == "assistant"
+                                            and str(m.get("_correlation_id") or "")
+                                            == correlation_id
+                                            and not m.get("ask_jarvis_pending")
+                                        ):
+                                            m["_tts_final_server_queued"] = bool(
+                                                tts_final.get("queued")
+                                            )
+                                            m["_tts_final"] = tts_final
+                                            break
+                                    sess.save()
+                                    with LOCK:
+                                        SESSIONS[session_id] = sess
+                                except Exception:
+                                    logger.exception("ask_jarvis final TTS stamp failed")
+
+                                # release-gate timing already recorded before persist/JM
+                            except Exception:
+                                logger.exception(
+                                    "ask_jarvis background finish failed corr=%s", correlation_id
+                                )
+
+                        threading.Thread(
+                            target=_run, daemon=True, name=f"ask-jarvis-finish-{correlation_id[-8:]}"
+                        ).start()
+
+                    _ask_jarvis_finish_bg()
+                    return j(
+                        handler,
+                        {
+                            "session_id": s.session_id,
+                            "stream_id": f"ask-jarvis-pending:{corr}",
+                            "ask_jarvis_hard_bind": True,
+                            "ask_jarvis_pending": True,
+                            "reply": pending_text,
+                            "spoken_text": None,
+                            "spoken_reply": None,
+                            "ack_spoken_text": ack_spoken_text(),
+                            "tts_engine": "elevenlabs",
+                            "tts_voice_id": austin_voice_id(),
+                            "tts_voice_profile": "biggy_austin_ack",
+                            "tts_ack_queued": bool(tts_ack.get("queued")),
+                            "tts_ack": tts_ack,
+                            "tts_server_queued": False,
+                            "correlation_id": corr,
+                            "map_view_model": None,
+                            "lodging_view_model": None,
+                            "recommendation_view_model": None,
+                            "smedley_document_sidecar": "suppressed",
+                            "smedley_document_sidecar_reason": "ask_jarvis_no_auto_rag",
+                            "title": getattr(s, "title", None),
+                            "error": None,
+                        },
+                    )
+        # A selected Word/PDF document becomes session-scoped review context.
+        # Handle a paragraph/section follow-up before ordinary chat so typed
+        # WebUI and pedal PTT have the same evidence-bound behavior.
+        if not attachments:
+            try:
+                from api.smedley_document_route import try_active_document_review
+
+                review = try_active_document_review(
+                    msg,
+                    getattr(s, "active_document", None),
+                    public_origin=_request_base_url(handler),
+                )
+            except Exception:
+                logger.exception("active document review failed closed to ordinary chat")
+                review = None
+            if isinstance(review, dict) and review.get("handled"):
+                reply = str(review.get("reply") or "").strip()
+                spoken = str(review.get("spoken_reply") or "").strip() or None
+                active_document = review.get("active_document")
+                if isinstance(active_document, dict) and active_document.get("source"):
+                    s.active_document = active_document
+                now_ts = int(time.time())
+                if not isinstance(getattr(s, "messages", None), list):
+                    s.messages = []
+                s.messages.extend([
+                    {"role": "user", "content": msg, "timestamp": now_ts},
+                    {
+                        "role": "assistant",
+                        "content": reply,
+                        "timestamp": now_ts + 1,
+                        "active_document_review": True,
+                        "spoken_reply": spoken,
+                    },
+                ])
+                try:
+                    s.save()
+                except Exception:
+                    logger.exception("failed to persist active document review for %s", s.session_id)
+                    return bad(handler, "failed to persist active document review", 500)
+                return j(handler, {
+                    "session_id": s.session_id,
+                    "stream_id": None,
+                    "active_document_review": True,
+                    "reply": reply,
+                    "spoken_reply": spoken,
+                    "source": review.get("source"),
+                    "active_document": getattr(s, "active_document", None),
+                    "extraction": review.get("extraction"),
+                    "error": review.get("error"),
+                })
+        if not attachments:
+            try:
+                from api.smedley_document_route import try_grounded_document_excerpt
+                from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj3
+
+                if _is_aj3(msg):
+                    grounded = None
+                else:
+                    grounded = try_grounded_document_excerpt(
+                        msg, public_origin=_request_base_url(handler)
+                    )
+            except Exception:
+                logger.exception("grounded document excerpt failed closed to ordinary chat")
+                grounded = None
+            if isinstance(grounded, dict) and grounded.get("handled"):
+                reply = str(grounded.get("reply") or "").strip()
+                now_ts = int(time.time())
+                s.messages.extend([
+                    {"role": "user", "content": msg, "timestamp": now_ts},
+                    {"role": "assistant", "content": reply, "timestamp": now_ts + 1, "grounded_document_excerpt": True},
+                ])
+                s.save()
+                return j(handler, {"session_id": s.session_id, "stream_id": None, "grounded_document_excerpt": True, "reply": reply, "spoken_reply": str(grounded.get("spoken_reply") or "").strip() or None, "source": grounded.get("source")})
+        # Ordinary engineering questions must be evidence-bound too.  The
+        # extension only pre-retrieves document-link requests, so do this on
+        # the server to keep typed and PTT traffic consistent without DOM work.
+        if not attachments:
+            try:
+                from api.smedley_document_route import try_engineering_rag_answer
+                from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj
+
+                if _is_aj(msg):
+                    engineering = None
+                else:
+                    engineering = try_engineering_rag_answer(
+                        msg,
+                        public_origin=_request_base_url(handler),
+                        active_document=getattr(s, "active_document", None),
+                    )
+            except Exception:
+                logger.exception("engineering RAG answer failed closed to ordinary chat")
+                engineering = None
+            if isinstance(engineering, dict) and engineering.get("handled"):
+                reply = str(engineering.get("reply") or "").strip()
+                spoken = str(engineering.get("spoken_reply") or "").strip() or None
+                active_document = engineering.get("active_document")
+                if isinstance(active_document, dict) and (
+                    active_document.get("source")
+                    or active_document.get("part_number")
+                    or active_document.get("pending_action")
+                ):
+                    s.active_document = active_document
+                elif (
+                    isinstance(getattr(s, "active_document", None), dict)
+                    and engineering.get("pending_action")
+                ):
+                    s.active_document = dict(s.active_document)
+                    s.active_document["pending_action"] = engineering.get("pending_action")
+                now_ts = int(time.time())
+                if not isinstance(getattr(s, "messages", None), list):
+                    s.messages = []
+                s.messages.extend([
+                    {"role": "user", "content": msg, "timestamp": now_ts},
+                    {
+                        "role": "assistant",
+                        "content": reply,
+                        "timestamp": now_ts + 1,
+                        "engineering_rag_answer": True,
+                        "spoken_reply": spoken,
+                    },
+                ])
+                s.pending_user_message = None
+                s.active_stream_id = None
+                if hasattr(s, "pending_started_at"):
+                    s.pending_started_at = None
+                try:
+                    s.save()
+                except Exception:
+                    logger.exception("failed to persist engineering RAG answer for %s", s.session_id)
+                    return bad(handler, "failed to persist engineering RAG answer", 500)
+                return j(
+                    handler,
+                    {
+                        "session_id": s.session_id,
+                        "stream_id": None,
+                        "engineering_rag_answer": True,
+                        "reply": reply,
+                        "spoken_reply": spoken,
+                        "source": engineering.get("source"),
+                        "active_document": getattr(s, "active_document", None),
+                        "part_number": engineering.get("part_number"),
+                        "verification": engineering.get("verification"),
+                        "pending_action": engineering.get("pending_action"),
+                        "document_kind": engineering.get("document_kind"),
+                        "error": engineering.get("error"),
+                    },
+                )
+        # Smedley document-link repair: NL pull/find/link requests go through RAG
+        # retrieve and emit absolute sidecar URLs — never ordinary chat / LAN URLs.
+        if not attachments:
+            try:
+                from api.smedley_document_route import try_document_route
+                from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj2
+
+                if _is_aj2(msg):
+                    routed = None
+                else:
+                    routed = try_document_route(
+                        msg, public_origin=_request_base_url(handler)
+                    )
+            except Exception:
+                logger.exception("smedley document route failed closed to ordinary chat")
+                routed = None
+            if isinstance(routed, dict) and routed.get("handled"):
+                reply = str(routed.get("reply") or "").strip()
+                active_document = routed.get("active_document")
+                # Always replace session binding on a document-route turn so a
+                # prior manual cannot contaminate index-only or no-match replies.
+                if isinstance(active_document, dict) and active_document.get("source"):
+                    s.active_document = active_document
+                else:
+                    s.active_document = None
+                now_ts = int(time.time())
+                if not isinstance(getattr(s, "messages", None), list):
+                    s.messages = []
+                s.messages.append(
+                    {"role": "user", "content": msg, "timestamp": now_ts}
+                )
+                s.messages.append(
+                    {
+                        "role": "assistant",
+                        "content": reply,
+                        "timestamp": now_ts + 1,
+                        "document_route": True,
+                        "spoken_reply": str(routed.get("spoken_reply") or "").strip()
+                        or None,
+                    }
+                )
+                s.pending_user_message = None
+                s.active_stream_id = None
+                if hasattr(s, "pending_started_at"):
+                    s.pending_started_at = None
+                try:
+                    if not getattr(s, "title", None) or str(s.title).strip() in (
+                        "",
+                        "Untitled",
+                        "New chat",
+                    ):
+                        s.title = (msg[:64] or "Document link").strip()
+                except Exception:
+                    pass
+                try:
+                    s.save()
+                except Exception:
+                    logger.exception(
+                        "failed to persist smedley document-route turn for %s",
+                        getattr(s, "session_id", None),
+                    )
+                    return bad(handler, "failed to persist document route turn", 500)
+                try:
+                    with LOCK:
+                        SESSIONS[s.session_id] = s
+                        SESSIONS.move_to_end(s.session_id)
+                except Exception:
+                    pass
+                return j(
+                    handler,
+                    {
+                        "session_id": s.session_id,
+                        "stream_id": None,
+                        "document_route": True,
+                        "reply": reply,
+                        "spoken_reply": str(routed.get("spoken_reply") or "").strip()
+                        or None,
+                        "title": getattr(s, "title", None),
+                        "matches": routed.get("matches") or [],
+                        "collection": routed.get("collection") or "",
+                        "active_document": getattr(s, "active_document", None),
+                        "pending_action": (
+                            (getattr(s, "active_document", None) or {}).get("pending_action")
+                            if isinstance(getattr(s, "active_document", None), dict)
+                            else routed.get("pending_action")
+                        ),
+                        "retrieval_receipt": routed.get("retrieval_receipt") or None,
+                        "error": routed.get("error"),
+                    },
+                )
         recovery = compression_recovery_payload_for_session(s)
         if recovery and not attachments and is_generic_continuation_intent(msg):
             return j(
@@ -22293,6 +23445,281 @@ def _normalize_chat_attachments(raw_attachments):
     return normalized
 
 
+def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
+    """PTT/sync ``/api/chat`` Ask Jarvis hard-bind (blocks until Jarvis + TTS done).
+
+    Pedal posts wrapped ``message`` plus raw ``display_message``. Always bind on the
+    raw owner utterance so Austin ack + James Michael final run here — never the
+    agent/skill paraphrase path.
+    """
+    from api.ask_jarvis_route import (
+        ack_spoken_text,
+        austin_voice_id,
+        mint_correlation_id,
+        pending_visual_text,
+        queue_ask_jarvis_smedley_tts,
+        queue_biggy_austin_ack,
+        timing_path_for,
+        try_ask_jarvis,
+        wait_ack_playback_complete,
+        wait_final_playback_complete,
+    )
+
+    objective = str(objective or "").strip()
+    if not objective:
+        return bad(handler, "empty ask-jarvis objective", 400)
+
+    ingress_ts = time.time()
+    corr = mint_correlation_id()
+    tpath = timing_path_for(corr)
+    try:
+        tpath.parent.mkdir(parents=True, exist_ok=True)
+        tpath.write_text(
+            json.dumps(
+                {
+                    "schema": "jarvis.ask_jarvis_correlation_timing.v1",
+                    "correlation_id": corr,
+                    "timestamps_utc": {
+                        "biggy_ingress": time.strftime(
+                            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(ingress_ts)
+                        ),
+                        "ask_jarvis_accepted": time.strftime(
+                            "%Y-%m-%dT%H:%M:%SZ", time.gmtime()
+                        ),
+                    },
+                    "segments_ms": {},
+                    "ingress": "api_chat_sync_ptt",
+                },
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        logger.exception("ask_jarvis sync timing seed failed")
+
+    tts_ack = {"queued": False}
+    try:
+        tts_ack = queue_biggy_austin_ack(correlation_id=corr, timing_path=tpath)
+    except Exception:
+        logger.exception("ask_jarvis sync Austin ack queue failed")
+        tts_ack = {"queued": False, "reason": "exception"}
+
+    now_ts = int(time.time())
+    pending_text = pending_visual_text()
+    if not isinstance(getattr(s, "messages", None), list):
+        s.messages = []
+    s.messages.extend(
+        [
+            {
+                "role": "user",
+                "content": objective,
+                "timestamp": now_ts,
+                "_ask_jarvis": True,
+                "_correlation_id": corr,
+                "_ingress": "api_chat_sync_ptt",
+            },
+            {
+                "role": "assistant",
+                "content": pending_text,
+                "timestamp": now_ts + 1,
+                "ask_jarvis_hard_bind": True,
+                "ask_jarvis_pending": True,
+                "spoken_reply": None,
+                "spoken_text": None,
+                "tts_engine": "elevenlabs",
+                "tts_voice_id": austin_voice_id(),
+                "tts_voice_profile": "biggy_austin_ack",
+                "_correlation_id": corr,
+                "_ack_spoken_text": ack_spoken_text(),
+                "_tts_ack_server_queued": bool(tts_ack.get("queued")),
+            },
+        ]
+    )
+    s.pending_user_message = None
+    s.active_stream_id = f"ask-jarvis-pending:{corr}"
+    if hasattr(s, "pending_started_at"):
+        s.pending_started_at = time.time()
+    try:
+        if not getattr(s, "title", None) or str(s.title).strip() in (
+            "",
+            "Untitled",
+            "New chat",
+        ):
+            s.title = (objective[:64] or "Ask Jarvis").strip()
+    except Exception:
+        pass
+    try:
+        s.save()
+    except Exception:
+        logger.exception(
+            "failed to persist ask_jarvis sync pending turn for %s",
+            getattr(s, "session_id", None),
+        )
+        return bad(handler, "failed to persist ask_jarvis pending turn", 500)
+    try:
+        with LOCK:
+            SESSIONS[s.session_id] = s
+            SESSIONS.move_to_end(s.session_id)
+    except Exception:
+        pass
+
+    ask_jarvis = try_ask_jarvis(
+        objective, biggy_ingress_ts=ingress_ts, correlation_id=corr
+    )
+    if not isinstance(ask_jarvis, dict) or not ask_jarvis.get("handled"):
+        ask_jarvis = {
+            "handled": True,
+            "ok": False,
+            "reply": "Jarvis briefing unavailable. Fail closed.",
+            "spoken_text": "Jarvis briefing unavailable.",
+            "spoken_reply": "Jarvis briefing unavailable.",
+            "evidence_footer": "",
+            "error": "ask_jarvis_sync_empty",
+            "correlation_id": corr,
+        }
+
+    reply = str(ask_jarvis.get("reply") or "").strip()
+    spoken_text = str(
+        ask_jarvis.get("spoken_text") or ask_jarvis.get("spoken_reply") or ""
+    ).strip()
+    evidence_footer = str(ask_jarvis.get("evidence_footer") or "").strip()
+    final_msg = {
+        "role": "assistant",
+        "content": reply or pending_text,
+        "timestamp": int(time.time()),
+        "ask_jarvis_hard_bind": True,
+        "ask_jarvis_pending": False,
+        "spoken_text": spoken_text or None,
+        "spoken_reply": spoken_text or None,
+        "evidence_footer": evidence_footer or None,
+        "tts_engine": ask_jarvis.get("tts_engine") or "elevenlabs",
+        "tts_voice_id": ask_jarvis.get("tts_voice_id"),
+        "tts_voice_profile": ask_jarvis.get("tts_voice_profile") or "jarvis_james_michael",
+        "map_view_model": ask_jarvis.get("map_view_model")
+        if isinstance(ask_jarvis.get("map_view_model"), dict)
+        else None,
+        "lodging_view_model": ask_jarvis.get("lodging_view_model")
+        if isinstance(ask_jarvis.get("lodging_view_model"), dict)
+        else None,
+        "recommendation_view_model": ask_jarvis.get("recommendation_view_model")
+        if isinstance(ask_jarvis.get("recommendation_view_model"), dict)
+        else None,
+        "_correlation_id": corr,
+        "_receipt": ask_jarvis.get("receipt"),
+        "_response_channel": ask_jarvis.get("response_channel"),
+        "_transport": ask_jarvis.get("transport") or "api_chat_sync_ptt",
+        "_correlation_timing": ask_jarvis.get("correlation_timing"),
+        "smedley_document_sidecar": "suppressed",
+        "smedley_document_sidecar_reason": "ask_jarvis_no_auto_rag",
+        "_ack_spoken_text": ack_spoken_text(),
+        "_tts_ack_server_queued": bool(tts_ack.get("queued")),
+    }
+
+    wait_ack_playback_complete(corr, timeout_s=120.0)
+
+    # Replace pending assistant in-place before final TTS wait so GUI can leave
+    # "Working with Jarvis…" while James Michael speaks.
+    try:
+        with LOCK:
+            sess = SESSIONS.get(s.session_id) or s
+    except Exception:
+        sess = s
+    if not isinstance(getattr(sess, "messages", None), list):
+        sess.messages = []
+    replaced = False
+    for idx_m in range(len(sess.messages) - 1, -1, -1):
+        m = sess.messages[idx_m] or {}
+        if (
+            m.get("role") == "assistant"
+            and str(m.get("_correlation_id") or "") == corr
+            and m.get("ask_jarvis_pending")
+        ):
+            sess.messages[idx_m] = final_msg
+            replaced = True
+            break
+    if not replaced:
+        sess.messages.append(final_msg)
+    sess.active_stream_id = None
+    if hasattr(sess, "pending_started_at"):
+        sess.pending_started_at = None
+    try:
+        sess.save()
+    except Exception:
+        logger.exception("ask_jarvis sync final persist failed for %s", sess.session_id)
+        return bad(handler, "failed to persist ask_jarvis final turn", 500)
+    try:
+        with LOCK:
+            SESSIONS[sess.session_id] = sess
+            SESSIONS.move_to_end(sess.session_id)
+    except Exception:
+        pass
+
+    tts_final = {"queued": False}
+    if spoken_text:
+        try:
+            tts_final = queue_ask_jarvis_smedley_tts(
+                spoken_text,
+                voice_id=ask_jarvis.get("tts_voice_id"),
+                correlation_id=corr,
+                timing_path=tpath,
+                delay_s=0.0,
+            )
+        except Exception:
+            logger.exception("ask_jarvis sync final JM TTS failed")
+            tts_final = {"queued": False, "reason": "exception"}
+    # Pedal skips local TTS when tts_server_handled — must block until JM completes
+    # or the owner hears Austin ack then silence while HTTP returns early.
+    final_gate = {"ok": False, "skipped": True}
+    if tts_final.get("queued"):
+        final_gate = wait_final_playback_complete(corr, timeout_s=180.0)
+        if final_gate.get("timed_out"):
+            logger.warning(
+                "ask_jarvis sync final TTS wait timed out corr=%s; returning anyway",
+                corr,
+            )
+    try:
+        # Stamp TTS queue result on the persisted final message when possible.
+        for idx_m in range(len(sess.messages) - 1, -1, -1):
+            m = sess.messages[idx_m] or {}
+            if (
+                m.get("role") == "assistant"
+                and str(m.get("_correlation_id") or "") == corr
+                and m.get("ask_jarvis_hard_bind")
+                and not m.get("ask_jarvis_pending")
+            ):
+                m["_tts_final_server_queued"] = bool(tts_final.get("queued"))
+                m["_tts_final_gate"] = final_gate
+                sess.save()
+                break
+    except Exception:
+        logger.exception("ask_jarvis sync final TTS stamp failed")
+
+    return j(
+        handler,
+        {
+            "session_id": sess.session_id,
+            "answer": reply,
+            "reply": reply,
+            "spoken_reply": spoken_text or None,
+            "spoken_text": spoken_text or None,
+            "ask_jarvis_hard_bind": True,
+            "ask_jarvis_pending": False,
+            "tts_server_handled": True,
+            "tts_ack_queued": bool(tts_ack.get("queued")),
+            "tts_final_queued": bool(tts_final.get("queued")),
+            "tts_final_complete": bool(final_gate.get("ok")),
+            "correlation_id": corr,
+            "map_view_model": final_msg.get("map_view_model"),
+            "lodging_view_model": final_msg.get("lodging_view_model"),
+            "recommendation_view_model": final_msg.get("recommendation_view_model"),
+            "evidence_footer": evidence_footer or None,
+            "title": getattr(sess, "title", None),
+            "error": ask_jarvis.get("error"),
+        },
+    )
+
+
 def _handle_chat_sync(handler, body):
     """Fallback synchronous chat endpoint (POST /api/chat). Not used by frontend."""
     stale_response = _agent_runtime_barrier_response(runner_local_owned=False)
@@ -22304,6 +23731,138 @@ def _handle_chat_sync(handler, body):
     msg = str(body.get("message", "")).strip()
     if not msg:
         return j(handler, {"error": "empty message"}, status=400)
+    display_msg = msg
+    if "display_message" in body:
+        from api.config import SYNC_DISPLAY_MESSAGE_MAX_CHARS
+
+        raw_display_msg = body.get("display_message")
+        if not isinstance(raw_display_msg, str) or not raw_display_msg.strip():
+            return bad(handler, "display_message must be a non-empty string")
+        display_msg = raw_display_msg.strip()
+        if len(display_msg) > SYNC_DISPLAY_MESSAGE_MAX_CHARS:
+            return bad(
+                handler,
+                f"display_message exceeds {SYNC_DISPLAY_MESSAGE_MAX_CHARS} characters",
+            )
+    # PTT Ask Jarvis must hard-bind here (pedal uses /api/chat, not /api/chat/start).
+    # Detect on display_message (raw utterance) first — wrapped message may bury the cue.
+    try:
+        from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj_sync
+    except Exception:
+        logger.exception("ask_jarvis sync import failed; falling through to ordinary chat")
+    else:
+        if _is_aj_sync(display_msg) or _is_aj_sync(msg):
+            ask_objective = display_msg if _is_aj_sync(display_msg) else msg
+            return _handle_ask_jarvis_sync_hard_bind(handler, s, ask_objective)
+    # PTT uses this synchronous endpoint.  Once a document was selected on the
+    # same session, answer paragraph/section review asks from that document's
+    # extracted preview instead of asking the model to guess from a sidecar URL.
+    try:
+        from api.smedley_document_route import try_active_document_review
+
+        review = try_active_document_review(
+            display_msg,
+            getattr(s, "active_document", None),
+            public_origin=_request_base_url(handler),
+        )
+    except Exception:
+        logger.exception("active document review failed closed to ordinary chat")
+        review = None
+    if isinstance(review, dict) and review.get("handled"):
+        reply = str(review.get("reply") or "").strip()
+        spoken = str(review.get("spoken_reply") or "").strip() or None
+        active_document = review.get("active_document")
+        if isinstance(active_document, dict) and active_document.get("source"):
+            s.active_document = active_document
+        now_ts = int(time.time())
+        if not isinstance(getattr(s, "messages", None), list):
+            s.messages = []
+        s.messages.extend([
+            {"role": "user", "content": display_msg, "timestamp": now_ts},
+            {
+                "role": "assistant",
+                "content": reply,
+                "timestamp": now_ts + 1,
+                "active_document_review": True,
+                "spoken_reply": spoken,
+            },
+        ])
+        try:
+            s.save()
+        except Exception:
+            logger.exception("failed to persist active document review for %s", s.session_id)
+            return bad(handler, "failed to persist active document review", 500)
+        return j(handler, {
+            "session_id": s.session_id,
+            "answer": reply,
+            "spoken_reply": spoken,
+            "active_document_review": True,
+            "source": review.get("source"),
+            "active_document": getattr(s, "active_document", None),
+            "extraction": review.get("extraction"),
+            "error": review.get("error"),
+        })
+    try:
+        from api.smedley_document_route import try_engineering_rag_answer
+
+        engineering = try_engineering_rag_answer(
+            display_msg,
+            public_origin=_request_base_url(handler),
+            active_document=getattr(s, "active_document", None),
+        )
+    except Exception:
+        logger.exception("engineering RAG answer failed closed to ordinary chat")
+        engineering = None
+    if isinstance(engineering, dict) and engineering.get("handled"):
+        reply = str(engineering.get("reply") or "").strip()
+        spoken = str(engineering.get("spoken_reply") or "").strip() or None
+        active_document = engineering.get("active_document")
+        if isinstance(active_document, dict) and (
+            active_document.get("source")
+            or active_document.get("part_number")
+            or active_document.get("pending_action")
+        ):
+            s.active_document = active_document
+        elif (
+            isinstance(getattr(s, "active_document", None), dict)
+            and engineering.get("pending_action")
+        ):
+            s.active_document = dict(s.active_document)
+            s.active_document["pending_action"] = engineering.get("pending_action")
+        now_ts = int(time.time())
+        if not isinstance(getattr(s, "messages", None), list):
+            s.messages = []
+        s.messages.extend([
+            {"role": "user", "content": display_msg, "timestamp": now_ts},
+            {
+                "role": "assistant",
+                "content": reply,
+                "timestamp": now_ts + 1,
+                "engineering_rag_answer": True,
+                "spoken_reply": spoken,
+            },
+        ])
+        try:
+            s.save()
+        except Exception:
+            logger.exception("failed to persist engineering RAG answer for %s", s.session_id)
+            return bad(handler, "failed to persist engineering RAG answer", 500)
+        return j(
+            handler,
+            {
+                "session_id": s.session_id,
+                "answer": reply,
+                "spoken_reply": spoken,
+                "engineering_rag_answer": True,
+                "source": engineering.get("source"),
+                "active_document": getattr(s, "active_document", None),
+                "part_number": engineering.get("part_number"),
+                "verification": engineering.get("verification"),
+                "pending_action": engineering.get("pending_action"),
+                "document_kind": engineering.get("document_kind"),
+                "error": engineering.get("error"),
+            },
+        )
     try:
         workspace = str(resolve_trusted_workspace(body.get("workspace") or s.workspace))
     except ValueError as e:
@@ -22337,6 +23896,10 @@ def _handle_chat_sync(handler, body):
 
         with CHAT_LOCK:
             from api.config import (
+                coerce_reasoning_effort_for_model,
+                parse_reasoning_effort,
+                resolve_per_request_max_tokens_override,
+                resolve_per_request_reasoning_effort_override,
                 resolve_model_provider,
                 resolve_custom_provider_connection,
             )
@@ -22371,7 +23934,52 @@ def _handle_chat_sync(handler, body):
                     _api_key = _cp_key
                 if not _base_url and _cp_base:
                     _base_url = _cp_base
-            agent = AIAgent(
+            # Match the streaming path's profile default, but let an explicit
+            # synchronous request override it for this AIAgent only. This is
+            # the PTT seam: voice may request "none" without mutating the
+            # deliberate reasoning level used by typed coordinator chat.
+            if "reasoning_effort" in body:
+                try:
+                    _reasoning_config = resolve_per_request_reasoning_effort_override(
+                        body.get("reasoning_effort"),
+                        model_id=_model,
+                        provider_id=_provider,
+                        base_url=_base_url,
+                    )
+                except ValueError as exc:
+                    return bad(handler, str(exc))
+            else:
+                try:
+                    _cfg = get_config()
+                    _effort_cfg = (
+                        _cfg.get("agent", {}) if isinstance(_cfg, dict) else {}
+                    )
+                    _effort_raw = (
+                        _effort_cfg.get("reasoning_effort")
+                        if isinstance(_effort_cfg, dict)
+                        else None
+                    )
+                    _reasoning_config = parse_reasoning_effort(
+                        coerce_reasoning_effort_for_model(
+                            _effort_raw,
+                            _model,
+                            provider_id=_provider,
+                            base_url=_base_url,
+                        )
+                    )
+                except Exception:
+                    _reasoning_config = None
+
+            _max_tokens_override = None
+            if "max_tokens" in body:
+                try:
+                    _max_tokens_override = resolve_per_request_max_tokens_override(
+                        body.get("max_tokens")
+                    )
+                except ValueError as exc:
+                    return bad(handler, str(exc))
+
+            _agent_kwargs = dict(
                 model=_model,
                 provider=_provider,
                 base_url=_base_url,
@@ -22383,6 +23991,17 @@ def _handle_chat_sync(handler, body):
                 enabled_toolsets=_resolve_cli_toolsets(),
                 session_id=s.session_id,
             )
+            # reasoning_config / max_tokens have been AIAgent params for several
+            # releases, but guard defensively to avoid TypeError on an older
+            # agent build.
+            import inspect as _inspect
+
+            _agent_params = _inspect.signature(AIAgent.__init__).parameters
+            if _reasoning_config is not None and "reasoning_config" in _agent_params:
+                _agent_kwargs["reasoning_config"] = _reasoning_config
+            if _max_tokens_override is not None and "max_tokens" in _agent_params:
+                _agent_kwargs["max_tokens"] = _max_tokens_override
+            agent = AIAgent(**_agent_kwargs)
             from api.streaming import (
                 _WEBUI_PROGRESS_PROMPT,
                 _assign_stable_message_ids,
@@ -22418,7 +24037,9 @@ def _handle_chat_sync(handler, body):
             _previous_messages = list(s.messages or [])
             _previous_context_messages = list(_context_messages_for_new_turn(s, msg))
 
-            result = agent.run_conversation(
+            result = run_conversation_with_disconnect_guard(
+                agent,
+                handler,
                 user_message=workspace_ctx + msg,
                 system_message=workspace_system_msg,
                 conversation_history=_sanitize_messages_for_api(
@@ -22429,8 +24050,15 @@ def _handle_chat_sync(handler, body):
                     effective_base_url=_base_url,
                 ),
                 task_id=s.session_id,
-                persist_user_message=msg,
+                persist_user_message=display_msg,
             )
+    except ClientDisconnectedError:
+        # Nobody is reading this response; skip persistence and let the caller
+        # retry. The point of the guard is that the provider slot is released.
+        logger.info(
+            "sync chat abandoned by client (session %s)", s.session_id
+        )
+        return j(handler, {"error": "client disconnected"}, status=499)
     finally:
         with _ENV_LOCK:
             if old_cwd is None:
@@ -22466,7 +24094,7 @@ def _handle_chat_sync(handler, body):
             _previous_messages,
             _previous_context_messages,
             _restore_display_reasoning_metadata(_previous_messages, _result_messages),
-            msg,
+            display_msg,
             source=getattr(s, "pending_user_source", None) or "webui",
         )
         _compact_session_image_parts_for_persistence(s)

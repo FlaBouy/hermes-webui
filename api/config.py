@@ -3202,6 +3202,9 @@ def get_effective_default_model(config_data: dict | None = None) -> str:
 # will show up in the shared test suite since both sides accept the same set.
 # Keep this WebUI-visible set aligned with hermes-agent#29248.
 VALID_REASONING_EFFORTS = ("minimal", "low", "medium", "high", "xhigh", "max")
+SYNC_DISPLAY_MESSAGE_MAX_CHARS = 8000
+# Hard ceiling for a request-scoped sync /api/chat max_tokens override.
+SYNC_MAX_TOKENS_LIMIT = 128000
 
 
 def parse_reasoning_effort(effort):
@@ -3220,6 +3223,49 @@ def parse_reasoning_effort(effort):
     if eff in VALID_REASONING_EFFORTS:
         return {"enabled": True, "effort": eff}
     return None
+
+
+def resolve_per_request_max_tokens_override(value):
+    """Validate a request-scoped completion-token cap for sync /api/chat.
+
+    Explicit API input fails closed: non-integers, zero, negatives, and values
+    above ``SYNC_MAX_TOKENS_LIMIT`` raise ``ValueError``.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError("max_tokens must be a positive integer")
+    if value < 1 or value > SYNC_MAX_TOKENS_LIMIT:
+        raise ValueError(
+            f"max_tokens must be an integer from 1 to {SYNC_MAX_TOKENS_LIMIT}"
+        )
+    return value
+
+
+def resolve_per_request_reasoning_effort_override(
+    effort,
+    *,
+    model_id=None,
+    provider_id=None,
+    base_url=None,
+):
+    """Validate and resolve a request-scoped reasoning override.
+
+    Unlike stored profile configuration, a supplied API override is explicit
+    user input. Invalid values therefore fail closed instead of silently
+    falling back to the profile or provider default.
+    """
+    if not isinstance(effort, str):
+        raise ValueError("reasoning_effort must be a string")
+    raw = effort.strip().lower()
+    if raw != "none" and raw not in VALID_REASONING_EFFORTS:
+        allowed = "none|" + "|".join(VALID_REASONING_EFFORTS)
+        raise ValueError(f"reasoning_effort must be {allowed}")
+    coerced = coerce_reasoning_effort_for_model(
+        raw,
+        model_id,
+        provider_id=provider_id,
+        base_url=base_url,
+    )
+    return parse_reasoning_effort(coerced)
 
 
 def _strip_provider_hint_for_reasoning(model_id: str, provider: str | None = None) -> str:
@@ -9203,6 +9249,7 @@ _SETTINGS_DEFAULTS = {
     "tts_rate": 1.0,
     "tts_pitch": 1.0,
     "voice_mode_button": False,
+    "gpt_realtime_voice": False,  # opt-in: show GPT Realtime Voice composer control (audio I/O only; Hermes remains chat authority)
     "voice_continuous": False,
     "voice_silence_ms": 1800,
     "raw_audio_mode": False,
@@ -9273,6 +9320,7 @@ _SETTINGS_SPEECH_KEYS = {
     "tts_rate",
     "tts_pitch",
     "voice_mode_button",
+    "gpt_realtime_voice",
     "voice_continuous",
     "voice_silence_ms",
     "raw_audio_mode",
@@ -9521,6 +9569,7 @@ _SETTINGS_BOOL_KEYS = {
     "tts_enabled",
     "tts_auto_read",
     "voice_mode_button",
+    "gpt_realtime_voice",
     "voice_continuous",
     "raw_audio_mode",
     "sound_enabled",

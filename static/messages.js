@@ -661,6 +661,11 @@ window.enhanceMarkdownTables=enhanceMarkdownTables;
     const inner=typeof $==='function'?$('msgInner'):document.getElementById('msgInner');
     enhanceMarkdownTables(inner);
     _wireMarkdownTableCopyHandler(inner);
+    try{
+      if(typeof window.__biggyHandoffTravelVisualsFromMessages==='function'){
+        window.__biggyHandoffTravelVisualsFromMessages();
+      }
+    }catch(_){ }
     return result;
   };
   window.renderMessages._markdownTablesEnhanced=true;
@@ -1375,7 +1380,18 @@ async function send(){
         }
       }
     const defaultMessageMode=window._defaultMessageMode||'steer';
-      if(defaultMessageMode==='steer'&&S.activeStreamId&&typeof _trySteer==='function'){
+      // Ask Jarvis must never be steered into an in-flight agent/pending turn —
+      // hard-bind only works via /api/chat/start. Queue if another turn owns the session.
+      const _askJarvisBusy=/\bask\s+jarvis\b/i.test(text);
+      const _askJarvisPending=String(S.activeStreamId||'').startsWith('ask-jarvis-pending:');
+      if(_askJarvisBusy||_askJarvisPending){
+        const _modelState=_chatPayloadModelState();
+        queueSessionMessage(S.session.session_id,{text,files:[...S.pendingFiles],model:_modelState.model,model_provider:_modelState.model_provider,profile:S.activeProfile||'default'});
+        _clearComposerAfterQueuedSelectionSend(S.session&&S.session.session_id);
+        S.pendingFiles=[];renderTray();
+        updateQueueBadge(S.session.session_id);
+        showToast(`Queued Ask Jarvis: "${text.slice(0,40)}${text.length>40?'…':''}"`,2500);
+      } else if(defaultMessageMode==='steer'&&S.activeStreamId&&typeof _trySteer==='function'){
         // Real steer: clear the input first so the user gets immediate
         // feedback, then ship the steer payload via /api/chat/steer.
         // _trySteer captures the owner session/files before awaiting uploads,
@@ -1828,6 +1844,288 @@ async function send(){
   }
 
   const startData = postStartData || {};
+  // Ask Jarvis hard-bind: deterministic Jarvis PA webhook reply, no agent stream.
+  // Two-stage: immediate pending+Austin ack, then poll until final James Michael result.
+  if(startData.ask_jarvis_hard_bind){
+    const _ajt0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const _ajCorr = startData.correlation_id ? String(startData.correlation_id) : '';
+    const _ajPending = !!startData.ask_jarvis_pending;
+    if(S.session&&S.session.session_id===activeSid){
+      if(startData.title) applySessionTitleUpdate(activeSid, startData.title, {provisionalText:displayText.slice(0,64), rememberProvisional:true});
+      if(_ajPending){
+        S.session.active_stream_id = startData.stream_id || (`ask-jarvis-pending:${_ajCorr}`);
+        S.activeStreamId = S.session.active_stream_id;
+      }else{
+        S.activeStreamId=null;
+        S.session.active_stream_id=null;
+      }
+    }
+    delete INFLIGHT[activeSid];
+    if(typeof clearInflightState==='function') clearInflightState(activeSid);
+    if(!_ajPending && typeof clearOptimisticSessionStreaming==='function') clearOptimisticSessionStreaming(activeSid);
+    if(_ajPending){
+      if(typeof setBusy==='function') setBusy(true); else S.busy=true;
+    }else{
+      if(typeof setBusy==='function') setBusy(false); else S.busy=false;
+    }
+    if(typeof updateSendBtn==='function') updateSendBtn();
+
+    const _ajApplyFinalVisual = (mvm, lvm, rvm)=>{
+      if(_ajCorr) window.__askJarvisActiveCorrelation = _ajCorr;
+      const _render=()=>{
+        try{
+          if(typeof window.__biggyHandoffTravelVisualsFromMessages==='function'){
+            // Prefer live S.messages (survives pending→final session refresh).
+            const out = window.__biggyHandoffTravelVisualsFromMessages(null, _ajCorr);
+            if(out && typeof out.then==='function'){ out.then(function(ok){ if(ok) return; }); return; }
+            if(out) return;
+          }
+          Promise.resolve().then(async ()=>{
+            let mapOk=false;
+            let recInfo={rendered:false,count:0,category:null};
+            if(mvm&&typeof mvm==='object'&&typeof window.__biggyRenderMapViewModel==='function'){
+              mapOk = !!(await window.__biggyRenderMapViewModel(mvm));
+            }
+            if(rvm&&typeof rvm==='object'&&typeof window.__biggyRenderRecommendationViewModel==='function'){
+              recInfo = window.__biggyRenderRecommendationViewModel(rvm) || recInfo;
+            }else if(lvm&&typeof lvm==='object'&&typeof window.__biggyRenderLodgingViewModel==='function'){
+              recInfo = window.__biggyRenderLodgingViewModel(lvm) || recInfo;
+            }
+            if(typeof window.__biggyPostAskJarvisRenderAck==='function' && _ajCorr){
+              const dlg=document.getElementById('biggyTravelMapDialog');
+              window.__biggyPostAskJarvisRenderAck({
+                correlation_id: _ajCorr,
+                map_rendered: !!mapOk,
+                recommendations_rendered: !!recInfo.rendered,
+                recommendation_card_count: recInfo.count||0,
+                category: recInfo.category||null,
+                layout_slot: 'docked_landing_panel',
+                overlay_dialog: false,
+                displaces_conversation: false,
+                panel_visible: !!(dlg && !dlg.hidden),
+                panel_collapsed: !!(dlg && dlg.classList.contains('is-collapsed')),
+                dialog_visible: false,
+              });
+            }
+          }).catch(function(){});
+        }catch(_){ }
+      };
+      _render();
+      setTimeout(_render, 250);
+      setTimeout(_render, 900);
+      setTimeout(_render, 2000);
+    };
+
+    if(_ajPending){
+      // Stage 1 visual: pending/working. Austin ack is server-queued — never client-speak pending.
+      try{
+        if(typeof loadSession==='function'){
+          await loadSession(activeSid,{force:true,externalRefreshReason:'ask-jarvis-pending'});
+        }
+      }catch(askJarvisErr){
+        try{console.warn('[webui] ask-jarvis pending refresh failed', askJarvisErr);}catch(_){ }
+      }
+      // Poll same session/correlation until pending resolves to final (one reply only).
+      (async ()=>{
+        try{
+          let finalMsg=null;
+          for(let i=0;i<180;i++){
+            await new Promise(r=>setTimeout(r,500));
+            if(typeof loadSession==='function'){
+              await loadSession(activeSid,{force:true,externalRefreshReason:'ask-jarvis-pending-poll'});
+            }
+            if(Array.isArray(S.messages)){
+              for(let j=S.messages.length-1;j>=0;j--){
+                const m=S.messages[j];
+                if(!m||m.role!=='assistant') continue;
+                if(_ajCorr && String(m._correlation_id||'')!==_ajCorr) continue;
+                if(m.ask_jarvis_hard_bind && !m.ask_jarvis_pending){
+                  finalMsg=m;
+                  break;
+                }
+              }
+            }
+            if(finalMsg) break;
+          }
+          S.activeStreamId=null;
+          if(S.session&&S.session.session_id===activeSid) S.session.active_stream_id=null;
+          if(typeof clearOptimisticSessionStreaming==='function') clearOptimisticSessionStreaming(activeSid);
+          if(typeof setBusy==='function') setBusy(false); else S.busy=false;
+          if(typeof updateSendBtn==='function') updateSendBtn();
+          if(finalMsg){
+            // Always hand off from live S.messages — pending→final refresh can
+            // populate map/lodging after the first poll snapshot.
+            _ajApplyFinalVisual(finalMsg.map_view_model, finalMsg.lodging_view_model, finalMsg.recommendation_view_model);
+            // Server queues James Michael once — skip client sink (no duplicate audio).
+          }else if(typeof window.__biggyHandoffTravelVisualsFromMessages==='function'){
+            try{ window.__biggyHandoffTravelVisualsFromMessages(); }catch(_){ }
+          }
+          try{
+            const clientTiming = {
+              schema: 'jarvis.ask_jarvis_client_timing.v1',
+              correlation_id: _ajCorr || null,
+              segments_ms: {
+                client_pending_to_final_ms: Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - _ajt0),
+              },
+              timestamps_utc: { client_final_resolved: new Date().toISOString() },
+            };
+            window.__askJarvisClientTiming = clientTiming;
+            if(_ajCorr){
+              fetch('/api/biggy/ask-jarvis-client-timing', {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(clientTiming),
+              }).catch(function(){});
+            }
+          }catch(_){ }
+          if(typeof renderSessionList==='function') void renderSessionList();
+        }catch(pollErr){
+          try{console.warn('[webui] ask-jarvis pending poll failed', pollErr);}catch(_){ }
+          if(typeof setBusy==='function') setBusy(false); else S.busy=false;
+        }
+      })();
+      if(typeof renderSessionList==='function') void renderSessionList();
+      return;
+    }
+
+    // Legacy/sync final path (no pending flag): load + map; skip client TTS if server queued.
+    S.activeStreamId=null;
+    if(S.session&&S.session.session_id===activeSid){
+      S.session.active_stream_id=null;
+    }
+    if(typeof clearOptimisticSessionStreaming==='function') clearOptimisticSessionStreaming(activeSid);
+    try{
+      const _ajLoad0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+      if(typeof loadSession==='function'){
+        await loadSession(activeSid,{force:true,externalRefreshReason:'ask-jarvis-hard-bind'});
+        // Prove same-turn map_view_model survives loadSession / message-shape drops.
+        if(((startData.map_view_model&&typeof startData.map_view_model==='object')||(startData.lodging_view_model&&typeof startData.lodging_view_model==='object')||(startData.recommendation_view_model&&typeof startData.recommendation_view_model==='object'))&&Array.isArray(S.messages)){
+          for(let i=S.messages.length-1;i>=0;i--){
+            const m=S.messages[i];
+            if(m&&m.role==='assistant'){
+              if(startData.map_view_model&&!m.map_view_model) m.map_view_model=startData.map_view_model;
+              if(startData.lodging_view_model&&!m.lodging_view_model) m.lodging_view_model=startData.lodging_view_model;
+              if(startData.recommendation_view_model&&!m.recommendation_view_model) m.recommendation_view_model=startData.recommendation_view_model;
+              if(startData.correlation_id&&!m._correlation_id) m._correlation_id=String(startData.correlation_id);
+              break;
+            }
+          }
+        }
+      }else if(startData.reply){
+        const asst={role:'assistant',content:String(startData.reply),timestamp:Date.now()/1000,ask_jarvis_hard_bind:true};
+        if(startData.spoken_reply||startData.spoken_text) asst.spoken_reply=String(startData.spoken_reply||startData.spoken_text);
+        if(startData.spoken_text) asst.spoken_text=String(startData.spoken_text);
+        if(startData.evidence_footer) asst.evidence_footer=String(startData.evidence_footer);
+        if(startData.tts_engine) asst.tts_engine=String(startData.tts_engine);
+        if(startData.tts_voice_id) asst.tts_voice_id=String(startData.tts_voice_id);
+        if(startData.tts_voice_profile) asst.tts_voice_profile=String(startData.tts_voice_profile);
+        if(startData.correlation_id) asst._correlation_id=String(startData.correlation_id);
+        if(startData.map_view_model&&typeof startData.map_view_model==='object') asst.map_view_model=startData.map_view_model;
+        if(startData.lodging_view_model&&typeof startData.lodging_view_model==='object') asst.lodging_view_model=startData.lodging_view_model;
+        if(startData.recommendation_view_model&&typeof startData.recommendation_view_model==='object') asst.recommendation_view_model=startData.recommendation_view_model;
+        if(Array.isArray(S.messages)) S.messages.push(asst);
+        if(typeof renderMessages==='function') renderMessages();
+      }
+      const _ajLoadMs = Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - _ajLoad0);
+      const _mvm=startData.map_view_model;
+      const _lvm=startData.lodging_view_model;
+      const _rvm=startData.recommendation_view_model;
+      _ajApplyFinalVisual(_mvm, _lvm, _rvm);
+      const _ajTotalMs = Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - _ajt0);
+      try{
+        const clientTiming = {
+          schema: 'jarvis.ask_jarvis_client_timing.v1',
+          correlation_id: _ajCorr || null,
+          segments_ms: {
+            client_hard_bind_loadSession_ms: _ajLoadMs,
+            client_hard_bind_total_ms: _ajTotalMs,
+          },
+          timestamps_utc: { client_hard_bind_end: new Date().toISOString() },
+        };
+        window.__askJarvisClientTiming = clientTiming;
+        if(_ajCorr){
+          fetch('/api/biggy/ask-jarvis-client-timing', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(clientTiming),
+          }).catch(function(){});
+        }
+      }catch(_){ }
+    }catch(askJarvisErr){
+      try{console.warn('[webui] ask-jarvis hard-bind session refresh failed', askJarvisErr);}catch(_){ }
+    }
+    if(typeof autoReadLastAssistant==='function'){
+      // Server already queued James Michael on Smedley /speak — skip client sink
+      // so a cache-stuck Austin path cannot override/double-speak.
+      if(!startData.tts_server_queued){
+        setTimeout(()=>autoReadLastAssistant(), 300);
+      }
+    }
+    if(typeof renderSessionList==='function') void renderSessionList();
+    return;
+  }
+  // Smedley document-link repair / engineering RAG: deterministic reply, no agent stream.
+  if(startData.document_route || startData.active_document_review || startData.engineering_rag_answer){
+    S.activeStreamId=null;
+    if(S.session&&S.session.session_id===activeSid){
+      S.session.active_stream_id=null;
+      if(typeof startData.pending_started_at==='number') S.session.pending_started_at=startData.pending_started_at;
+      if(startData.title) applySessionTitleUpdate(activeSid, startData.title, {provisionalText:displayText.slice(0,64), rememberProvisional:true});
+      if(startData.active_document && typeof startData.active_document==='object'){
+        S.session.active_document=startData.active_document;
+      }
+    }
+    delete INFLIGHT[activeSid];
+    if(typeof clearInflightState==='function') clearInflightState(activeSid);
+    if(typeof clearOptimisticSessionStreaming==='function') clearOptimisticSessionStreaming(activeSid);
+    if(typeof setBusy==='function') setBusy(false); else S.busy=false;
+    if(typeof updateSendBtn==='function') updateSendBtn();
+    try{
+      if(typeof loadSession==='function'){
+        const reason=startData.active_document_review
+          ? 'active-document-review'
+          : (startData.engineering_rag_answer ? 'engineering-rag-answer' : 'document-route');
+        await loadSession(activeSid,{force:true,externalRefreshReason:reason});
+      }else if(startData.reply){
+        const asst={
+          role:'assistant',
+          content:String(startData.reply),
+          timestamp:Date.now()/1000,
+          document_route:!!startData.document_route,
+          active_document_review:!!startData.active_document_review,
+          engineering_rag_answer:!!startData.engineering_rag_answer
+        };
+        if(startData.spoken_reply) asst.spoken_reply=String(startData.spoken_reply);
+        if(Array.isArray(S.messages)) S.messages.push(asst);
+        if(typeof renderMessages==='function') renderMessages();
+      }
+    }catch(docRouteErr){
+      try{console.warn('[webui] document-route session refresh failed', docRouteErr);}catch(_){ }
+    }
+    // Voice-safe TTS: prefer compact spoken_reply (never narrate full RAG body / CoT).
+    if(typeof autoReadLastAssistant==='function'){
+      try{
+        if(startData.spoken_reply&&Array.isArray(S.messages)){
+          for(let i=S.messages.length-1;i>=0;i--){
+            const m=S.messages[i];
+            if(m&&m.role==='assistant'){
+              if(startData.document_route) m.document_route=true;
+              if(startData.active_document_review) m.active_document_review=true;
+              if(startData.engineering_rag_answer) m.engineering_rag_answer=true;
+              m.spoken_reply=String(startData.spoken_reply);
+              break;
+            }
+          }
+        }
+      }catch(_){ }
+      try{ window.__smedleyDocSpokenReply=String(startData.spoken_reply||'').trim(); }catch(_){ }
+      setTimeout(()=>autoReadLastAssistant(), 300);
+    }
+    if(typeof renderSessionList==='function') void renderSessionList();
+    return;
+  }
   streamId = postStartData ? postStartData.stream_id : null;
   S.activeStreamId = streamId;
   // setBusy(true) already ran with activeStreamId=null; refresh now that we

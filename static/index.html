@@ -592,6 +592,15 @@
           <span class="voice-mode-indicator" id="voiceModeIndicator"></span>
           <span class="voice-mode-label" id="voiceModeLabel"></span>
         </div>
+        <div class="voice-mode-bar gpt-voice-bar" id="gptVoiceBar" style="display:none">
+          <span class="voice-mode-indicator gpt-voice-indicator" id="gptVoiceIndicator"></span>
+          <span class="voice-mode-label" id="gptVoiceLabel"></span>
+          <span class="gpt-voice-guard" id="gptVoiceGuard" style="display:none" data-i18n="gpt_voice_echo_guard">Echo protection on · mic muted during playback</span>
+          <span class="gpt-voice-actions">
+            <button type="button" class="gpt-voice-talk" id="btnGptVoiceTalk" data-i18n="gpt_voice_hold_to_talk" aria-label="Hold to talk">Hold to talk</button>
+            <button type="button" class="gpt-voice-stop" id="btnGptVoiceStop" data-i18n="gpt_voice_stop" aria-label="Stop Smedley Voice">Stop</button>
+          </span>
+        </div>
         <textarea id="msg" rows="1" placeholder="Message Hermes…"></textarea>
         <div id="composerWorkspaceContext" class="sr-only"></div>
         <div class="composer-footer">
@@ -620,6 +629,17 @@
                 <path d="M14 8v8"/>
                 <path d="M18 5v14"/>
                 <path d="M22 10v4"/>
+              </svg>
+            </button>
+            <button class="icon-btn gpt-voice-btn has-tooltip" id="btnGptVoice" type="button" data-tooltip="Smedley Voice" data-i18n-title="gpt_voice_toggle" aria-pressed="false" style="display:none">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <!-- Distinct from mic + audio-lines: waveform + spark (Realtime). -->
+                <path d="M4 10v4"/>
+                <path d="M8 7v10"/>
+                <path d="M12 4v16"/>
+                <path d="M16 8v8"/>
+                <path d="M20 11v2"/>
+                <path d="M19 4l1.5 1.5L22 4"/>
               </svg>
             </button>
             <div class="composer-divider" aria-hidden="true"></div>
@@ -1239,6 +1259,13 @@
             </div>
             <div class="settings-field">
               <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                <input type="checkbox" id="settingsGptRealtimeVoice" style="width:15px;height:15px;accent-color:var(--accent)">
+                <span data-i18n="settings_label_gpt_realtime_voice">Smedley Voice (Realtime) button</span>
+              </label>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px" data-i18n="settings_desc_gpt_realtime_voice">Show the Smedley Voice control. Uses OpenAI Realtime WebRTC for low-latency mic/speakers only — Hermes stays the chat, RAG, approval, and session authority. Requires OPENAI_API_KEY on the server. Does not replace the physical pedal or local dictation.</div>
+            </div>
+            <div class="settings-field">
+              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
                 <input type="checkbox" id="settingsRawAudio" style="width:15px;height:15px;accent-color:var(--accent)">
                 <span data-i18n="settings_label_raw_audio">Send raw audio instead of transcribing</span>
               </label>
@@ -1774,6 +1801,7 @@
 <script src="static/extension_settings.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/panels.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/onboarding.js?v=__WEBUI_VERSION__" defer></script>
+<script src="static/realtime_voice.js?v=__WEBUI_VERSION__&rv=ptt-replace-20260812-1245" defer></script>
 <script src="static/boot.js?v=__WEBUI_VERSION__" defer></script>
 <script src="static/outline.js?v=__WEBUI_VERSION__" defer></script>
 

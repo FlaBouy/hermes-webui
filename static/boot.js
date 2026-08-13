@@ -3119,7 +3119,7 @@ function _applyComposerFooterVisibilitySettings(){
   // Stops a lone vertical separator from appearing when attach/saved-prompts/mic/voice are all hidden.
   const _divider=document.querySelector('.composer-divider');
   if(_divider){
-    const _leftBtnSelectors=['#btnAttach','#btnSavedPrompts','#btnMic','#btnVoiceMode'];
+    const _leftBtnSelectors=['#btnAttach','#btnSavedPrompts','#btnMic','#btnVoiceMode','#btnGptVoice'];
     const _allLeftHidden=_leftBtnSelectors.every(sel=>{
       const el=document.querySelector(sel);
       return !el||el.classList.contains('composer-control-hidden')||el.style.display==='none';
@@ -3153,6 +3153,7 @@ function _mirrorSpeechSettingsFromServer(s){
     tts_rate:1,
     tts_pitch:1,
     voice_mode_button:false,
+    gpt_realtime_voice:false,
     voice_continuous:false,
     voice_silence_ms:1800,
     raw_audio_mode:false,
@@ -3181,6 +3182,7 @@ function _mirrorSpeechSettingsFromServer(s){
     ['tts_enabled','hermes-tts-enabled'],
     ['tts_auto_read','hermes-tts-auto-read'],
     ['voice_mode_button','hermes-voice-mode-button'],
+    ['gpt_realtime_voice','hermes-gpt-realtime-voice'],
     ['voice_continuous','hermes-voice-continuous'],
   ];
   boolKeys.forEach(([settingKey,storageKey])=>{
@@ -3376,6 +3378,12 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
     // Note: must use window._applyVoiceModePref — the bare name is
     // closure-local to the voice-mode IIFE and not visible here.
     if(typeof window._applyVoiceModePref==='function') window._applyVoiceModePref();
+    if(typeof window.applyGptVoiceButtonVisibility==='function'){
+      try{
+        const on=localStorage.getItem('hermes-gpt-realtime-voice')==='true';
+        window.applyGptVoiceButtonVisibility(on);
+      }catch(_){ window.applyGptVoiceButtonVisibility(false); }
+    }
     _applyComposerFooterVisibilitySettings();
     // TTS: apply enabled state on boot so buttons show/hide correctly (#499)
     if(typeof _applyTtsEnabled==='function') _applyTtsEnabled(localStorage.getItem('hermes-tts-enabled')==='true');
@@ -3439,6 +3447,12 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
     // Note: must use window._applyVoiceModePref — the bare name is
     // closure-local to the voice-mode IIFE and not visible here.
     if(typeof window._applyVoiceModePref==='function') window._applyVoiceModePref();
+    if(typeof window.applyGptVoiceButtonVisibility==='function'){
+      try{
+        const on=localStorage.getItem('hermes-gpt-realtime-voice')==='true';
+        window.applyGptVoiceButtonVisibility(on);
+      }catch(_){ window.applyGptVoiceButtonVisibility(false); }
+    }
     _applyComposerFooterVisibilitySettings();
     if(typeof _applyTtsEnabled==='function') _applyTtsEnabled(localStorage.getItem('hermes-tts-enabled')==='true');
   }

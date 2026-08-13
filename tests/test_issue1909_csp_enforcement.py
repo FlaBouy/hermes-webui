@@ -66,6 +66,7 @@ def test_enforcing_csp_honors_valid_extra_connect_origins(monkeypatch):
         "connect-src 'self' http://127.0.0.1:* http://localhost:* "
         "http://ipc.localhost https://127.0.0.1:* https://localhost:* "
         "ws://127.0.0.1:* ws://localhost:* https://cdn.jsdelivr.net "
+        "https://api.openai.com "
         "https://metrics.example.com wss://events.example.com:443; "
     ) in policy
 

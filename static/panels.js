@@ -7042,6 +7042,11 @@ async function switchToProfile(name) {
     // Apply the profile defaults returned by /api/profile/switch immediately.
     // Refreshing the full model/workspace catalogs is useful, but it should not
     // hold the visible switch animation open.
+    //
+    // Shared fleet contract (Thunderdome / upstream): clear browser-persisted
+    // composer state and apply the profile's persistent default_model. Do NOT
+    // reintroduce Smedley's 2026-07-16 "dynamic model inheritance" that made
+    // every profile follow the per-conversation dropdown selection.
     if(typeof _clearPersistedModelState==='function') _clearPersistedModelState();
     else localStorage.removeItem('hermes-webui-model');
     _skillsData = null;
@@ -8593,6 +8598,7 @@ const _SETTINGS_SPEECH_STORAGE_KEYS={
   tts_rate:'hermes-tts-rate',
   tts_pitch:'hermes-tts-pitch',
   voice_mode_button:'hermes-voice-mode-button',
+  gpt_realtime_voice:'hermes-gpt-realtime-voice',
   voice_continuous:'hermes-voice-continuous',
   voice_silence_ms:'hermes-voice-silence-ms',
   raw_audio_mode:'hermes-raw-audio-mode',
@@ -8726,6 +8732,8 @@ function _speechPreferencesPayloadFromUi(){
   if(ttsPitchSlider) _setOwnedSpeechPayload(payload,'tts_pitch',parseFloat(ttsPitchSlider.value));
   const voiceModeCb=$('settingsVoiceModeEnabled');
   if(voiceModeCb) _setOwnedSpeechPayload(payload,'voice_mode_button',voiceModeCb.checked);
+  const gptVoiceCb=$('settingsGptRealtimeVoice');
+  if(gptVoiceCb) _setOwnedSpeechPayload(payload,'gpt_realtime_voice',gptVoiceCb.checked);
   const rawAudioCb=$('settingsRawAudio');
   _setOwnedSpeechPayload(payload,'raw_audio_mode',rawAudioCb?rawAudioCb.checked:localStorage.getItem('hermes-raw-audio-mode')==='true');
   _setOwnedSpeechPayload(payload,'voice_continuous',localStorage.getItem('hermes-voice-continuous')==='true');
@@ -9397,6 +9405,19 @@ async function loadSettingsPanel(){
         _markSpeechPreferenceChanged('voice_mode_button');
         localStorage.setItem('hermes-voice-mode-button',this.checked?'true':'false');
         if(typeof window._applyVoiceModePref==='function') window._applyVoiceModePref();
+        if(typeof window._applyComposerFooterVisibilitySettings==='function') window._applyComposerFooterVisibilitySettings();
+        _schedulePreferencesAutosave();
+      };
+    }
+    const gptVoiceCb=$('settingsGptRealtimeVoice');
+    if(gptVoiceCb){
+      gptVoiceCb.checked=_speechBool('gpt_realtime_voice','hermes-gpt-realtime-voice',false);
+      gptVoiceCb.onchange=function(){
+        _markSpeechPreferenceChanged('gpt_realtime_voice');
+        localStorage.setItem('hermes-gpt-realtime-voice',this.checked?'true':'false');
+        if(typeof window.applyGptVoiceButtonVisibility==='function'){
+          window.applyGptVoiceButtonVisibility(this.checked);
+        }
         if(typeof window._applyComposerFooterVisibilitySettings==='function') window._applyComposerFooterVisibilitySettings();
         _schedulePreferencesAutosave();
       };
