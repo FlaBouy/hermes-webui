@@ -1,0 +1,3245 @@
+"""Force natural-language document requests through the Smedley RAG path.
+
+Detects pull/find/link document intents, retrieves via the Smedley RAG
+retrieve endpoint (not ordinary chat), and deterministically emits canonical
+absolute WebUI sidecar preview/doc links. LAN corpus-serve URLs
+(192.168.0.15:8789) are never emitted to clients.
+
+Absolute sidecar URLs keep document links usable when a session is later
+viewed through TD (or any workstation) against Smedley's WebUI origin.
+
+Gated: callers decide when to invoke. This module does not mutate kanban cards.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import re
+import subprocess
+import urllib.error
+import urllib.parse
+import urllib.request
+from html.parser import HTMLParser
+from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
+
+WEBUI_CORPUS_SIDECAR = "/api/extensions/smedley-engineering/sidecar"
+LAN_HOST_RE = re.compile(
+    r"https?://(?:192\.168\.0\.15|127\.0\.0\.1|localhost)(?::8789)(/[^\s\)\"']*)?",
+    re.IGNORECASE,
+)
+LAN_MARKDOWN_HREF_RE = re.compile(
+    r"\]\((https?://(?:192\.168\.0\.15|127\.0\.0\.1|localhost):8789/[^)]+)\)",
+    re.IGNORECASE,
+)
+SIDECAR_HREF_RE = re.compile(
+    r"^/api/extensions/smedley-engineering/sidecar/(?:preview|doc)/",
+    re.IGNORECASE,
+)
+# Match sidecar route anywhere (including duplicated /doc/.../doc/... prefixes).
+_SIDECAR_ROUTE_PREFIX_RE = re.compile(
+    r"(?i)(?:https?://[^/\s]+)?(/api/extensions/smedley-engineering/sidecar/(?:preview|doc)/)+",
+)
+_SIDECAR_REL_PREFIX_RE = re.compile(
+    r"(?i)^(?:/)?(?:api/extensions/smedley-engineering/sidecar/(?:preview|doc)/)+",
+)
+# Unsupported LLM-invented "search UI" citations — never a real sidecar route.
+SIDECAR_SEARCH_PATH_RE = re.compile(
+    r"(?i)/api/extensions/smedley-engineering/sidecar/search(?:\?[^)\s<>\"']*)?"
+)
+SIDECAR_SEARCH_MD_RE = re.compile(
+    r"(!?\[[^\]]*\])\(((?:https?://[^)\s]+)?/api/extensions/smedley-engineering/"
+    r"sidecar/search\?[^)]*)\)",
+    re.IGNORECASE,
+)
+
+# Intent: pull/find/open a document OR ask for a document link.
+_DOC_NOUN = (
+    r"(?:document|doc(?:ument)?s?|spec(?:ification)?s?|manuals?|datasheets?|"
+    r"pdfs?|drawings?|prints?|procedures?|standards?|dock)"
+)
+_DOC_VERB = (
+    r"(?:pull|get|fetch|find|locate|open|show|send|give|provide|bring|grab|"
+    r"retrieve|look\s*up|lookup|search\s+for|need|want)"
+)
+_LINK_ASK = (
+    r"(?:(?:give|send|provide|get|need|want|show)\s+(?:me\s+)?(?:a\s+|the\s+)?"
+    r"(?:link|url|href|preview)|(?:link|url)\s+to)"
+)
+# Honeywell FTA / IOP model tokens (MC-TDID52, MU-TDID52, MU/MC-…).
+_HW_PART = re.compile(
+    r"\b(?:MU\s*/\s*MC|MC\s*/\s*MU|MU|MC)[- ]?[A-Z]{2,6}\d{2,}[A-Z]?\b",
+    re.IGNORECASE,
+)
+_AB_PART = re.compile(
+    r"\b(?:1756|1769|1794|5094)[- ]?[A-Z0-9]{2,}\b",
+    re.IGNORECASE,
+)
+_DOCNUM = re.compile(r"\b\d{2}-\d{3}\b")  # require hyphen (02-315); never bare ZIP 32444
+_FILE_EXT = re.compile(
+    r"\b[\w./\\ -]+\.(?:pdf|docx?|xlsx?|pptx?|txt|md)\b",
+    re.IGNORECASE,
+)
+_AFFIRMATIVE_FOLLOWUP_RE = re.compile(
+    r"^\s*(?:yes|yep|yeah|yup|sure|ok|okay|please|do\s+it|go\s+ahead|"
+    r"proceed|affirmative|sounds\s+good|that\s+works|do\s+that|"
+    r"yes\s+please|please\s+do)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+_PENDING_EXTRACT_ACTION = "extract_wiring_schematic"
+_MANUAL_EXTS = {".pdf", ".doc", ".docx"}
+_INDEX_EXTS = {".xlsx", ".xls", ".csv"}
+_INDEX_TITLE_RE = re.compile(
+    r"\b(?:knowledgebase|technote\s+ids?|lookup\s+index|part\s+number\s+index|"
+    r"index\s+by\s+part|cross[- ]?reference)\b",
+    re.IGNORECASE,
+)
+
+_DOCUMENT_REQUEST_RES = (
+    re.compile(
+        rf"\b{_DOC_VERB}\b.{{0,80}}\b{_DOC_NOUN}\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        rf"\b{_DOC_NOUN}\b.{{0,40}}\b{_DOC_VERB}\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    # “I need the user manual …” / “need … wiring schematics”
+    re.compile(
+        rf"\b(?:need|want)\b.{{0,100}}\b(?:{_DOC_NOUN}|wiring|schematics?|pinouts?)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(rf"\b{_LINK_ASK}\b.{{0,80}}\b{_DOC_NOUN}\b", re.IGNORECASE | re.DOTALL),
+    re.compile(rf"\b{_LINK_ASK}\b.{{0,80}}{_DOCNUM.pattern}", re.IGNORECASE),
+    re.compile(
+        rf"\b{_DOC_VERB}\b.{{0,80}}{_DOCNUM.pattern}",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        rf"\b{_DOC_VERB}\b.{{0,80}}{_FILE_EXT.pattern}",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    # Part-number / Honeywell FTA asks are first-class document requests.
+    re.compile(
+        rf"(?:{_HW_PART.pattern}).{{0,80}}\b(?:{_DOC_NOUN}|wiring|schematics?)\b|"
+        rf"\b(?:{_DOC_NOUN}|wiring|schematics?)\b.{{0,80}}(?:{_HW_PART.pattern})",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(rf"(?:{_HW_PART.pattern})", re.IGNORECASE),
+    # Allen-Bradley / Rockwell catalog numbers with wiring/manual cues.
+    re.compile(
+        rf"(?:{_AB_PART.pattern}).{{0,80}}\b(?:{_DOC_NOUN}|wiring|schematics?)\b|"
+        rf"\b(?:{_DOC_NOUN}|wiring|schematics?)\b.{{0,80}}(?:{_AB_PART.pattern})",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(
+        rf"(?:can\s+you|please|pls)?\s*(?:{_LINK_ASK})",
+        re.IGNORECASE,
+    ),
+)
+
+DEFAULT_RAG_RETRIEVE_URL = "http://127.0.0.1:5004/rag/retrieve"
+RAG_RETRIEVE_URL_ENV = "HERMES_WEBUI_SMEDLEY_RAG_RETRIEVE_URL"
+DEFAULT_JARVIS_N8N_BRIEFING_URL = (
+    "http://192.168.0.15:5680/webhook/jarvis-pa-biggy-briefing"
+)
+JARVIS_N8N_BRIEFING_URL_ENV = "SMEDLEY_JARVIS_N8N_BRIEFING_URL"
+JARVIS_N8N_HANDOFF_ENABLE_ENV = "SMEDLEY_JARVIS_N8N_HANDOFF"
+JARVIS_N8N_TOKEN_ENV = "GPT_BIGGY_PROPOSE_TOKEN"
+JARVIS_N8N_TOKEN_FILE_ENV = "GPT_BIGGY_PROPOSE_TOKEN_FILE"
+DOC_ROUTE_ENABLED_ENV = "HERMES_WEBUI_SMEDLEY_DOC_ROUTE"
+PUBLIC_ORIGIN_ENV = "HERMES_WEBUI_SMEDLEY_PUBLIC_ORIGIN"
+MAX_ACTIVE_DOCUMENT_PREVIEW_BYTES = 2 * 1024 * 1024
+_ACTIVE_DOCUMENT_SECTION_RE = re.compile(
+    r"\b(?:paragraph|para|section|sec\.?|article|clause)\s*(?:no\.?\s*)?"
+    r"([0-9]+(?:[.\-][0-9]+)*)\b",
+    re.IGNORECASE,
+)
+_ACTIVE_DOCUMENT_FOLLOWUP_RE = re.compile(
+    r"\b(?:paragraph|para|section|sec\.?|article|clause|what\s+does\s+it\s+say|"
+    r"read\s+(?:that|it)|quote|exact\s+(?:wording|text))\b",
+    re.IGNORECASE,
+)
+_ACTIVE_DOCUMENT_WIRING_EXTRACT_RE = re.compile(
+    r"\b(?:extract|pull|show|open|find|get|locate|display|bring\s+up)\b.{0,40}\b"
+    r"(?:wiring|schematic|connection\s+diagram|terminal\s+diagram|diagram)\b"
+    r"|\b(?:wiring|schematic|connection)\s+(?:diagram|page|schematic|drawing)s?\b"
+    r"|\bextract\s+(?:it|that|the\s+(?:page|diagram|schematic|wiring))\b",
+    re.IGNORECASE,
+)
+_ACTIVE_DOCUMENT_RECOMMENDATION_RE = re.compile(
+    r"\b(?:who\s+(?:do|does|would)\s+(?:they|it)\s+recommend|recommend(?:ed|ation)?|preferred|manufacturer|vendor)\b",
+    re.IGNORECASE,
+)
+_LIBRARY_ROOT_ENV = "SMEDLEY_LIBRARY_ROOT"
+_DEFAULT_LIBRARY_ROOTS = (
+    "/Users/rick/Mounts/RAG_Pool/Library",
+    "/Volumes/RAG_Pool/Library",
+)
+_GROUNDED_CONTEXT_RE = re.compile(r"<retrieved_library_context>(.*?)</retrieved_library_context>", re.I | re.S)
+_GROUNDED_SIDECAR_RE = re.compile(r"\]\((?:https?://[^)]+)?/api/extensions/smedley-engineering/sidecar/(?:preview|doc)/([^)\s]+)\)", re.I)
+_ENGINEERING_TERMS = frozenset({
+    "allowable", "bearing", "cable", "card", "catalog", "channel", "circuit",
+    "compatible", "compatibility", "concrete", "criteria", "current", "design",
+    "electrical", "excavation", "failure", "foundation", "footing", "fuse",
+    "fused", "fusing", "hardness", "ifm", "input", "load", "material",
+    "mechanical", "module", "motor", "output", "pipe", "pump", "rating",
+    "rated", "ratio", "shaft", "spec", "stability", "structural", "terminal",
+    "voltage", "volt", "welding", "wiring",
+})
+_ENGINEERING_PRIORITY_TERMS = frozenset({
+    "hardness", "ratio", "minimum", "maximum", "allowable", "shall", "shaft",
+    "fuse", "fusing", "ifm", "rating", "voltage",
+})
+_ENGINEERING_QUESTION_RE = re.compile(r"\b(?:what|which|where|when|how|does|is|are|shall|should|need)\b|\?", re.I)
+_ELECTRICAL_FACT_RE = re.compile(
+    r"\b(?:fuse|fusing|fused|amp(?:ere)?s?|rating|rated|voltage|volts?|"
+    r"current|channel|compatible|compatibility|match(?:es|ing)?|"
+    r"ifm|interface\s+modules?|pre-?wired|cables?|terminals?|"
+    r"catalog|cat\.?\s*nos?|datasheets?|internal\s+fus|"
+    r"power\s+suppl(?:y|ies)|psu|chassis|watt(?:age)?s?|redundan(?:t|cy)|"
+    r"backplane|slot(?:s)?|sizing|thermal)\w*\b",
+    re.IGNORECASE,
+)
+_CHASSIS_POWER_TOPIC_RE = re.compile(
+    r"(?i)(?:\b(?:controllogix|allen[- ]?bradley|rockwell|1756)\b.{0,100}"
+    r"\b(?:power\s+suppl(?:y|ies)|psu|chassis|watt(?:age)?s?|redundan(?:t|cy)|"
+    r"backplane|slots?)\b|"
+    r"\b(?:power\s+suppl(?:y|ies)|psu|chassis|watt(?:age)?s?|redundan(?:t|cy)|"
+    r"backplane|slots?)\b.{0,100}\b(?:controllogix|allen[- ]?bradley|rockwell|1756)\b|"
+    r"\b(?:1756-P[AB]\w*|which\s+power\s+suppl(?:y|ies)|"
+    r"chassis\s+(?:power|sizing|selection)|"
+    r"power\s+suppl(?:y|ies)\s+for\s+(?:a\s+)?(?:controllogix|1756))\b)",
+)
+_SLOT_FOLLOWUP_RE = re.compile(
+    r"^\s*(\d{1,2})\s*-?\s*slots?\s*[.?]?\s*$",
+    re.IGNORECASE,
+)
+_COMPATIBILITY_FOLLOWUP_RE = re.compile(
+    r"\b(?:fusible\s+ifm|ifm|interface\s+module|pre-?wired\s+cable|cable|"
+    r"match|compatible|compatibility|wiring\s+system|1492|"
+    r"power\s+suppl(?:y|ies)|psu|chassis|redundan(?:t|cy)|watt(?:age)?s?|slots?)\b",
+    re.IGNORECASE,
+)
+_CHAIN_OF_THOUGHT_RE = re.compile(
+    r"(?i)(?:let me (?:search|check|try|pull|look)|based on my experience|"
+    r"the rag search|i(?:'| a)m going to search|hidden search|"
+    r"thinking out loud|as an ai)"
+)
+_PENDING_IFM_LOOKUP_ACTION = "retrieve_ifm_cable_for_part"
+_PENDING_USE_AB_INDEX_ACTION = "use_ab_wiring_index_for_part"
+_PENDING_CHASSIS_SIZING_ACTION = "retrieve_controllogix_chassis_power"
+_AB_WIRING_INDEX_SOURCE = (
+    "Vendor Data/Allen Bradley/"
+    "Wiring Diagram Knowledgebase Technote IDs by Part Number 1-11-2021.xlsx"
+)
+_AB_WIRING_INDEX_TITLE = (
+    "Wiring Diagram Knowledgebase Technote IDs by Part Number — lookup index"
+)
+_AB_WIRING_INDEX_SMB = (
+    "smb://192.168.0.25/RAG_Pool/Library/Vendor Data/Allen Bradley/"
+    "Wiring Diagram Knowledgebase Technote IDs by Part Number 1-11-2021.xlsx"
+)
+_AB_DIGITAL_IO_MANUAL_SOURCES = (
+    "Vendor Data/Allen Bradley/1756/1756-um058_-en-p.pdf",
+)
+_AB_CHASSIS_POWER_MANUAL_SOURCES = (
+    "Vendor Data/Allen Bradley/1756-um001_-en-p.pdf",
+    "Vendor Data/Allen Bradley/1756/1756-um001_-en-p.pdf",
+)
+_AB_ANALOG_IO_MANUAL_RE = re.compile(
+    r"(?:1756-um009|um009_|analog\s+i/?o|analog\s+input)",
+    re.IGNORECASE,
+)
+# Digital discrete catalog bodies vs analog IF/OF families.
+_AB_DIGITAL_BODY_RE = re.compile(
+    r"^1756-(?:IA|IB|IC|IH|IV|OA|OB|OC|OG|OH|OV|OW|OX)\d",
+    re.IGNORECASE,
+)
+_AB_ANALOG_BODY_RE = re.compile(
+    r"^1756-(?:IF|IR|IT|OF|OY)\d",
+    re.IGNORECASE,
+)
+_SPECIFICATION_NUMBER_RE = re.compile(
+    r"\b(?:spec(?:ification)?\s*(?:number|no\.?|#)|(?:general\s+)?(?:wire|cable|piping|hvac)\s+(?:spec|specification))\b",
+    re.IGNORECASE,
+)
+
+
+class _PreviewTextExtractor(HTMLParser):
+    """Convert the trusted loopback preview HTML into bounded plain text."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_data(self, data: str) -> None:
+        if data and data.strip():
+            self.parts.append(data.strip())
+
+    def text(self) -> str:
+        return "\n".join(self.parts)
+
+
+def document_route_enabled() -> bool:
+    """Opt-out via HERMES_WEBUI_SMEDLEY_DOC_ROUTE=0/false/off."""
+    raw = (os.environ.get(DOC_ROUTE_ENABLED_ENV) or "1").strip().lower()
+    return raw not in {"0", "false", "off", "no"}
+
+
+def _is_ask_jarvis_traffic(text: object) -> bool:
+    """Ask Jarvis turns must not auto-open the Smedley engineering document sidecar."""
+    try:
+        from api.ask_jarvis_route import is_ask_jarvis_command
+
+        return bool(is_ask_jarvis_command(str(text or "")))
+    except Exception:
+        return bool(
+            re.search(
+                r"(?i)\bask\s+jarvis\b",
+                str(text or ""),
+            )
+        )
+
+
+def is_document_request(text: object) -> bool:
+    """True when the user is asking to pull/find a document or get a doc link."""
+    msg = str(text or "").strip()
+    if not msg or len(msg) > 4000:
+        return False
+    # Biggy → Ask Jarvis: never treat as automatic Smedley document sidecar request.
+    if _is_ask_jarvis_traffic(msg):
+        return False
+    # Slash commands and obvious non-doc tooling stay on ordinary chat.
+    if msg.startswith("/"):
+        return False
+    # Already-grounded RAG turns (extension retrieveFromComposer) stay on chat.
+    if "<retrieved_library_context>" in msg:
+        return False
+    # A request for a governing project specification is a document lookup even
+    # when it does not include a verb such as "find" or "open".
+    if _SPECIFICATION_NUMBER_RE.search(msg):
+        return True
+    for pattern in _DOCUMENT_REQUEST_RES:
+        if pattern.search(msg):
+            return True
+    # Bare "link to 02315" / "document 02-315 please"
+    if _DOCNUM.search(msg) and re.search(
+        r"\b(?:document|doc|spec|pdf|link|url|preview|pull|find|open)\b",
+        msg,
+        re.IGNORECASE,
+    ):
+        return True
+    return False
+
+
+def is_specification_number_request(text: object) -> bool:
+    return bool(_SPECIFICATION_NUMBER_RE.search(str(text or "")))
+
+
+def project_spec_lookup_query(query: object) -> str:
+    """Remove conversational filler that otherwise biases vector search to NEC."""
+    words = re.findall(r"[A-Za-z0-9]+", str(query or ""))
+    ignored = {"what", "which", "is", "are", "the", "a", "an", "for", "of", "on", "that", "i", "need", "looking"}
+    concise = " ".join(word for word in words if word.lower() not in ignored)
+    return f"GP Brewton {concise}".strip()
+
+
+def prioritize_gp_brewton_spec_matches(matches: object, query: object) -> list[dict[str, Any]]:
+    """Put matching Brewton project specs ahead of generic reference material."""
+    if not isinstance(matches, list):
+        return []
+    query_tokens = set(re.findall(r"[a-z0-9]+", str(query or "").lower()))
+    query_tokens -= {"what", "which", "the", "for", "and", "general", "spec", "specification", "number", "volt", "volts", "feeder", "feeders"}
+
+    def key(item: object) -> tuple[int, int]:
+        source = str(item.get("source") or "") if isinstance(item, dict) else ""
+        source_l = source.lower()
+        # Match "GP Brewton/..." at path start and ".../GP Brewton/..." mid-path.
+        is_gp = int(
+            "gp brewton" in source_l
+            or "brewton specs" in source_l
+        )
+        title_tokens = set(re.findall(r"[a-z0-9]+", source.rsplit("/", 1)[-1].lower()))
+        return (is_gp, len(query_tokens & title_tokens))
+
+    cleaned = [item for item in matches if isinstance(item, dict)]
+    return sorted(cleaned, key=key, reverse=True)
+
+
+def _coerce_public_origin_candidate(raw: object) -> str:
+    """Normalize one origin candidate, or '' when unset/invalid/forbidden."""
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    if "://" not in value:
+        value = "https://" + value
+    try:
+        parts = urllib.parse.urlsplit(value)
+    except Exception:
+        return ""
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return ""
+    host = (parts.hostname or "").lower()
+    port = parts.port
+    # Never emit loopback / localhost absolute links (break when opened via TD).
+    if host in {"127.0.0.1", "localhost", "::1"}:
+        return ""
+    # Never treat corpus-serve 192.168.0.15:8789 as the WebUI origin.
+    if host == "192.168.0.15" and (port == 8789 or port is None):
+        return ""
+    return f"{parts.scheme}://{parts.netloc}".rstrip("/")
+
+
+def normalize_public_origin(origin: object = "") -> str:
+    """Return a scheme://host[:port] origin, or '' when unset/invalid.
+
+    Prefer HERMES_WEBUI_SMEDLEY_PUBLIC_ORIGIN when set so persisted sidecar
+    links stay absolute to Smedley's WebUI even if the request Host is
+    loopback or a different workstation (TD) origin.
+    """
+    env_raw = (os.environ.get(PUBLIC_ORIGIN_ENV) or "").strip()
+    for candidate in (env_raw, str(origin or "").strip()):
+        normalized = _coerce_public_origin_candidate(candidate)
+        if normalized:
+            return normalized
+    return ""
+
+
+def library_relpath_from_source(source: object = "") -> str:
+    """Return a clean library-relative path; strip duplicated sidecar route prefixes."""
+    rel = str(source or "").replace("\\", "/").strip()
+    if not rel or rel == "?":
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(rel)
+        if parsed.scheme in ("http", "https") and parsed.path:
+            rel = parsed.path + (("?" + parsed.query) if parsed.query else "")
+    except Exception:
+        pass
+    rel = rel.split("?")[0].split("#")[0]
+    # Peel every leading sidecar route prefix (handles doubled /doc/.../doc/...).
+    while True:
+        nxt = _SIDECAR_REL_PREFIX_RE.sub("", rel, count=1)
+        if nxt == rel:
+            break
+        rel = nxt
+    # If a sidecar marker remains mid-string, keep only the path after the last route.
+    low = rel.lower()
+    last_doc = low.rfind("/api/extensions/smedley-engineering/sidecar/doc/")
+    last_prev = low.rfind("/api/extensions/smedley-engineering/sidecar/preview/")
+    last = max(last_doc, last_prev)
+    if last >= 0:
+        route = "doc" if last_doc >= last_prev else "preview"
+        prefix = f"/api/extensions/smedley-engineering/sidecar/{route}/"
+        rel = rel[last + len(prefix) :]
+    try:
+        rel = urllib.parse.unquote(rel)
+    except Exception:
+        pass
+    return rel.strip().lstrip("/").replace("\\", "/")
+
+
+def sidecar_preview_path(source: object) -> str:
+    """Deterministic relative WebUI sidecar path for a corpus source."""
+    rel = library_relpath_from_source(source)
+    if not rel or rel == "?":
+        return ""
+    ext = os.path.splitext(rel)[1].lower()
+    route = "doc" if ext == ".pdf" else "preview"
+    return f"{WEBUI_CORPUS_SIDECAR}/{route}/{urllib.parse.quote(rel)}"
+
+
+def _collapse_duplicated_sidecar_path(path: object) -> str:
+    """Idempotently collapse .../sidecar/doc/.../sidecar/doc/... into one route."""
+    raw = str(path or "").strip()
+    if not raw:
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+        path_only = parsed.path if parsed.scheme in ("http", "https") else raw.split("?")[0].split("#")[0]
+        query = ("?" + parsed.query) if parsed.scheme in ("http", "https") and parsed.query else ""
+        if parsed.scheme not in ("http", "https") and "?" in raw:
+            query = "?" + raw.split("?", 1)[1].split("#")[0]
+    except Exception:
+        path_only = raw.split("?")[0].split("#")[0]
+        query = ""
+    rel = library_relpath_from_source(path_only)
+    if not rel:
+        return ""
+    rebuilt = sidecar_preview_path(rel)
+    if not rebuilt:
+        return ""
+    return rebuilt + query
+
+
+def _is_sidecar_preview_or_doc_path(path: object) -> bool:
+    raw = str(path or "").split("?")[0].split("#")[0]
+    if SIDECAR_HREF_RE.match(raw):
+        return True
+    # Doubled route still counts as a sidecar path for collapse.
+    return bool(
+        re.search(
+            r"(?i)/api/extensions/smedley-engineering/sidecar/(?:preview|doc)/",
+            raw,
+        )
+    )
+
+
+def absolutize_sidecar_href(path_or_url: object, *, public_origin: object = "") -> str:
+    """Canonical absolute sidecar URL when origin is known; else relative path.
+
+    Only preview|doc routes are accepted. Unsupported paths such as
+    ``/sidecar/search?q=`` are rejected (empty string) so callers fall back to
+    a source-derived preview/doc link. Already-prefixed and doubled routes are
+    collapsed before absolutizing (idempotent).
+    """
+    raw = str(path_or_url or "").strip()
+    if not raw:
+        return ""
+    origin = normalize_public_origin(public_origin)
+    # Already absolute sidecar — collapse duplicates, keep preview|doc only.
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+        if parsed.scheme in ("http", "https") and _is_sidecar_preview_or_doc_path(
+            parsed.path
+        ):
+            collapsed = _collapse_duplicated_sidecar_path(raw)
+            if not collapsed:
+                return ""
+            if origin:
+                # collapsed may already be absolute if origin was baked in — normalize to path
+                cparse = urllib.parse.urlsplit(collapsed)
+                path = cparse.path if cparse.scheme else collapsed
+                if not path.startswith("/"):
+                    path = "/" + path
+                q = ("?" + cparse.query) if cparse.query else ""
+                return origin + path + q
+            cparse = urllib.parse.urlsplit(collapsed)
+            if cparse.scheme:
+                return cparse.path + (("?" + cparse.query) if cparse.query else "")
+            return collapsed
+    except Exception:
+        pass
+    collapsed = _collapse_duplicated_sidecar_path(raw) if _is_sidecar_preview_or_doc_path(raw) else ""
+    if not collapsed:
+        if not _is_sidecar_preview_or_doc_path(raw):
+            return ""
+        collapsed = _collapse_duplicated_sidecar_path(raw)
+    if not collapsed:
+        return ""
+    path = collapsed.split("#")[0]
+    cparse = urllib.parse.urlsplit(path)
+    if cparse.scheme in ("http", "https"):
+        path = cparse.path + (("?" + cparse.query) if cparse.query else "")
+    if not path.startswith("/"):
+        path = "/" + path
+    if origin:
+        return origin + path
+    return path
+
+
+def normalize_corpus_url(
+    path_or_url: object, *, source: object = "", public_origin: object = ""
+) -> str:
+    """Rewrite LAN/corpus-serve/search URLs to sidecar preview|doc; never lan_url.
+
+    Idempotent: already-canonical sidecar hrefs (relative, same-origin, Tailscale,
+    or accidentally double-prefixed) collapse to one preview|doc route.
+    """
+    raw = str(path_or_url or "").strip()
+    origin = normalize_public_origin(public_origin)
+    src_rel = library_relpath_from_source(source)
+    if not raw:
+        return absolutize_sidecar_href(sidecar_preview_path(src_rel), public_origin=origin)
+    # Unsupported search UI citations → source-derived preview/doc when possible.
+    if SIDECAR_SEARCH_PATH_RE.search(raw):
+        if src_rel:
+            return absolutize_sidecar_href(
+                sidecar_preview_path(src_rel), public_origin=origin
+            )
+        return ""
+    lan = LAN_HOST_RE.match(raw) or LAN_HOST_RE.search(raw)
+    if lan:
+        rel = (lan.group(1) or "").split("?")[0].split("#")[0]
+        try:
+            rel = urllib.parse.unquote(rel)
+        except Exception:
+            pass
+        rel = library_relpath_from_source(rel.lstrip("/").replace("\\", "/"))
+        return absolutize_sidecar_href(
+            sidecar_preview_path(rel or src_rel), public_origin=origin
+        )
+    # Any sidecar-shaped path/URL (including doubled) → collapse once.
+    if _is_sidecar_preview_or_doc_path(raw) or _SIDECAR_ROUTE_PREFIX_RE.search(raw):
+        return absolutize_sidecar_href(raw.split("#")[0], public_origin=origin)
+    # Absolute non-sidecar URL with sidecar path segment.
+    try:
+        parsed = urllib.parse.urlsplit(raw)
+        if parsed.path.startswith(WEBUI_CORPUS_SIDECAR + "/"):
+            if source or src_rel:
+                return absolutize_sidecar_href(
+                    sidecar_preview_path(src_rel), public_origin=origin
+                )
+            return ""
+    except Exception:
+        pass
+    # Bare library-relative path in the URL field.
+    if re.search(r"\.(?:pdf|docx?|xlsx?|pptx?|txt|md)$", raw, re.I) and "://" not in raw:
+        return absolutize_sidecar_href(
+            sidecar_preview_path(library_relpath_from_source(raw) or src_rel),
+            public_origin=origin,
+        )
+    if src_rel:
+        return absolutize_sidecar_href(sidecar_preview_path(src_rel), public_origin=origin)
+    return ""
+
+
+def markdown_link_for_source(
+    source: object, url: object = "", *, public_origin: object = ""
+) -> str:
+    rel = library_relpath_from_source(source) or str(source or "").strip()
+    href = normalize_corpus_url(url, source=rel, public_origin=public_origin) or absolutize_sidecar_href(
+        sidecar_preview_path(rel), public_origin=public_origin
+    )
+    if not href:
+        return rel or "?"
+    fname = rel.rsplit("/", 1)[-1] or rel
+    return f"📄 [{fname}]({href})"
+
+
+def neutralize_lan_url_text(text: object, *, public_origin: object = "") -> str:
+    """Strip/rewrite any 192.168.0.15:8789 (and loopback :8789) citations."""
+    value = str(text or "")
+    if not value:
+        return ""
+    origin = normalize_public_origin(public_origin)
+
+    def _md_sub(match: re.Match[str]) -> str:
+        next_href = normalize_corpus_url(match.group(1), public_origin=origin)
+        return f"]({next_href})" if next_href else "]()"
+
+    value = LAN_MARKDOWN_HREF_RE.sub(_md_sub, value)
+    value = LAN_HOST_RE.sub(
+        lambda m: normalize_corpus_url(m.group(0), public_origin=origin) or "", value
+    )
+    value = re.sub(r"lan_url\s*[:=]\s*\S+", "", value, flags=re.IGNORECASE)
+    # Promote relative sidecar markdown hrefs to absolute when origin known.
+    if origin:
+        value = re.sub(
+            r"\]\((/api/extensions/smedley-engineering/sidecar/(?:preview|doc)/[^)]+)\)",
+            lambda m: f"]({absolutize_sidecar_href(m.group(1), public_origin=origin)})",
+            value,
+        )
+    return value.strip()
+
+
+def neutralize_match(match: object, *, public_origin: object = "") -> dict[str, Any]:
+    """Return a match dict with sidecar url/markdown and lan_url removed."""
+    if not isinstance(match, dict):
+        return {}
+    origin = normalize_public_origin(public_origin)
+    source = str(match.get("source") or "").strip()
+    url = normalize_corpus_url(
+        match.get("url") or "", source=source, public_origin=origin
+    ) or absolutize_sidecar_href(sidecar_preview_path(source), public_origin=origin)
+    md = neutralize_lan_url_text(match.get("markdown") or "", public_origin=origin)
+    if not md or "192.168.0.15:8789" in md or "lan_url" in md.lower():
+        md = markdown_link_for_source(source, url, public_origin=origin)
+    else:
+        # Ensure href is sidecar even when markdown lacked an explicit LAN URL.
+        md = re.sub(
+            r"\]\((https?://[^)]+/api/extensions/smedley-engineering/sidecar/(?:preview|doc)/[^)]+)\)",
+            lambda m: f"]({normalize_corpus_url(m.group(1), source=source, public_origin=origin) or m.group(1)})",
+            md,
+        )
+        md = re.sub(
+            r"\]\((/api/extensions/smedley-engineering/sidecar/(?:preview|doc)/[^)]+)\)",
+            lambda m: f"]({normalize_corpus_url(m.group(1), source=source, public_origin=origin) or m.group(1)})",
+            md,
+        )
+        if "](" not in md:
+            md = markdown_link_for_source(source, url, public_origin=origin)
+    out = {
+        "source": source,
+        "snippet": str(match.get("snippet") or ""),
+        "url": url,
+        "markdown": md,
+    }
+    if isinstance(match.get("score"), (int, float)) and not isinstance(match.get("score"), bool):
+        out["score"] = float(match["score"])
+    if match.get("plato_unc"):
+        out["plato_unc"] = str(match.get("plato_unc"))
+    # Preserve TDC3000 custom-index identity metadata through Smedley → Jarvis.
+    for key in (
+        "match_kind",
+        "part_number",
+        "observed_part",
+        "document_identity",
+        "revision",
+        "page_hint",
+        "chunk_hint",
+        "index_href",
+        "index_formats",
+        "retrieval",
+    ):
+        if key in match and match.get(key) is not None:
+            out[key] = match.get(key)
+    # Explicitly drop lan_url — never forward corpus-serve fallbacks.
+    return out
+
+
+def neutralize_retrieve_payload(
+    payload: object, *, public_origin: object = ""
+) -> dict[str, Any]:
+    """Rewrite a /rag/retrieve JSON body so clients never see LAN URLs."""
+    if not isinstance(payload, dict):
+        return {"matches": [], "collection": ""}
+    origin = normalize_public_origin(public_origin)
+    matches = payload.get("matches") if isinstance(payload.get("matches"), list) else []
+    out = {
+        "matches": [
+            neutralize_match(m, public_origin=origin) for m in matches if isinstance(m, dict)
+        ],
+        "collection": str(payload.get("collection") or ""),
+    }
+    if payload.get("retrieval"):
+        out["retrieval"] = str(payload.get("retrieval"))
+    return out
+
+
+def classify_document_kind(source: object = "", title: object = "") -> str:
+    """Return manual | index | other for operator presentation gates."""
+    src = str(source or "").replace("\\", "/").strip()
+    ttl = str(title or "").strip() or src.rsplit("/", 1)[-1]
+    ext = os.path.splitext(src)[1].lower() or os.path.splitext(ttl)[1].lower()
+    blob = f"{src} {ttl}".lower()
+    if ext in _INDEX_EXTS or _INDEX_TITLE_RE.search(ttl) or "knowledgebase" in blob:
+        return "index"
+    if ext in _MANUAL_EXTS:
+        return "manual"
+    return "other"
+
+
+def infer_query_vendor(query: object) -> str:
+    """Best-effort vendor family from the operator query."""
+    msg = str(query or "")
+    low = msg.lower()
+    if "honeywell" in low or "tdc3000" in low or "tdc 3000" in low or "experion" in low or _HW_PART.search(msg):
+        return "honeywell"
+    if "allen" in low or "bradley" in low or "rockwell" in low or _AB_PART.search(msg):
+        return "allen_bradley"
+    return ""
+
+
+def infer_source_vendor(source: object = "", title: object = "") -> str:
+    blob = f"{source or ''} {title or ''}".lower().replace("\\", "/")
+    if "honeywell" in blob or "tdc3000" in blob or "/tdc/" in blob or "experion" in blob or "experian pks" in blob:
+        return "honeywell"
+    if "allen bradley" in blob or "allen-bradley" in blob or "rockwell" in blob or "/1756/" in blob:
+        return "allen_bradley"
+    return ""
+
+
+def vendor_compatible(query_vendor: str, source_vendor: str) -> bool:
+    if not query_vendor or not source_vendor:
+        return True
+    return query_vendor == source_vendor
+
+
+def extract_query_part_numbers(query: object) -> list[str]:
+    """Catalog/part numbers explicitly present in the operator query."""
+    msg = str(query or "")
+    found: list[str] = []
+    for rx in (_HW_PART, _AB_PART):
+        for m in rx.finditer(msg):
+            found.append(re.sub(r"\s+", "-", m.group(0).upper()))
+    return list(dict.fromkeys(found))
+
+
+def _parts_compatible(query_part: object, candidate_part: object) -> bool:
+    q = str(query_part or "").strip().upper()
+    c = str(candidate_part or "").strip().upper()
+    if not q or not c:
+        return False
+    q_needles = set(_part_match_needles(q))
+    c_needles = set(_part_match_needles(c))
+    return bool(q_needles & c_needles) or c.lower() in q.lower() or q.lower() in c.lower()
+
+
+def manual_relevant_to_query_parts(match: dict[str, Any], query_parts: list[str]) -> bool:
+    """Reject cross-family manuals (e.g. 1771 PDF for a 1756-OW16I ask)."""
+    if not query_parts:
+        return True
+    pn = str(match.get("part_number") or "").strip()
+    observed = str(match.get("observed_part") or "").strip()
+    if pn and any(_parts_compatible(q, pn) for q in query_parts):
+        return True
+    if observed and any(_parts_compatible(q, observed) for q in query_parts):
+        return True
+    kind = str(match.get("match_kind") or "")
+    if kind == "exact" and str(match.get("retrieval") or "") == "tdc3000_custom_index":
+        # TDC custom-index exact hits are already part-resolved upstream.
+        return True
+    blob = " ".join(
+        [
+            str(match.get("source") or ""),
+            str(match.get("snippet") or ""),
+            _match_title(match),
+            pn,
+            observed,
+        ]
+    )
+    return any(_text_mentions_part(blob, q) for q in query_parts)
+
+
+def _match_title(match: dict[str, Any]) -> str:
+    ident = match.get("document_identity") if isinstance(match.get("document_identity"), dict) else {}
+    return str((ident or {}).get("title") or match.get("source") or "").rsplit("/", 1)[-1]
+
+
+def select_operator_document_match(
+    matches: object, *, query: object = ""
+) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+    """Pick operator-facing manual vs optional index; enforce vendor/part gates."""
+    items = [m for m in (matches if isinstance(matches, list) else []) if isinstance(m, dict)]
+    q_vendor = infer_query_vendor(query)
+    query_parts = extract_query_part_numbers(query)
+    query_tokens = set(re.findall(r"[a-z0-9]+", str(query or "").lower()))
+    query_tokens -= {
+        "open", "the", "a", "an", "doc", "dock", "document", "please", "lets",
+        "need", "user", "manual", "wiring", "schematics", "schematic", "for",
+        "honeywell", "iota", "find", "pull", "link", "show", "want", "can",
+        "you", "me", "next", "page", "extract",
+    }
+    manuals: list[dict[str, Any]] = []
+    indexes: list[dict[str, Any]] = []
+    for match in items:
+        source = str(match.get("source") or "").replace("\\", "/")
+        title = _match_title(match)
+        kind = classify_document_kind(source, title)
+        src_vendor = infer_source_vendor(source, title)
+        if not vendor_compatible(q_vendor, src_vendor):
+            continue
+        if kind == "manual":
+            if not manual_relevant_to_query_parts(match, query_parts):
+                continue
+            manuals.append(match)
+        elif kind == "index":
+            indexes.append(match)
+
+    def _rank_key(match: dict[str, Any]) -> tuple[int, int, int, float]:
+        exact = 1 if str(match.get("match_kind") or "") == "exact" else 0
+        tdc = 1 if str(match.get("retrieval") or "") == "tdc3000_custom_index" else 0
+        title = _match_title(match)
+        source = str(match.get("source") or "")
+        blob_tokens = set(re.findall(r"[a-z0-9]+", f"{title} {source}".lower()))
+        overlap = len(query_tokens & blob_tokens) if query_tokens else 0
+        try:
+            score = float(match.get("score") or 0.0)
+        except Exception:
+            score = 0.0
+        return (exact, tdc, overlap, score)
+
+    manuals.sort(key=_rank_key, reverse=True)
+    indexes.sort(key=_rank_key, reverse=True)
+    return (manuals[0] if manuals else None, indexes[0] if indexes else None)
+
+
+def _top_document_match(matches: object) -> dict[str, Any] | None:
+    """Backward-compatible top match — manuals only (never xlsx/index)."""
+    manual, _index = select_operator_document_match(matches, query="")
+    if manual:
+        return manual
+    # Legacy fallback: first PDF/DOC with URL, still never an index/xlsx.
+    items = matches if isinstance(matches, list) else []
+    for match in items:
+        if not isinstance(match, dict) or not match.get("url"):
+            continue
+        source = str(match.get("source") or "")
+        if classify_document_kind(source, _match_title(match)) != "manual":
+            continue
+        return match
+    return None
+
+
+def build_operator_document_reply(
+    matches: object, *, query: object = "", public_origin: object = ""
+) -> tuple[str, dict[str, Any] | None]:
+    """Clean operator-facing PA answer + optional pending_action payload.
+
+    Returns (reply, pending_action_dict_or_None).
+    """
+    origin = normalize_public_origin(public_origin)
+    manual, index = select_operator_document_match(matches, query=query)
+    q = str(query or "").lower()
+    wants_wiring = any(w in q for w in ("wiring", "schematic", "connection", "pinout"))
+
+    if not isinstance(manual, dict) and isinstance(index, dict):
+        item = neutralize_match(index, public_origin=origin)
+        title = _match_title(item) or "lookup index"
+        href = str(item.get("url") or "").strip()
+        lines = [
+            f"I found a **lookup index**, not an engineering installation manual:",
+            "",
+            f"**{title}**",
+            "",
+            "This file is a part-number knowledgebase/index. I will not treat it as a manual "
+            "and I cannot extract a wiring schematic page from it.",
+        ]
+        if href:
+            lines.extend(["", f"[Open index]({href})"])
+        lines.extend(
+            [
+                "",
+                "Provide a document number or a more specific part/vendor cue so I can resolve the actual manual.",
+            ]
+        )
+        return "\n".join(lines), None
+
+    if not isinstance(manual, dict):
+        return (
+            "I could not find a matching engineering-library manual for that request. "
+            "Try a document number (for example 02-315) or a Honeywell part number.",
+            None,
+        )
+
+    item = neutralize_match(manual, public_origin=origin)
+    ident = item.get("document_identity") if isinstance(item.get("document_identity"), dict) else {}
+    title = str((ident or {}).get("title") or "").strip() or str(item.get("source") or "manual").rsplit("/", 1)[-1]
+    doc_no = str((ident or {}).get("doc_no") or item.get("revision") or "").strip()
+    part = str(item.get("part_number") or "").strip()
+    kind = str(item.get("match_kind") or "").strip()
+    href = str(item.get("url") or "").strip()
+    page = item.get("page_hint")
+    identity = f"**{title}**" + (f" (**{doc_no}**)" if doc_no else "")
+    pending = None
+
+    if kind == "near_family":
+        observed = str(item.get("observed_part") or "").strip()
+        lines = [
+            f"I found a **near-family** manual, not an exact substitute for **{part or 'the requested part'}**"
+            + (f" (related: {observed})." if observed else "."),
+            "",
+            identity,
+            "",
+            f"[Open manual]({href})" if href else "",
+            "",
+            "Want me to keep searching for an exact part match?",
+        ]
+        return "\n".join(line for line in lines if line is not None).strip(), None
+
+    who = f" for **{part}**" if part else ""
+    lines = [
+        f"I found the engineering-library manual{who}:",
+        "",
+        identity,
+    ]
+    if wants_wiring:
+        if page not in (None, ""):
+            lines.extend(["", f"Verified wiring-schematic location: page **{page}**."])
+        else:
+            lines.extend(
+                [
+                    "",
+                    "The part appears in this manual, but a specific wiring-schematic page "
+                    "is not verified yet — page extraction is still needed.",
+                ]
+            )
+    if href:
+        lines.extend(["", f"[Open manual]({href})"])
+    if wants_wiring and classify_document_kind(item.get("source"), title) == "manual":
+        lines.extend(["", "Want me to extract the wiring schematic page next?"])
+        pending = {
+            "action": _PENDING_EXTRACT_ACTION,
+            "source": str(item.get("source") or ""),
+            "title": title,
+            "part_number": part or None,
+            "doc_no": doc_no or None,
+            "offered_at": None,
+        }
+    return "\n".join(lines), pending
+
+
+def build_retrieval_receipt(matches: object, *, query: object = "") -> dict[str, Any]:
+    """Internal provenance only — never dump into operator chat prose."""
+    manual, index = select_operator_document_match(matches, query=query)
+    top = manual or index or {}
+    ident = top.get("document_identity") if isinstance(top.get("document_identity"), dict) else {}
+    return {
+        "schema": "smedley.document_route_receipt.v1",
+        "query": str(query or "").strip(),
+        "match_kind": top.get("match_kind"),
+        "part_number": top.get("part_number"),
+        "observed_part": top.get("observed_part"),
+        "document_identity": ident or None,
+        "revision": top.get("revision"),
+        "page_hint": top.get("page_hint"),
+        "index_href": top.get("index_href"),
+        "index_formats": top.get("index_formats"),
+        "source": top.get("source"),
+        "url": top.get("url"),
+        "retrieval": top.get("retrieval"),
+        "score": top.get("score"),
+        "document_kind": classify_document_kind(top.get("source"), _match_title(top)) if top else None,
+        "query_vendor": infer_query_vendor(query) or None,
+        "source_vendor": infer_source_vendor(top.get("source"), _match_title(top)) if top else None,
+        "index_source": (index or {}).get("source") if index and manual else None,
+    }
+
+
+def build_deterministic_document_reply(
+    matches: object, *, query: object = "", public_origin: object = ""
+) -> str:
+    """Operator-visible document-route reply (clean PA answer)."""
+    reply, _pending = build_operator_document_reply(
+        matches, query=query, public_origin=public_origin
+    )
+    return reply
+
+
+def build_compact_spoken_document_reply(
+    matches: object, *, query: object = ""
+) -> str:
+    """Natural TTS only — no markdown, URLs, scores, or retrieval tokens."""
+    manual, index = select_operator_document_match(matches, query=query)
+    if not isinstance(manual, dict) and isinstance(index, dict):
+        title = _match_title(index) or "a lookup index"
+        return (
+            f"I found a lookup index, {title}, not an installation manual. "
+            "I cannot extract a wiring schematic from an index."
+        )
+    top = manual
+    if not isinstance(top, dict):
+        return "I could not find that manual in the engineering library."
+    ident = top.get("document_identity") if isinstance(top.get("document_identity"), dict) else {}
+    title = str((ident or {}).get("title") or "").strip() or "the engineering manual"
+    doc_no = str((ident or {}).get("doc_no") or top.get("revision") or "").strip()
+    part = str(top.get("part_number") or "").strip()
+    kind = str(top.get("match_kind") or "").strip()
+    # Speak document numbers naturally: PM20-520 -> PM 20-520
+    doc_spoken = re.sub(r"([A-Z]{1,4})(\d{2})-(\d{3})", r"\1 \2-\3", doc_no) if doc_no else ""
+    if kind == "near_family":
+        return (
+            f"I found a near-family manual, {title}"
+            + (f", document {doc_spoken}" if doc_spoken else "")
+            + f", not an exact substitute for {part or 'the requested part'}. "
+            "The manual is on screen."
+        )
+    who = f" for {part}" if part else ""
+    bits = [f"I found {title}{who}."]
+    if doc_spoken:
+        bits = [f"I found {title}, document {doc_spoken}{who}."]
+    q = str(query or "").lower()
+    if any(w in q for w in ("wiring", "schematic", "connection", "pinout")):
+        page = top.get("page_hint")
+        if page not in (None, ""):
+            bits.append(f"Wiring schematic is on page {page}.")
+        else:
+            bits.append("The wiring schematic page still needs extraction.")
+    bits.append("The manual is on screen.")
+    return " ".join(bits)
+
+
+# Spoken-output sanitizer: keep visible markdown/HTML links intact in chat;
+# strip TTS-hostile URLs, link markup (including filenames/titles), scores,
+# document-route chrome, UI metadata, and raw retrieval payloads.
+_DOC_ROUTE_HEADER_RE = re.compile(
+    r"(?im)^[ \t]*Document links(?:\s+for\s+[“\"][^”\"]*[”\"])?"
+    r"(?:\s*\(sidecar preview\))?\s*:?[ \t]*\n?"
+)
+_DOC_ROUTE_HEADER_INLINE_RE = re.compile(
+    r"(?i)\bDocument links(?:\s+for\s+[“\"][^”\"]*[”\"])?"
+    r"(?:\s*\(sidecar preview\))?\s*:?"
+)
+_SCORE_META_RE = re.compile(r"\(\s*score\s*=\s*[-+]?\d*\.?\d+\s*\)", re.IGNORECASE)
+_MD_LINK_DROP_RE = re.compile(r"!\[[^\]]*\]\([^)]+\)|\[[^\]]*\]\([^)]+\)")
+_RAW_URL_RE = re.compile(r"https?://[^\s<>\]\)\"']+", re.IGNORECASE)
+_SIDECAR_PATH_RE = re.compile(
+    r"(?i)/api/extensions/smedley-engineering/sidecar/(?:preview|doc)/[^\s<>\]\)\"']*"
+)
+_BARE_FILENAME_RE = re.compile(
+    r"\b[\w./\\-]+\.(?:pdf|docx?|xlsx?|pptx?|txt|md)\b",
+    re.IGNORECASE,
+)
+_JSON_OBJECT_RE = re.compile(r"\{[^{}]*\}")
+_RETRIEVAL_KEY_RE = re.compile(
+    r'(?i)"(?:matches|collection|lan_url|snippet|source|score|url|markdown)"\s*:'
+)
+_RETRIEVAL_FIELD_RE = re.compile(
+    r"(?i)\b(?:matches|collection|snippet|source|topk|library_only|"
+    r"snippet_chars)\b\s*[:=]\s*",
+)
+_UI_META_RES = (
+    re.compile(r"(?i)\b(?:sidecar preview|lan_url)\b\s*:?"),
+    re.compile(r"(?i)\b(?:card title|source pill|owner\s*ack)\b\s*:?"),
+)
+
+
+def _strip_retrieval_payload(value: str) -> str:
+    """Drop raw RAG/retrieve JSON blobs and leftover retrieval field chrome."""
+    text = value
+    for _ in range(8):
+        changed = False
+
+        def _drop_retrieval_object(match: re.Match[str]) -> str:
+            nonlocal changed
+            body = match.group(0)
+            if _RETRIEVAL_KEY_RE.search(body):
+                changed = True
+                return " "
+            return body
+
+        nxt = _JSON_OBJECT_RE.sub(_drop_retrieval_object, text)
+        if nxt == text and not changed:
+            break
+        text = nxt
+    text = _RETRIEVAL_FIELD_RE.sub(" ", text)
+    # Fail closed: any residue still shaped like a retrieve payload is not prose.
+    if _RETRIEVAL_KEY_RE.search(text) or re.search(
+        r'(?i)\b(?:matches|collection)\b\s*[:=]', text
+    ):
+        return ""
+    return text
+
+
+def sanitize_for_spoken_output(text: object) -> str:
+    """Return voice-safe answer prose only — no URLs, filenames, or UI chrome.
+
+    Visible chat replies keep clickable markdown links. This sanitizer is the
+    spoken-output twin used before TTS (document-route replies and ordinary
+    assistant text that cites corpus links). Filenames and link titles are
+    dropped so PTT speaks the answer body, not retrieval chrome.
+    """
+    value = str(text or "")
+    if not value.strip():
+        return ""
+
+    # Drop document-route / card-title boilerplate before link rewriting.
+    value = _DOC_ROUTE_HEADER_RE.sub(" ", value)
+    value = _DOC_ROUTE_HEADER_INLINE_RE.sub(" ", value)
+    value = _SCORE_META_RE.sub(" ", value)
+    for pattern in _UI_META_RES:
+        value = pattern.sub(" ", value)
+
+    # Raw retrieval JSON / field dumps must never be spoken.
+    value = _strip_retrieval_payload(value)
+    if not value.strip():
+        return ""
+
+    # Markdown links and images → drop entirely (no filename / title spoken).
+    value = _MD_LINK_DROP_RE.sub(" ", value)
+
+    # Any remaining raw WebUI / absolute URLs must not be spoken.
+    value = _RAW_URL_RE.sub(" ", value)
+    value = _SIDECAR_PATH_RE.sub(" ", value)
+
+    # Bare corpus filenames left after link stripping (list rows, etc.).
+    value = _BARE_FILENAME_RE.sub(" ", value)
+
+    # Light markdown / chrome cleanup (parity with client _stripForTTS).
+    value = re.sub(r"(?m)^[ \t]*#{1,6}\s+", "", value)
+    value = re.sub(r"`[^`]+`", " ", value)
+    value = re.sub(r"\*\*(.+?)\*\*", r"\1", value)
+    value = re.sub(r"\*(.+?)\*", r"\1", value)
+    value = re.sub(r"<[^>]+>", " ", value)
+    value = re.sub(
+        r"[\U0001F300-\U0001F9FF\U0001FA00-\U0001FAFF\u2600-\u27BF\uFE0F\u200D📄]",
+        "",
+        value,
+    )
+    # List markers → spaces; newlines → sentence breaks.
+    value = re.sub(r"(?m)^[ \t]*[-*•]\s+", "", value)
+    value = re.sub(r"\n+", ". ", value)
+    value = re.sub(r"\s+", " ", value)
+    value = re.sub(r"\s+([,.;:!?])", r"\1", value)
+    value = re.sub(r"([.!?])\1+", r"\1", value)
+    value = re.sub(r"\.\s*\.", ".", value)
+    return value.strip(" \t.-")
+
+
+def rag_retrieve_url() -> str:
+    return (os.environ.get(RAG_RETRIEVE_URL_ENV) or DEFAULT_RAG_RETRIEVE_URL).strip()
+
+
+def retrieve_documents(
+    query: str,
+    *,
+    topk: int = 8,
+    timeout: float = 12.0,
+    public_origin: object = "",
+) -> dict[str, Any]:
+    """POST to Smedley RAG retrieve; return neutralized matches payload."""
+    origin = normalize_public_origin(public_origin)
+    body = {
+        "query": str(query or "").strip(),
+        "topk": max(1, min(int(topk), 20)),
+        "snippet_chars": 900,
+        "filter": {"library_only": True},
+    }
+    data = json.dumps(body).encode("utf-8")
+    req = urllib.request.Request(
+        rag_retrieve_url(),
+        data=data,
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            raw = resp.read()
+            payload = json.loads(raw.decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = ""
+        try:
+            detail = exc.read().decode("utf-8", errors="replace")[:300]
+        except Exception:
+            pass
+        raise RuntimeError(f"RAG retrieve HTTP {exc.code}: {detail}") from exc
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"RAG retrieve failed: {type(exc).__name__}") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("RAG retrieve returned non-object JSON")
+    return neutralize_retrieve_payload(payload, public_origin=origin)
+
+
+def active_document_from_matches(
+    matches: object, *, query: object = "", public_origin: object = ""
+) -> dict[str, str]:
+    """Return the one canonical manual selected for session-scoped review.
+
+    Must match the same manual shown in the operator reply. Indexes/xlsx are never bound.
+    """
+    origin = normalize_public_origin(public_origin)
+    manual, _index = select_operator_document_match(matches, query=query)
+    if not isinstance(manual, dict):
+        return {}
+    item = neutralize_match(manual, public_origin=origin)
+    source = str(item.get("source") or "").strip().replace("\\", "/")
+    ext = os.path.splitext(source)[1].lower()
+    if not (source and ext in _MANUAL_EXTS):
+        return {}
+    if classify_document_kind(source, _match_title(item)) != "manual":
+        return {}
+    ident = item.get("document_identity") if isinstance(item.get("document_identity"), dict) else {}
+    title = str((ident or {}).get("title") or source.rsplit("/", 1)[-1])
+    record = {
+        "source": source,
+        "url": str(item.get("url") or ""),
+        "title": title,
+        "document_kind": "manual",
+        "query_vendor": infer_query_vendor(query) or "",
+        "source_vendor": infer_source_vendor(source, title) or "",
+    }
+    if ident:
+        for key in ("doc_no", "filename", "category", "pages", "status"):
+            if ident.get(key) is not None:
+                record[key] = ident.get(key)
+    if item.get("part_number"):
+        record["part_number"] = str(item.get("part_number"))
+    if item.get("match_kind"):
+        record["match_kind"] = str(item.get("match_kind"))
+    if item.get("index_href"):
+        record["index_href"] = str(item.get("index_href"))
+    if item.get("revision"):
+        record["revision"] = str(item.get("revision"))
+    return record
+
+
+def _active_document_source(active_document: object) -> str:
+    if not isinstance(active_document, dict):
+        return ""
+    source = str(active_document.get("source") or "").strip().replace("\\", "/")
+    if not source or source.startswith("/") or ".." in source.split("/"):
+        return ""
+    if os.path.splitext(source)[1].lower() not in _MANUAL_EXTS:
+        return ""
+    return source
+
+
+def is_affirmative_followup(query: object) -> bool:
+    """True for short explicit affirmatives that accept the offered next action."""
+    return bool(_AFFIRMATIVE_FOLLOWUP_RE.match(str(query or "").strip()))
+
+
+def is_wiring_extract_followup(query: object) -> bool:
+    """True for offered follow-ups like 'extract the wiring diagram'.
+
+    Must not swallow a new document lookup that merely mentions wiring/schematics
+    (e.g. 'user manual ... wiring schematics for MC-PDIX02') while an older
+    active_document is still bound.
+    """
+    msg = str(query or "").strip()
+    if not msg or not _ACTIVE_DOCUMENT_WIRING_EXTRACT_RE.search(msg):
+        return False
+    # Fresh part/doc lookups belong to document_route, not extract-on-bound-doc.
+    if _HW_PART.search(msg) or _AB_PART.search(msg) or _DOCNUM.search(msg):
+        return False
+    if re.search(
+        r"\b(?:user\s+)?manuals?\b|\bdatasheets?\b|\bknowledgebase\b|\biota\b|\biom\b",
+        msg,
+        re.IGNORECASE,
+    ) and not re.search(r"\bextract\b", msg, re.IGNORECASE):
+        return False
+    return True
+
+
+def _pending_extract_bound(active_document: object) -> bool:
+    if not isinstance(active_document, dict):
+        return False
+    pending = active_document.get("pending_action")
+    if isinstance(pending, dict):
+        return str(pending.get("action") or "") == _PENDING_EXTRACT_ACTION
+    return str(pending or "") == _PENDING_EXTRACT_ACTION
+
+
+def is_active_document_review_request(query: object, active_document: object) -> bool:
+    """True for section/text/wiring follow-ups after a document was selected."""
+    if not _active_document_source(active_document):
+        return False
+    msg = str(query or "").strip()
+    if not msg:
+        return False
+    if is_wiring_extract_followup(msg):
+        return True
+    if is_affirmative_followup(msg) and _pending_extract_bound(active_document):
+        return True
+    # Do not steal a new document-route lookup into review of a prior binding.
+    if is_document_request(msg) and not is_affirmative_followup(msg):
+        return False
+    return bool(
+        _ACTIVE_DOCUMENT_SECTION_RE.search(msg)
+        or _ACTIVE_DOCUMENT_FOLLOWUP_RE.search(msg)
+        or _ACTIVE_DOCUMENT_RECOMMENDATION_RE.search(msg)
+    )
+
+
+def library_root() -> str:
+    env = str(os.environ.get(_LIBRARY_ROOT_ENV) or "").strip()
+    if env and os.path.isdir(env):
+        return os.path.realpath(env)
+    for candidate in _DEFAULT_LIBRARY_ROOTS:
+        if os.path.isdir(candidate):
+            return os.path.realpath(candidate)
+    return ""
+
+
+def resolve_active_document_filesystem_path(active_document: object) -> str:
+    """Resolve session active_document.source under the library root (no path escape)."""
+    source = _active_document_source(active_document)
+    root = library_root()
+    if not source or not root:
+        return ""
+    full = os.path.realpath(os.path.join(root, source))
+    root_real = os.path.realpath(root)
+    if full != root_real and not full.startswith(root_real + os.sep):
+        return ""
+    if not os.path.isfile(full):
+        return ""
+    return full
+
+
+def _preview_url_for_source(source: str) -> str:
+    base = rag_retrieve_url()
+    parts = urllib.parse.urlsplit(base)
+    if parts.scheme != "http" or parts.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        raise RuntimeError("active document preview requires the local Smedley RAG service")
+    origin = f"{parts.scheme}://{parts.netloc}"
+    return origin + "/preview/" + urllib.parse.quote(source, safe="/")
+
+
+def fetch_active_document_text(source: object, *, timeout: float = 15.0) -> str:
+    """Read text from the existing, safe Word/PDF sidecar preview service."""
+    normalized = _active_document_source({"source": source})
+    if not normalized:
+        raise RuntimeError("invalid active document source")
+    request = urllib.request.Request(
+        _preview_url_for_source(normalized), headers={"Accept": "text/html"}, method="GET"
+    )
+    with urllib.request.urlopen(request, timeout=timeout) as response:
+        body = response.read(MAX_ACTIVE_DOCUMENT_PREVIEW_BYTES + 1)
+    if len(body) > MAX_ACTIVE_DOCUMENT_PREVIEW_BYTES:
+        raise RuntimeError("document preview exceeds review limit")
+    parser = _PreviewTextExtractor()
+    parser.feed(body.decode("utf-8", errors="replace"))
+    text = re.sub(r"\n{2,}", "\n", parser.text())
+    if not text.strip():
+        raise RuntimeError("document preview contained no extractable text")
+    return text.strip()
+
+
+def _section_candidates(query: str) -> list[str]:
+    raw = [m.group(1) for m in _ACTIVE_DOCUMENT_SECTION_RE.finditer(query)]
+    candidates: list[str] = []
+    for value in raw:
+        candidates.extend([value, value.replace("-", "."), value.replace(".", "-")])
+    return list(dict.fromkeys(candidates))
+
+
+def extract_active_document_passage(text: object, query: object) -> str:
+    """Return the requested section plus nearby prose, never a whole document."""
+    lines = [re.sub(r"\s+", " ", line).strip() for line in str(text or "").splitlines()]
+    lines = [line for line in lines if line]
+    if not lines:
+        return ""
+    def _excerpt_at(index: int) -> str:
+        selected = [lines[index]]
+        for nearby in lines[index + 1:index + 7]:
+            # Stop at the next numbered heading; do not bleed a later section
+            # into the requested passage.
+            if re.match(r"^(?:SECTION\s+)?\d+(?:[.\-]\d+)*[.\s:—-]", nearby, re.I):
+                break
+            selected.append(nearby)
+        return " ".join(selected)[:2400].strip()
+
+    candidates = _section_candidates(str(query or ""))
+    for candidate in candidates:
+        heading = re.compile(rf"^(?:SECTION\s+)?{re.escape(candidate)}[.\s:—-]", re.I)
+        for index, line in enumerate(lines):
+            if heading.search(line):
+                nearby = lines[index + 1:index + 5]
+                if any("PAGEREF" in item.upper() for item in nearby):
+                    # Converted legacy Word tables of contents split a section
+                    # number and title into separate HTML nodes.  Resolve that
+                    # title to the later body heading instead of reading TOC.
+                    title = next((item for item in nearby if item.isalpha()), "")
+                    if title:
+                        for body_index in range(index + len(nearby) + 1, len(lines)):
+                            if lines[body_index].casefold() == title.casefold():
+                                return _excerpt_at(body_index)
+                    continue
+                return _excerpt_at(index)
+    # A Word preview may lose heading punctuation. Match the requested label in
+    # prose as a bounded fallback, then return only local context.
+    for candidate in candidates:
+        needle = re.compile(rf"\b{re.escape(candidate)}\b", re.I)
+        for index, line in enumerate(lines):
+            if needle.search(line):
+                return " ".join(lines[index:index + 6])[:2400].strip()
+    return ""
+
+
+def _part_match_needles(part: object) -> list[str]:
+    """Honeywell MU-/MC- prefixes are conformal-coat variants of the same family."""
+    raw = str(part or "").strip().upper()
+    if not raw:
+        return []
+    needles = [raw.lower()]
+    m = re.match(r"^(M[UC])-([A-Z0-9]+)$", raw)
+    if m:
+        body = m.group(2)
+        needles.extend([f"mu-{body.lower()}", f"mc-{body.lower()}", body.lower()])
+    return list(dict.fromkeys(needles))
+
+
+def _text_mentions_part(text: object, part: object) -> bool:
+    low = str(text or "").lower()
+    for needle in _part_match_needles(part):
+        if not needle:
+            continue
+        # Boundary-aware: 1756-OB16I must not match 1756-OB16IEF.
+        if re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", low):
+            return True
+    return False
+
+
+def _score_wiring_page(text: str, *, part: str) -> tuple[int, list[str]]:
+    low = str(text or "").lower()
+    reasons: list[str] = []
+    score = 0
+    if _text_mentions_part(low, part):
+        score += 50
+        reasons.append("part_hit")
+    if re.search(r"\bfigure\s+\d+", low):
+        score += 12
+        reasons.append("figure")
+    if "connection diagram" in low:
+        score += 25
+        reasons.append("connection_diagram")
+    if "wiring" in low:
+        score += 10
+        reasons.append("wiring")
+    if "schematic" in low:
+        score += 10
+        reasons.append("schematic")
+    if "terminal" in low:
+        score += 4
+        reasons.append("terminal")
+    if "iop compatibility" in low or "compatible with the model" in low:
+        score += 8
+        reasons.append("iop_compat")
+    return score, reasons
+
+
+def _figure_refs(text: str) -> list[str]:
+    refs = re.findall(r"\bFigure\s+(\d+[-\u2013]\d+)\b", str(text or ""), flags=re.I)
+    # Normalize en-dash
+    return list(dict.fromkeys(r.replace("\u2013", "-") for r in refs))
+
+
+def _pdf_page_texts(pdf_path: str) -> list[str]:
+    """Return 1:1 page texts via pypdf or pdftotext (WebUI runtime may lack pypdf)."""
+    try:
+        from pypdf import PdfReader
+
+        reader = PdfReader(pdf_path)
+        out: list[str] = []
+        for page in reader.pages:
+            try:
+                out.append(page.extract_text() or "")
+            except Exception:
+                out.append("")
+        if out:
+            return out
+    except Exception:
+        pass
+
+    pdftotext = "/opt/homebrew/bin/pdftotext"
+    if not os.path.isfile(pdftotext):
+        pdftotext = "pdftotext"
+    try:
+        proc = subprocess.run(
+            [pdftotext, "-layout", pdf_path, "-"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(f"pdftotext failed: {type(exc).__name__}") from exc
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()[:200]
+        raise RuntimeError(f"pdftotext rc={proc.returncode}: {detail or 'failed'}")
+    # Form-feed separates pages.
+    pages = str(proc.stdout or "").split("\f")
+    # Trailing empty page from final form-feed.
+    while pages and not pages[-1].strip():
+        pages.pop()
+    if not pages:
+        raise RuntimeError("pdftotext returned no pages")
+    return pages
+
+
+def extract_wiring_pages_from_pdf(
+    pdf_path: object,
+    *,
+    part_number: object = "",
+    max_pages: int = 3,
+) -> list[dict[str, Any]]:
+    """Locate verified wiring/schematic-relevant PDF pages for the active part."""
+    path = str(pdf_path or "")
+    if not path or not os.path.isfile(path):
+        return []
+    page_texts = _pdf_page_texts(path)
+    part = str(part_number or "").strip()
+
+    part_pages: list[tuple[int, int, list[str], str]] = []
+    for index, text in enumerate(page_texts):
+        if part and not _text_mentions_part(text, part):
+            continue
+        score, reasons = _score_wiring_page(text, part=part)
+        if score < 50:
+            continue
+        part_pages.append((score, index + 1, reasons, text))
+    if not part_pages and part:
+        for index, text in enumerate(page_texts):
+            if _text_mentions_part(text, part):
+                score, reasons = _score_wiring_page(text, part=part)
+                part_pages.append((score, index + 1, reasons, text))
+    if not part_pages:
+        return []
+
+    def _prefer_key(item: tuple[int, int, list[str], str]) -> tuple[int, int]:
+        score, _page_no, reasons, _text = item
+        rich = 1 if any(
+            r in reasons for r in ("wiring", "schematic", "connection_diagram", "figure", "iop_compat")
+        ) else 0
+        return (rich, score)
+
+    part_pages.sort(key=lambda item: (_prefer_key(item)[0], _prefer_key(item)[1], -item[1]), reverse=True)
+    best_score, best_page, best_reasons, best_text = part_pages[0]
+    selected: list[dict[str, Any]] = [
+        {
+            "pdf_page": best_page,
+            "score": best_score,
+            "reasons": best_reasons,
+            "excerpt": re.sub(r"\s+", " ", best_text).strip()[:900],
+        }
+    ]
+    seen = {best_page}
+
+    for fig in _figure_refs(best_text):
+        needle = re.compile(rf"\bFigure\s+{re.escape(fig)}\b", re.I)
+        for index, text in enumerate(page_texts):
+            page_no = index + 1
+            if page_no in seen:
+                continue
+            if not needle.search(text):
+                continue
+            if "table of contents" in text.lower() or text.lower().count("figure ") > 8:
+                continue
+            score, reasons = _score_wiring_page(text, part=part)
+            selected.append(
+                {
+                    "pdf_page": page_no,
+                    "score": score + 30,
+                    "reasons": reasons + [f"figure_ref:{fig}"],
+                    "excerpt": re.sub(r"\s+", " ", text).strip()[:900],
+                }
+            )
+            seen.add(page_no)
+            if len(selected) >= max_pages:
+                return selected[:max_pages]
+
+    for page_no in range(max(1, best_page - 2), min(len(page_texts), best_page + 12) + 1):
+        if page_no in seen:
+            continue
+        text = page_texts[page_no - 1]
+        score, reasons = _score_wiring_page(text, part=part)
+        if "connection_diagram" not in reasons and "schematic" not in reasons:
+            continue
+        selected.append(
+            {
+                "pdf_page": page_no,
+                "score": score,
+                "reasons": reasons + ["near_part_context"],
+                "excerpt": re.sub(r"\s+", " ", text).strip()[:900],
+            }
+        )
+        seen.add(page_no)
+        if len(selected) >= max_pages:
+            break
+    return selected[:max_pages]
+
+
+def build_wiring_extract_reply(
+    active_document: object,
+    pages: list[dict[str, Any]],
+    *,
+    public_origin: object = "",
+    error: object = "",
+) -> tuple[str, str, dict[str, Any]]:
+    """Operator-facing wiring extraction answer + compact spoken + receipt patch."""
+    origin = normalize_public_origin(public_origin)
+    source = _active_document_source(active_document)
+    title = ""
+    part = ""
+    doc_no = ""
+    url = ""
+    if isinstance(active_document, dict):
+        title = str(active_document.get("title") or "").strip()
+        part = str(active_document.get("part_number") or "").strip()
+        doc_no = str(active_document.get("doc_no") or active_document.get("revision") or "").strip()
+        url = str(active_document.get("url") or "").strip()
+    identity = title or (source.rsplit("/", 1)[-1] if source else "the active manual")
+    if doc_no:
+        identity = f"{identity} ({doc_no})"
+    open_href = normalize_corpus_url(url, source=source, public_origin=origin) or absolutize_sidecar_href(
+        sidecar_preview_path(source) if source else "", public_origin=origin
+    )
+    receipt = {
+        "schema": "smedley.active_document_wiring_extract.v1",
+        "source": source,
+        "title": title or None,
+        "doc_no": doc_no or None,
+        "part_number": part or None,
+        "url": open_href or url or None,
+        "pages": pages,
+        "error": str(error or "") or None,
+    }
+    if error and not pages:
+        reply = (
+            f"I still have **{identity}** bound for **{part or 'this part'}**, but wiring-diagram "
+            f"extraction failed ({error}). The manual context is retained — try again, or open the manual."
+        )
+        if open_href:
+            reply += f"\n\n[Open manual]({open_href})"
+        spoken = (
+            f"Wiring extraction failed for {title or 'the active manual'}"
+            + (f", document {doc_no}" if doc_no else "")
+            + ". The manual context is still bound."
+        )
+        return reply, spoken, receipt
+    if not pages:
+        reply = (
+            f"I searched **{identity}** for **{part or 'the requested part'}** wiring/schematic pages, "
+            "but could not verify a specific diagram page from the PDF text layer. "
+            "The document context stays bound."
+        )
+        if open_href:
+            reply += f"\n\n[Open manual]({open_href})"
+        spoken = (
+            f"I could not verify a wiring diagram page in {title or 'the active manual'} yet. "
+            "The manual is still bound."
+        )
+        return reply, spoken, receipt
+
+    top = pages[0]
+    page_no = top.get("pdf_page")
+    page_href = open_href
+    if open_href and page_no:
+        # Fragment is advisory for PDF viewers; same sidecar document bytes.
+        joiner = "&" if "?" in open_href else "#"
+        # Prefer hash page for browser PDF viewers.
+        page_href = f"{open_href}#page={page_no}"
+    lines = [
+        f"Using the bound manual **{identity}**"
+        + (f" for **{part}**" if part else "")
+        + ":",
+        "",
+        f"Verified PDF page **{page_no}** contains the strongest wiring/schematic context for this part.",
+    ]
+    if top.get("excerpt"):
+        lines.extend(["", str(top["excerpt"])[:700]])
+    if len(pages) > 1:
+        extras = ", ".join(f"p.{p.get('pdf_page')}" for p in pages[1:])
+        lines.extend(["", f"Related pages also retained: {extras}."])
+    if page_href:
+        lines.extend(["", f"[Open wiring page]({page_href})"])
+    elif open_href:
+        lines.extend(["", f"[Open manual]({open_href})"])
+    lines.extend(["", "Want me to pull another figure or FTA connection diagram from this manual?"])
+    reply = "\n".join(lines)
+    doc_spoken = re.sub(r"([A-Z]+)(\d{2})-(\d{3})", r"\1 \2-\3", doc_no) if doc_no else ""
+    spoken = (
+        f"I extracted wiring context from {title or 'the bound manual'}"
+        + (f", document {doc_spoken}" if doc_spoken else "")
+        + (f" for {part}" if part else "")
+        + f", PDF page {page_no}. The page link is on screen."
+    )
+    return reply, spoken, receipt
+
+
+def try_active_document_review(
+    query: object, active_document: object, *, public_origin: object = ""
+) -> Optional[dict[str, Any]]:
+    """Resolve a paragraph/section/wiring ask against the session's selected document."""
+    if not is_active_document_review_request(query, active_document):
+        return None
+    source = _active_document_source(active_document)
+    origin = normalize_public_origin(public_origin)
+
+    # Offered follow-up: explicit extract phrasing OR affirmative on pending extract.
+    wants_extract = is_wiring_extract_followup(query) or (
+        is_affirmative_followup(query) and _pending_extract_bound(active_document)
+    )
+    if wants_extract:
+        pdf_path = resolve_active_document_filesystem_path(active_document)
+        part = ""
+        if isinstance(active_document, dict):
+            part = str(active_document.get("part_number") or "").strip()
+        pages: list[dict[str, Any]] = []
+        err = ""
+        if not pdf_path:
+            err = "bound PDF path unavailable"
+        elif os.path.splitext(pdf_path)[1].lower() != ".pdf":
+            err = "bound document is not a PDF"
+        else:
+            try:
+                pages = extract_wiring_pages_from_pdf(pdf_path, part_number=part)
+            except Exception as exc:  # noqa: BLE001
+                err = type(exc).__name__
+                logger.warning("wiring extract failed: %s", err)
+        reply, spoken, receipt = build_wiring_extract_reply(
+            active_document, pages, public_origin=origin, error=err
+        )
+        # Keep page_hint on active document when verified; clear spent pending action.
+        active_out = dict(active_document) if isinstance(active_document, dict) else {}
+        active_out.pop("pending_action", None)
+        if pages:
+            active_out["page_hint"] = pages[0].get("pdf_page")
+            active_out["wiring_pages"] = [p.get("pdf_page") for p in pages]
+        return {
+            "handled": True,
+            "reply": reply,
+            "spoken_reply": spoken,
+            "source": source,
+            "active_document": active_out,
+            "extraction": receipt,
+            "error": err or None,
+        }
+
+    try:
+        text = fetch_active_document_text(source)
+        passage = extract_active_document_passage(text, str(query or ""))
+        if not passage and _ACTIVE_DOCUMENT_RECOMMENDATION_RE.search(str(query or "")):
+            passage = _best_engineering_excerpt(text, str(query or ""))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("active document review failed: %s", type(exc).__name__)
+        return {
+            "handled": True,
+            "reply": "I could not extract that selected document for review. The document context is still bound.",
+            "spoken_reply": "I could not extract that selected document for review. The document context is still bound.",
+            "active_document": active_document if isinstance(active_document, dict) else None,
+            "error": type(exc).__name__,
+        }
+    link = markdown_link_for_source(source, public_origin=public_origin)
+    if not passage:
+        reply = f"I reviewed {link}, but could not find the requested section. Try the exact section number or a distinctive phrase."
+    else:
+        reply = f"From {link}:\n\n{passage}"
+    return {
+        "handled": True,
+        "reply": reply,
+        "spoken_reply": sanitize_for_spoken_output(reply),
+        "source": source,
+        "active_document": active_document if isinstance(active_document, dict) else None,
+        "error": None,
+    }
+
+
+def try_grounded_document_excerpt(message: object, *, public_origin: object = "") -> Optional[dict[str, Any]]:
+    """Answer a RAG-grounded engineering ask from its first cited source, not an LLM guess."""
+    raw = str(message or "")
+    block = _GROUNDED_CONTEXT_RE.search(raw)
+    if not block:
+        return None
+    source_match = _GROUNDED_SIDECAR_RE.search(block.group(1))
+    if not source_match:
+        return None
+    source = urllib.parse.unquote(source_match.group(1)).replace("\\", "/")
+    source = _active_document_source({"source": source})
+    if not source:
+        return None
+    question = raw[:block.start()].strip()
+    tokens = [t for t in re.findall(r"[a-z]{4,}", question.lower()) if t not in {"what", "with", "from", "that", "this", "according", "foundation", "foundations"}]
+    try:
+        lines = [re.sub(r"\s+", " ", line).strip() for line in fetch_active_document_text(source).splitlines()]
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("grounded document excerpt failed: %s", type(exc).__name__)
+        return None
+    best_index, best_score = -1, 0
+    for index, line in enumerate(lines):
+        folded = line.lower()
+        hits = {token for token in tokens if token in folded}
+        score = len(hits) + 3 * len(hits & _ENGINEERING_PRIORITY_TERMS)
+        if score > best_score:
+            best_index, best_score = index, score
+    if best_index < 0 or best_score <= 0:
+        return None
+    passage = " ".join(line for line in lines[best_index:best_index + 3] if line)[:1800]
+    reply = f"{passage}\n\nSource: {markdown_link_for_source(source, public_origin=public_origin)}"
+    return {"handled": True, "reply": reply, "spoken_reply": sanitize_for_spoken_output(reply), "source": source, "error": None}
+
+
+def is_electrical_equipment_fact_question(query: object) -> bool:
+    """True for fuse/rating/IFM/chassis-power asks that must be source-gated."""
+    msg = str(query or "").strip()
+    if not msg or len(msg) > 1200 or msg.startswith("/"):
+        return False
+    if _is_ask_jarvis_traffic(msg) or "<retrieved_library_context>" in msg:
+        return False
+    if _CHASSIS_POWER_TOPIC_RE.search(msg):
+        return True
+    has_part = bool(_HW_PART.search(msg) or _AB_PART.search(msg))
+    return bool(has_part and _ELECTRICAL_FACT_RE.search(msg))
+
+
+def is_active_chassis_power_followup(query: object, active_document: object) -> bool:
+    """True for short slot/redundancy follow-ups that reuse chassis-power context."""
+    if not isinstance(active_document, dict):
+        return False
+    topic = str(active_document.get("topic") or "").strip()
+    if topic != "controllogix_chassis_power" and not active_document.get("chassis_power"):
+        return False
+    msg = str(query or "").strip()
+    if not msg or is_document_request(msg):
+        return False
+    if _HW_PART.search(msg) or _AB_PART.search(msg):
+        return False
+    if _SLOT_FOLLOWUP_RE.match(msg):
+        return True
+    return bool(
+        re.search(r"\b(?:redundan(?:t|cy)|dual\s+supply|single\s+supply|watt(?:age)?s?)\b", msg, re.I)
+        and len(msg) < 80
+    )
+
+
+def is_active_part_compatibility_followup(query: object, active_document: object) -> bool:
+    """True for IFM/cable/match follow-ups that should reuse the bound part."""
+    if not isinstance(active_document, dict):
+        return False
+    if is_active_chassis_power_followup(query, active_document):
+        return True
+    part = str(active_document.get("part_number") or "").strip()
+    if not part:
+        return False
+    msg = str(query or "").strip()
+    if not msg or is_document_request(msg):
+        return False
+    if _HW_PART.search(msg) or _AB_PART.search(msg):
+        # Explicit new part — treat as a fresh engineering ask, not follow-up reuse.
+        return False
+    return bool(_COMPATIBILITY_FOLLOWUP_RE.search(msg) and _ENGINEERING_QUESTION_RE.search(msg))
+
+
+def is_engineering_rag_question(query: object) -> bool:
+    """Gate automatic RAG to substantive engineering questions, not ordinary chat."""
+    msg = str(query or "").strip()
+    if not msg or len(msg) > 1200 or msg.startswith("/") or is_document_request(msg):
+        return False
+    if _is_ask_jarvis_traffic(msg):
+        return False
+    if "<retrieved_library_context>" in msg:
+        return False
+    if is_electrical_equipment_fact_question(msg):
+        return True
+    if not _ENGINEERING_QUESTION_RE.search(msg):
+        return False
+    # Catalog/part asks are first-class engineering lookups even without a
+    # generic civil/mech keyword (e.g. fuse/IFM questions).
+    if extract_query_part_numbers(msg) and _ELECTRICAL_FACT_RE.search(msg):
+        return True
+    tokens = set(re.findall(r"[a-z]{3,}", msg.lower()))
+    return bool(tokens & _ENGINEERING_TERMS)
+
+
+def select_engineering_evidence_match(
+    matches: object, *, query: object = ""
+) -> dict[str, Any] | None:
+    """Pick a manual for engineering-fact answers.
+
+    Series-folder proximity alone is not enough: analog manuals are rejected for
+    digital catalog numbers, and part-mention in snippet/title ranks above bare
+    1756/ path coincidence.
+    """
+    items = [m for m in (matches if isinstance(matches, list) else []) if isinstance(m, dict)]
+    q_vendor = infer_query_vendor(query)
+    query_parts = extract_query_part_numbers(query)
+    ranked: list[tuple[int, dict[str, Any]]] = []
+    for match in items:
+        source = str(match.get("source") or "").replace("\\", "/")
+        title = _match_title(match)
+        if classify_document_kind(source, title) != "manual":
+            continue
+        src_vendor = infer_source_vendor(source, title)
+        if not vendor_compatible(q_vendor, src_vendor):
+            continue
+        if query_parts and any(
+            not source_family_compatible_with_part(source, title, p) for p in query_parts
+        ):
+            continue
+        blob = f"{source} {title} {match.get('snippet') or ''} {match.get('part_number') or ''}"
+        score = 0
+        if query_parts and any(_text_mentions_part(blob, p) for p in query_parts):
+            score += 100
+        elif query_parts:
+            series_ok = False
+            for p in query_parts:
+                series = re.match(r"^(\d{4})", p)
+                if series and f"/{series.group(1).lower()}/" in source.lower():
+                    series_ok = True
+                    break
+            if not series_ok and not manual_relevant_to_query_parts(match, query_parts):
+                continue
+            # Bare series folder is weak — digital I/O pubs get a boost for digital parts.
+            score += 25 if series_ok else 10
+            if any(_AB_DIGITAL_BODY_RE.match(p) for p in query_parts) and re.search(
+                r"um058|digital\s+i/?o", f"{source} {title}", re.I
+            ):
+                score += 50
+            if any(_AB_ANALOG_BODY_RE.match(p) for p in query_parts) and re.search(
+                r"um009|analog", f"{source} {title}", re.I
+            ):
+                score += 50
+        if str(match.get("match_kind") or "") == "exact":
+            score += 20
+        try:
+            score += min(int(float(match.get("score") or 0) * 10), 15)
+        except Exception:
+            pass
+        ranked.append((score, match))
+    if not ranked:
+        return None
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return ranked[0][1]
+
+
+def source_family_compatible_with_part(
+    source: object = "", title: object = "", part: object = ""
+) -> bool:
+    """Reject cross-function manuals (e.g. analog UM009 for digital 1756-IA16)."""
+    part_s = str(part or "").strip().upper().replace(" ", "-")
+    blob = f"{source or ''} {title or ''}"
+    if not part_s:
+        return True
+    if _AB_DIGITAL_BODY_RE.match(part_s) and _AB_ANALOG_IO_MANUAL_RE.search(blob):
+        return False
+    if _AB_ANALOG_BODY_RE.match(part_s) and re.search(r"um058|digital\s+i/?o", blob, re.I):
+        # Digital I/O manual may still mention analog sparsely; allow but do not prefer.
+        return True
+    return True
+
+
+def _seed_authoritative_manuals_for_part(part: object, *, query: object = "") -> list[dict[str, Any]]:
+    """Inject on-disk authoritative pubs the vector ranker often misses."""
+    part_s = str(part or "").strip().upper().replace(" ", "-")
+    q = str(query or "")
+    q_low = q.lower()
+    seeds: list[dict[str, Any]] = []
+    root = library_root()
+    wants_chassis = bool(
+        _CHASSIS_POWER_TOPIC_RE.search(q)
+        or re.search(r"\b(?:power\s+suppl(?:y|ies)|psu|chassis|watt(?:age)?s?|redundan(?:t|cy)|slots?)\b", q_low)
+    )
+    if wants_chassis:
+        for rel in _AB_CHASSIS_POWER_MANUAL_SOURCES:
+            abs_path = os.path.join(root, rel) if root else ""
+            if abs_path and os.path.isfile(abs_path):
+                seeds.append(
+                    {
+                        "source": rel.replace("\\", "/"),
+                        "score": 0.99,
+                        "match_kind": "authoritative_seed",
+                        "retrieval": "smedley_authoritative_seed",
+                        "document_identity": {
+                            "title": "ControlLogix System User Manual",
+                            "doc_no": "1756-UM001",
+                        },
+                    }
+                )
+                break
+    if not part_s.startswith("1756-"):
+        return seeds
+    wants_io_table = bool(
+        re.search(r"\b(?:ifm|cable|1492|fuse|fusing|compatible|match)\b", q_low)
+        or _AB_DIGITAL_BODY_RE.match(part_s)
+    )
+    if wants_io_table and _AB_DIGITAL_BODY_RE.match(part_s):
+        for rel in _AB_DIGITAL_IO_MANUAL_SOURCES:
+            abs_path = os.path.join(root, rel) if root else ""
+            if abs_path and os.path.isfile(abs_path):
+                seeds.append(
+                    {
+                        "source": rel.replace("\\", "/"),
+                        "score": 0.99,
+                        "match_kind": "authoritative_seed",
+                        "retrieval": "smedley_authoritative_seed",
+                        "part_number": part_s,
+                        "document_identity": {
+                            "title": "ControlLogix Digital I/O Modules User Manual",
+                            "doc_no": "1756-UM058",
+                        },
+                    }
+                )
+    return seeds
+
+
+def _is_chassis_power_manual(source: object = "", title: object = "") -> bool:
+    """True for ControlLogix system/power pubs; false for I/O-module manuals."""
+    blob = f"{source or ''} {title or ''}".lower().replace("\\", "/")
+    if re.search(r"um009|analog\s+i/?o|digital\s+i/?o|um058", blob):
+        return False
+    return bool(
+        re.search(
+            r"um001|in619|in620|power\s+suppl|redundant\s+power|system\s+user\s+manual",
+            blob,
+        )
+    )
+
+
+def _extract_chassis_power_facts(text: object, query: object = "") -> str:
+    """Pull ControlLogix chassis/power-supply sizing lines from an authoritative manual.
+
+    TOC / 'see installation instructions' pointers alone are not sizing evidence.
+    Analog-module 'current wiring' examples are not chassis power-supply sizing.
+    """
+    raw = str(text or "")
+    if not raw:
+        return ""
+    q = str(query or "").lower()
+    slot_m = _SLOT_FOLLOWUP_RE.match(str(query or "").strip()) or re.search(
+        r"\b(\d{1,2})\s*-?\s*slot", q
+    )
+    slot_n = slot_m.group(1) if slot_m else ""
+    lines = [re.sub(r"\s+", " ", ln).strip() for ln in raw.splitlines()]
+    lines = [ln for ln in lines if ln]
+    scored: list[tuple[int, str]] = []
+    for line in lines:
+        low = line.lower()
+        if re.search(r"\bbefore you begin\b|\bsee the following publications\b", low):
+            continue
+        if re.search(r"\binstallation instructions\b", low) and not re.search(
+            r"1756-p[ab]\w*|\bwatt|\bsizing\b|\bcurrent\b", low
+        ):
+            continue
+        # Reject I/O module wiring examples that mention "module current".
+        if re.search(r"\b(?:wiring example|input circuit|transmitter|if\d|of\d)\b", low):
+            continue
+        if not re.search(
+            r"\b(?:1756-p[ab]\w*|power\s+suppl|watt|redundan|"
+            r"backplane\s+current|sizing\s+worksheet|chassis\s+load)\b",
+            low,
+        ):
+            continue
+        score = 0
+        if re.search(r"1756-p[ab]\w*", low):
+            score += 6
+        if "power supply" in low or "power-supply" in low:
+            score += 2
+        if "watt" in low:
+            score += 3
+        if "redundan" in low:
+            score += 2
+        if "sizing" in low or "worksheet" in low:
+            score += 4
+        if "backplane current" in low:
+            score += 4
+        if "chassis load" in low:
+            score += 3
+        if slot_n and re.search(rf"\b{re.escape(slot_n)}\s*-?\s*slot", low):
+            score += 5
+        if score < 4:
+            continue
+        scored.append((score, line[:320]))
+    if not scored:
+        return ""
+    scored.sort(key=lambda item: (-item[0], len(item[1])))
+    out: list[str] = []
+    seen: set[str] = set()
+    for _score, line in scored:
+        key = line.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(line)
+        if len(out) >= 5:
+            break
+    return "\n".join(out)[:1600].strip()
+
+
+def _opinionated_electrical_leak(text: object) -> bool:
+    """Detect free-agent opinion / slang that must never ship as electrical guidance."""
+    return bool(
+        re.search(
+            r"(?i)\b(?:serious juice|bite the bullet|handles thermal load better|"
+            r"based on my experience|in my experience|i(?:'| a)d recommend|"
+            r"let me search|thinking out loud|as an ai)\b",
+            str(text or ""),
+        )
+    )
+
+def _load_manual_text_for_evidence(selected: dict[str, Any]) -> str:
+    source = _active_document_source(selected)
+    if not source:
+        return ""
+    if os.path.splitext(source)[1].lower() == ".pdf":
+        pdf_path = resolve_active_document_filesystem_path(selected)
+        if pdf_path:
+            try:
+                return "\n".join(_pdf_page_texts(pdf_path))
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("engineering PDF extract failed: %s", type(exc).__name__)
+    try:
+        return fetch_active_document_text(source)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("engineering RAG preview failed: %s", type(exc).__name__)
+        return ""
+
+
+def _evidence_record_from_match(
+    match: dict[str, Any], *, public_origin: object = "", part: str = ""
+) -> dict[str, Any]:
+    origin = normalize_public_origin(public_origin)
+    item = neutralize_match(match, public_origin=origin)
+    source0 = library_relpath_from_source(item.get("source") or "") or str(
+        item.get("source") or ""
+    ).replace("\\", "/")
+    ident = item.get("document_identity") if isinstance(item.get("document_identity"), dict) else {}
+    selected = {
+        "source": source0,
+        "url": str(item.get("url") or ""),
+        "title": str((ident or {}).get("title") or source0.rsplit("/", 1)[-1]),
+        "document_kind": "manual",
+    }
+    if ident:
+        for key in ("doc_no", "filename", "category", "pages", "status"):
+            if ident.get(key) is not None:
+                selected[key] = ident.get(key)
+    if match.get("part_number"):
+        selected["part_number"] = str(match.get("part_number"))
+    if part:
+        selected["part_number"] = part
+    if match.get("revision"):
+        selected["revision"] = str(match.get("revision"))
+    # Ensure URL is a single canonical sidecar path.
+    selected["url"] = normalize_corpus_url(
+        selected.get("url"), source=source0, public_origin=origin
+    ) or selected.get("url")
+    return selected
+
+
+def _resolve_query_part(query: object, active_document: object = None) -> str:
+    parts = extract_query_part_numbers(query)
+    if parts:
+        return parts[0]
+    if isinstance(active_document, dict):
+        return str(active_document.get("part_number") or "").strip()
+    return ""
+
+
+def _strip_chain_of_thought(text: object) -> str:
+    """Remove self-dialogue / hidden-search narration if any model path leaks it."""
+    out = str(text or "")
+    if not out:
+        return ""
+    lines = []
+    for line in out.splitlines():
+        if _CHAIN_OF_THOUGHT_RE.search(line):
+            continue
+        lines.append(line)
+    cleaned = "\n".join(lines).strip()
+    cleaned = _CHAIN_OF_THOUGHT_RE.sub("", cleaned)
+    return re.sub(r"\n{3,}", "\n\n", cleaned).strip()
+
+
+def _extract_part_scoped_facts(text: object, part: object, *, query: object = "") -> str:
+    """Pull fuse/IFM/voltage lines that explicitly mention the exact part."""
+    raw = str(text or "")
+    part_s = str(part or "").strip()
+    if not raw or not part_s:
+        return ""
+    q = str(query or "").lower()
+    wants_ifm = bool(re.search(r"\b(?:ifm|cable|1492|compatible|match|fusible)\b", q))
+    wants_fuse = bool(re.search(r"\b(?:fuse|fusing|internal\s+fus)\w*\b", q)) and not wants_ifm
+    lines = [re.sub(r"\s+", " ", ln).strip() for ln in raw.splitlines()]
+    lines = [ln for ln in lines if ln]
+    voltage_hits: list[str] = []
+    fuse_hits: list[str] = []
+    ifm_hits: list[str] = []
+    for index, line in enumerate(lines):
+        if not _text_mentions_part(line, part_s):
+            continue
+        low = line.lower()
+        # Prefer compact single-line facts that name this exact catalog number.
+        if re.search(
+            r"\b(?:10\s*…\s*30|10\s*\.\.\.\s*30|10-30).{0,12}v\s*dc\b|"
+            r"\b(?:74\s*…\s*132|74\s*\.\.\.\s*132|79\s*…\s*132).{0,12}v\s*ac\b|"
+            r"\bv\s*dc\b.{0,40}isolated|\bv\s*ac\b.{0,40}(?:input|output|isolated)",
+            low,
+        ):
+            voltage_hits.append(line)
+        elif re.search(r"\b(?:v\s*dc|vdc|v\s*ac|vac|10…30|74…132|79…132)\b", low):
+            voltage_hits.append(line)
+        if wants_fuse and re.search(
+            r"\b(?:none\s*[—\-–]\s*fused ifm|fused ifm can be used|recommended fuse|"
+            r"fusing on the module|electronically fused|not protected)\b",
+            low,
+        ):
+            fuse_hits.append(line)
+        if wants_ifm and (
+            re.search(r"\b(?:1492-[\w-]+|ifm|fusible|cable|cabl)\b", low)
+            or _text_mentions_part(line, part_s)
+        ):
+            # Keep nearby IFM/cable catalog lines from the same wiring-system table block.
+            block = []
+            for j in range(index, min(len(lines), index + 14)):
+                nxt = lines[j]
+                if re.search(r"\b1492-[\w-]+\b", nxt) or re.search(
+                    r"\b(?:fusible|feed-through|status-indicating|cable|cabl)\b", nxt, re.I
+                ):
+                    block.append(nxt)
+                    continue
+                # Sibling catalog aliases in the same cell (IA16K / OB16IEF…) — skip, don't break.
+                if re.match(r"^1756-[A-Z0-9]+K?,?\s*$", nxt, re.I):
+                    continue
+                if j > index and re.match(r"^1756-", nxt) and not _text_mentions_part(nxt, part_s):
+                    # New primary module row.
+                    break
+            if block:
+                ifm_hits.append(" | ".join(block)[:900])
+    ordered: list[str] = []
+    for item in voltage_hits[:1] + fuse_hits[:2] + ifm_hits[:3]:
+        if item and item not in ordered:
+            ordered.append(item)
+    if not ordered and (wants_fuse or wants_ifm):
+        # Last resort: any part-tagged fuse/IFM line.
+        for line in lines:
+            if not _text_mentions_part(line, part_s):
+                continue
+            low = line.lower()
+            if "fuse" in low or "1492-" in low or "ifm" in low:
+                ordered.append(line)
+            if len(ordered) >= 3:
+                break
+    if not ordered:
+        return ""
+    # Hard gate: every retained line must still mention the exact part OR be a
+    # 1492 continuation line attached to a part-tagged block already accepted.
+    return "\n".join(ordered[:5])[:1600].strip()
+
+
+def _compact_electrical_spoken(part: str, passage: str) -> str:
+    """Build a short, non-truncated spoken summary from extracted evidence."""
+    low = passage.lower()
+    bits = [f"For {part},"] if part else []
+    if re.search(r"10\s*[…\.]{1,3}\s*30\s*v\s*dc|10-30\s*v\s*dc", low):
+        bits.append("the manual lists it as a 10 to 30 volt DC module.")
+    if re.search(r"74\s*[…\.]{1,3}\s*132\s*v\s*ac|79\s*[…\.]{1,3}\s*132\s*v\s*ac", low):
+        bits.append("the manual lists it as a 74 to 132 volt AC input module.")
+    if "none" in low and "fused ifm" in low:
+        bits.append("On-module fusing is none; a fused IFM can be used to protect outputs.")
+    m = re.search(r"(\d+(?:\.\d+)?\s*a\s+(?:quick acting|slo-?blow|medium lag)[^\n|]{0,40})", passage, re.I)
+    if m:
+        bits.append(f"Recommended external fuse: {m.group(1).strip()}.")
+    cats = re.findall(r"1492-[A-Z0-9-]+", passage, flags=re.I)
+    if cats:
+        uniq = list(dict.fromkeys(cats))[:4]
+        bits.append("Matching 1492 IFM or cable catalog numbers include " + ", ".join(uniq) + ".")
+    if len(bits) <= 1:
+        compact = re.sub(r"\s+", " ", passage)
+        bits.append(compact[:180].rsplit(" ", 1)[0] + ".")
+    bits.append("Source link is on screen.")
+    spoken = " ".join(bits)
+    if len(spoken) > 380:
+        spoken = spoken[:377].rsplit(" ", 1)[0] + "."
+    return spoken
+
+
+def _query_wants_ifm_pairing(query: object) -> bool:
+    return bool(
+        re.search(
+            r"\b(?:ifm|interface\s+modules?|pre-?wired|cable|1492|compatible|compatibility|match)\b",
+            str(query or ""),
+            re.I,
+        )
+    )
+
+
+def _ab_wiring_index_link(*, public_origin: object = "") -> str:
+    """One openable Smedley-served sidecar link for the AB wiring lookup index."""
+    href = normalize_corpus_url(
+        "", source=_AB_WIRING_INDEX_SOURCE, public_origin=public_origin
+    ) or absolutize_sidecar_href(
+        sidecar_preview_path(_AB_WIRING_INDEX_SOURCE), public_origin=public_origin
+    )
+    if not href:
+        return f"📄 {_AB_WIRING_INDEX_TITLE}"
+    return f"📄 [{_AB_WIRING_INDEX_TITLE}]({href})"
+
+
+def _electrical_ifm_index_fallback_reply(
+    part: str,
+    *,
+    public_origin: object = "",
+) -> tuple[str, str, dict[str, Any]]:
+    """Unresolved IFM/cable pairing → prescribed AB lookup index (never a guessed pairing)."""
+    who = f" for **{part}**" if part else ""
+    link = _ab_wiring_index_link(public_origin=public_origin)
+    reply = (
+        f"I cannot authoritatively verify an IFM/cable pairing{who} from a part-validated "
+        "module publication, so I will not guess a pairing or substitute an unrelated manual.\n\n"
+        "Prescribed next lookup resource "
+        "(**lookup index**, not an I/O module manual; does **not** prove compatibility):\n\n"
+        f"**{_AB_WIRING_INDEX_TITLE}**\n\n"
+        f"{link}\n\n"
+        "Use this index to resolve the correct technical note / IFM relationship for the "
+        "queried I/O catalog number. I will not extract wiring diagrams from the index."
+    )
+    if part:
+        reply += (
+            f"\n\nWant me to use this index to look up the technical note / IFM relationship "
+            f"for **{part}**?"
+        )
+    spoken = (
+        "I cannot authoritatively verify that IFM or cable pairing"
+        + (f" for {part}" if part else "")
+        + ". I am not guessing a pairing. The prescribed next resource is the Allen-Bradley "
+        "Wiring Diagram Knowledgebase Technote IDs by Part Number lookup index. "
+        "It is a lookup index, not a module manual, and it does not prove compatibility. "
+        "The openable index link is on screen."
+    )
+    if part:
+        spoken += f" Want me to use that index for {part}?"
+    pending = {
+        "action": _PENDING_USE_AB_INDEX_ACTION,
+        "part_number": part or None,
+        "index_source": _AB_WIRING_INDEX_SOURCE,
+        "index_title": _AB_WIRING_INDEX_TITLE,
+        "index_smb": _AB_WIRING_INDEX_SMB,
+    }
+    return reply, spoken, pending
+
+
+def _use_ab_wiring_index_for_part(
+    part: str,
+    *,
+    public_origin: object = "",
+) -> tuple[str, str]:
+    """Look up technote/IFM pointers in the AB index without treating it as a manual."""
+    link = _ab_wiring_index_link(public_origin=public_origin)
+    text = ""
+    try:
+        text = fetch_active_document_text(_AB_WIRING_INDEX_SOURCE) or ""
+    except Exception:  # noqa: BLE001
+        text = ""
+    hits: list[str] = []
+    if text and part:
+        needles = _part_match_needles(part)
+        for raw in text.splitlines():
+            line = re.sub(r"\s+", " ", raw).strip()
+            if not line or len(line) < 8:
+                continue
+            low = line.lower()
+            if not any(n.lower() in low for n in needles):
+                continue
+            # Keep technote / IFM / cable oriented rows.
+            if re.search(r"\b(?:1492|ifm|technote|tech\s*note|wiring|cable)\b", low) or re.search(
+                r"\b\d{6,}\b", line
+            ):
+                hits.append(line[:240])
+            if len(hits) >= 5:
+                break
+    if hits:
+        body = "\n".join(f"- {h}" for h in hits)
+        reply = (
+            f"From the **{_AB_WIRING_INDEX_TITLE}** for **{part}** "
+            "(lookup index only — **not** an I/O module manual; does **not** prove compatibility):\n\n"
+            f"{body}\n\n"
+            f"{link}\n\n"
+            "Use the listed technical-note / wiring-system pointers to continue the lookup. "
+            "I will not extract diagrams from this index."
+        )
+        spoken = (
+            f"I looked up {part} in the Allen-Bradley wiring diagram knowledgebase lookup index. "
+            "Matching index rows are on screen. This is a lookup index, not a module manual, "
+            "and it does not prove compatibility."
+        )
+        return reply, spoken
+    reply = (
+        f"I opened the **{_AB_WIRING_INDEX_TITLE}** for **{part}**, but I could not yet resolve "
+        "a clear technical-note / IFM relationship row for that exact catalog number from the "
+        "index text.\n\n"
+        f"{link}\n\n"
+        "This remains a lookup index only — not a module manual and not proof of compatibility. "
+        "Open the index and search the part number there, or provide a technical-note ID."
+    )
+    spoken = (
+        f"I checked the Allen-Bradley wiring diagram knowledgebase lookup index for {part}, "
+        "but I could not resolve a clear technical note or IFM relationship row yet. "
+        "The openable index link is on screen. It is not a module manual and does not prove compatibility."
+    )
+    return reply, spoken
+
+
+def _electrical_not_found_reply(
+    part: str,
+    *,
+    query: object = "",
+    next_family: str = "",
+    public_origin: object = "",
+) -> tuple[str, str, dict[str, Any] | None]:
+    """Fail closed without dumping research onto the owner or citing a wrong hit.
+
+    Unresolved IFM/cable pairings return the prescribed AB wiring lookup index.
+    Chassis/power misses retrieve 1756-UM001 themselves.
+    Other missing electrical facts stay on the cannot-yet-verify / next-retrieval path.
+    """
+    who = f" for **{part}**" if part else ""
+    wants_ifm = _query_wants_ifm_pairing(query)
+    wants_chassis = bool(
+        _CHASSIS_POWER_TOPIC_RE.search(str(query or ""))
+        or re.search(
+            r"\b(?:power\s+suppl(?:y|ies)|psu|chassis|watt(?:age)?s?|redundan(?:t|cy)|slots?)\b",
+            str(query or ""),
+            re.I,
+        )
+    )
+    if wants_ifm and not wants_chassis:
+        return _electrical_ifm_index_fallback_reply(part, public_origin=public_origin)
+    if wants_chassis:
+        next_family = next_family or (
+            "ControlLogix power-supply sizing publications "
+            "(1756-UM001 system manual + 1756-IN619 / redundant-supply instructions)"
+        )
+        reply = (
+            f"I cannot yet verify a ControlLogix chassis/power-supply recommendation{who} "
+            "from a part-validated engineering-library excerpt. "
+            "I will not substitute model memory, operational opinion, or an unsourced catalog pattern.\n\n"
+            f"Next I will retrieve **{next_family}**"
+            + (f" for this **{part}** context" if part else "")
+            + ".\n\n"
+            "Want me to run that retrieval now?"
+        )
+        spoken = (
+            "I cannot yet verify that ControlLogix chassis or power-supply recommendation"
+            + (f" for {part}" if part else "")
+            + " from a part-validated library source, so I will not guess. "
+            f"Next I can retrieve {next_family}. Want me to run that now?"
+        )
+        pending = {
+            "action": _PENDING_CHASSIS_SIZING_ACTION,
+            "part_number": part or None,
+            "next_family": next_family,
+            "topic": "controllogix_chassis_power",
+        }
+        return reply, spoken, pending
+    if not next_family:
+        if part and part.upper().startswith("1756-"):
+            next_family = "the ControlLogix module publication family"
+        else:
+            next_family = "the governing vendor catalog/manual"
+    reply = (
+        f"I cannot yet verify that{who} from a part-validated engineering-library source. "
+        "I will not substitute model memory, a generic family claim, or an unrelated manual link.\n\n"
+        f"Next I will retrieve **{next_family}** for this exact catalog number.\n\n"
+        "Want me to run that retrieval now?"
+    )
+    spoken = (
+        f"I cannot yet verify that"
+        + (f" for {part}" if part else "")
+        + " from a part-validated library source, so I will not guess. "
+        f"Next I can retrieve {next_family}. Want me to run that now?"
+    )
+    pending = None
+    if part:
+        pending = {
+            "action": "retrieve_part_manual",
+            "part_number": part,
+            "next_family": next_family,
+        }
+    return reply, spoken, pending
+
+
+def _best_engineering_excerpt(text: object, query: object) -> str:
+    """Return a compact evidence passage most responsive to an engineering ask."""
+    # Legacy Word previews often arrive as one enormous HTML text node.  Split
+    # it into sentences first so a matching requirement does not get buried
+    # behind the opening scope paragraph.
+    lines = [
+        re.sub(r"\s+", " ", line).strip()
+        for line in re.split(r"(?<=[.!?])\s+|\n+", str(text or ""))
+    ]
+    lines = [line for line in lines if line]
+    tokens = set(re.findall(r"[a-z0-9]{3,}", str(query or "").lower()))
+    tokens -= {"what", "which", "where", "when", "with", "from", "that", "this", "does", "need", "shall", "should", "according"}
+    best_index, best_score = -1, 0
+    asks_recommendation = bool(_ACTIVE_DOCUMENT_RECOMMENDATION_RE.search(str(query or "")))
+    for index, line in enumerate(lines):
+        folded = line.lower()
+        hits = {token for token in tokens if token in folded}
+        score = len(hits) + 3 * len(hits & _ENGINEERING_PRIORITY_TERMS)
+        if asks_recommendation and ("preferred" in folded or "recommended" in folded):
+            score += 3
+        if asks_recommendation and " or " in folded:
+            score += 2
+        if score > best_score:
+            best_index, best_score = index, score
+    # One generic overlap (for example, just "pump" in a scope clause) is
+    # not evidence for a specific requirement such as shaft hardness.
+    if best_score < 2:
+        return ""
+    return lines[best_index][:1800].strip()
+
+
+def try_engineering_rag_answer(
+    query: object,
+    *,
+    public_origin: object = "",
+    active_document: object = None,
+) -> Optional[dict[str, Any]]:
+    """Retrieve and quote a source for an engineering question; never guess a value.
+
+    Electrical equipment facts (fuse/rating/IFM/compatibility) are fail-closed:
+    claims require an authoritative excerpt tied to the exact part number. Linked
+    sources must themselves be part/family-validated — never an unrelated "closest hit".
+    """
+    msg = str(query or "").strip()
+    compatibility = is_active_part_compatibility_followup(msg, active_document)
+    chassis_followup = is_active_chassis_power_followup(msg, active_document)
+    chassis_topic = bool(
+        _CHASSIS_POWER_TOPIC_RE.search(msg)
+        or chassis_followup
+        or (
+            isinstance(active_document, dict)
+            and (
+                active_document.get("topic") == "controllogix_chassis_power"
+                or active_document.get("chassis_power")
+            )
+            and compatibility
+        )
+    )
+    pending_lookup = False
+    pending_use_index = False
+    pending_chassis = False
+    if isinstance(active_document, dict) and is_affirmative_followup(msg):
+        pending = active_document.get("pending_action")
+        if isinstance(pending, dict):
+            action = str(pending.get("action") or "")
+            if action == _PENDING_USE_AB_INDEX_ACTION:
+                pending_use_index = True
+            elif action == _PENDING_CHASSIS_SIZING_ACTION:
+                pending_chassis = True
+                chassis_topic = True
+            elif action in {_PENDING_IFM_LOOKUP_ACTION, "retrieve_part_manual"}:
+                pending_lookup = True
+    if not (
+        is_engineering_rag_question(msg)
+        or compatibility
+        or pending_lookup
+        or pending_use_index
+        or pending_chassis
+        or chassis_followup
+    ):
+        return None
+    origin = normalize_public_origin(public_origin)
+    part = _resolve_query_part(msg, active_document)
+    if (pending_lookup or pending_use_index or pending_chassis) and not part and isinstance(
+        active_document, dict
+    ):
+        part = str(active_document.get("part_number") or "").strip()
+
+    if pending_use_index and part:
+        reply, spoken = _use_ab_wiring_index_for_part(part, public_origin=origin)
+        keep = {
+            "part_number": part,
+            "lookup_index_source": _AB_WIRING_INDEX_SOURCE,
+            "lookup_index_title": _AB_WIRING_INDEX_TITLE,
+            "document_kind": "index",
+        }
+        return {
+            "handled": True,
+            "reply": reply,
+            "spoken_reply": spoken,
+            "source": _AB_WIRING_INDEX_SOURCE,
+            "active_document": keep,
+            "pending_action": None,
+            "error": None,
+            "engineering_rag_answer": True,
+            "verification": "lookup_index",
+            "part_number": part,
+            "document_kind": "index",
+        }
+
+    electrical = (
+        is_electrical_equipment_fact_question(msg)
+        or compatibility
+        or pending_lookup
+        or pending_chassis
+        or chassis_topic
+        or bool(part and re.search(r"\b(?:ifm|cable|1492|fuse|fusing|match)\b", msg, re.I))
+    )
+    retrieval_query = msg
+    slot_m = _SLOT_FOLLOWUP_RE.match(msg)
+    slot_n = ""
+    if slot_m:
+        slot_n = slot_m.group(1)
+    elif isinstance(active_document, dict) and active_document.get("chassis_slots"):
+        slot_n = str(active_document.get("chassis_slots") or "").strip()
+    if pending_chassis or chassis_topic:
+        retrieval_query = (
+            f"ControlLogix chassis power supply sizing 1756-UM001"
+            + (f" {slot_n}-slot" if slot_n else "")
+            + (f" {msg}" if msg and not slot_m else "")
+        )
+    elif pending_lookup and part:
+        retrieval_query = f"{part} 1492 IFM cable wiring system 1756-UM058"
+    elif compatibility and part:
+        retrieval_query = f"{msg} {part}"
+    elif part and part.lower() not in msg.lower():
+        retrieval_query = f"{msg} {part}"
+    if electrical and part and re.search(r"\b(?:ifm|cable|1492|match|compatible)\b", retrieval_query, re.I):
+        retrieval_query = f"{retrieval_query} 1492 IFM 1756-UM058"
+
+    try:
+        matches = list(
+            retrieve_documents(retrieval_query, topk=8, public_origin=origin).get("matches") or []
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("engineering RAG retrieve failed: %s", type(exc).__name__)
+        reply = "I could not reach the engineering library to verify that requirement."
+        keep = (
+            dict(active_document)
+            if isinstance(active_document, dict)
+            else ({"part_number": part} if part else None)
+        )
+        return {
+            "handled": True,
+            "reply": reply,
+            "spoken_reply": reply,
+            "source": None,
+            "active_document": keep,
+            "error": type(exc).__name__,
+            "engineering_rag_answer": True,
+        }
+
+    seeded = _seed_authoritative_manuals_for_part(part, query=retrieval_query)
+    if seeded:
+        seen_sources = {
+            str(m.get("source") or "").replace("\\", "/")
+            for m in matches
+            if isinstance(m, dict)
+        }
+        for seed in seeded:
+            src = str(seed.get("source") or "").replace("\\", "/")
+            if src and src not in seen_sources:
+                matches.insert(0, seed)
+                seen_sources.add(src)
+
+    candidates: list[dict[str, Any]] = []
+    primary = select_engineering_evidence_match(matches, query=retrieval_query)
+    if isinstance(primary, dict):
+        candidates.append(primary)
+    for match in matches:
+        if not isinstance(match, dict) or match is primary:
+            continue
+        source = str(match.get("source") or "").replace("\\", "/")
+        title = _match_title(match)
+        if classify_document_kind(source, title) != "manual":
+            continue
+        if chassis_topic and not _is_chassis_power_manual(source, title):
+            continue
+        if part and not source_family_compatible_with_part(source, title, part):
+            continue
+        candidates.append(match)
+    if chassis_topic and primary and not _is_chassis_power_manual(
+        primary.get("source"), _match_title(primary)
+    ):
+        # Drop a wrong-family primary that slipped in (e.g. analog UM009).
+        candidates = [c for c in candidates if c is not primary]
+    if (
+        not candidates
+        and isinstance(active_document, dict)
+        and active_document.get("source")
+        and source_family_compatible_with_part(
+            active_document.get("source"),
+            active_document.get("title"),
+            part or active_document.get("part_number"),
+        )
+    ):
+        candidates.append(active_document)
+
+    if not electrical:
+        selected = (
+            _evidence_record_from_match(candidates[0], public_origin=origin, part=part)
+            if candidates
+            else None
+        )
+        if selected and _active_document_source(selected):
+            handoff = try_jarvis_n8n_engineering_handoff(msg, matches, public_origin=origin)
+            if handoff and handoff.get("handled"):
+                handoff["reply"] = _strip_chain_of_thought(handoff.get("reply") or "")
+                handoff["active_document"] = selected
+                return handoff
+
+    selected: dict[str, Any] | None = None
+    passage = ""
+    for match in candidates:
+        trial = _evidence_record_from_match(match, public_origin=origin, part=part)
+        if chassis_topic and not _is_chassis_power_manual(
+            trial.get("source"), trial.get("title")
+        ):
+            continue
+        if part and not source_family_compatible_with_part(
+            trial.get("source"), trial.get("title"), part
+        ):
+            continue
+        text = _load_manual_text_for_evidence(trial)
+        if not text:
+            continue
+        if part and not chassis_topic and not _text_mentions_part(text, part):
+            continue
+        trial_passage = ""
+        if electrical and chassis_topic:
+            trial_passage = _extract_chassis_power_facts(
+                text, query=(f"{retrieval_query} {slot_n}-slot" if slot_n else retrieval_query)
+            )
+        if not trial_passage and electrical and part and not chassis_topic:
+            trial_passage = _extract_part_scoped_facts(text, part, query=retrieval_query)
+        if not trial_passage and not chassis_topic:
+            trial_passage = _best_engineering_excerpt(text, retrieval_query)
+            if electrical and part and trial_passage and not _text_mentions_part(
+                trial_passage, part
+            ):
+                trial_passage = ""
+        # Chassis/power asks: only strong sizing excerpts — never TOC soft-matches.
+        if trial_passage and not _opinionated_electrical_leak(trial_passage):
+            selected = trial
+            passage = trial_passage
+            break
+
+    keep_part_ctx: dict[str, Any] | None = None
+    if isinstance(active_document, dict) and (
+        active_document.get("part_number")
+        or active_document.get("source")
+        or active_document.get("topic")
+        or active_document.get("chassis_power")
+    ):
+        keep_part_ctx = dict(active_document)
+    if part:
+        keep_part_ctx = dict(keep_part_ctx or {})
+        keep_part_ctx["part_number"] = part
+    if chassis_topic:
+        keep_part_ctx = dict(keep_part_ctx or {})
+        keep_part_ctx["topic"] = "controllogix_chassis_power"
+        keep_part_ctx["chassis_power"] = True
+        if slot_n:
+            keep_part_ctx["chassis_slots"] = slot_n
+
+    if not (selected and passage):
+        # Chassis misses must still retain chassis context for "13 slot" follow-ups.
+        reply_query = msg
+        if chassis_topic and slot_n and "slot" not in msg.lower():
+            reply_query = f"{msg} {slot_n}-slot chassis"
+        elif chassis_topic and not _CHASSIS_POWER_TOPIC_RE.search(msg):
+            reply_query = f"ControlLogix chassis power supply {msg}"
+        reply, spoken, pending = _electrical_not_found_reply(
+            part, query=reply_query if chassis_topic else msg, public_origin=origin
+        )
+        verification = (
+            "lookup_index"
+            if pending and str(pending.get("action") or "") == _PENDING_USE_AB_INDEX_ACTION
+            else "not_found"
+        )
+        source_out = (
+            _AB_WIRING_INDEX_SOURCE if verification == "lookup_index" else None
+        )
+        if keep_part_ctx is None and (part or chassis_topic):
+            keep_part_ctx = {}
+            if part:
+                keep_part_ctx["part_number"] = part
+            if chassis_topic:
+                keep_part_ctx["topic"] = "controllogix_chassis_power"
+                keep_part_ctx["chassis_power"] = True
+                if slot_n:
+                    keep_part_ctx["chassis_slots"] = slot_n
+        if keep_part_ctx is not None and pending:
+            keep_part_ctx = dict(keep_part_ctx)
+            keep_part_ctx["pending_action"] = pending
+            keep_part_ctx["part_number"] = part or keep_part_ctx.get("part_number")
+            if chassis_topic:
+                keep_part_ctx["topic"] = "controllogix_chassis_power"
+                keep_part_ctx["chassis_power"] = True
+                if slot_n:
+                    keep_part_ctx["chassis_slots"] = slot_n
+            if verification == "lookup_index":
+                keep_part_ctx["lookup_index_source"] = _AB_WIRING_INDEX_SOURCE
+                keep_part_ctx["lookup_index_title"] = _AB_WIRING_INDEX_TITLE
+                keep_part_ctx["document_kind"] = "index"
+                # Never bind the xlsx as the extractable active manual source.
+                if classify_document_kind(
+                    keep_part_ctx.get("source"), keep_part_ctx.get("title")
+                ) == "index" or str(keep_part_ctx.get("source") or "").lower().endswith(
+                    (".xlsx", ".xls", ".csv")
+                ):
+                    keep_part_ctx.pop("source", None)
+                    keep_part_ctx.pop("url", None)
+            if keep_part_ctx.get("source") and part and not source_family_compatible_with_part(
+                keep_part_ctx.get("source"), keep_part_ctx.get("title"), part
+            ):
+                keep_part_ctx.pop("source", None)
+                keep_part_ctx.pop("url", None)
+        return {
+            "handled": True,
+            "reply": reply,
+            "spoken_reply": spoken,
+            "source": source_out,
+            "active_document": keep_part_ctx,
+            "pending_action": pending,
+            "error": None,
+            "engineering_rag_answer": True,
+            "verification": verification,
+            "part_number": part or None,
+            "document_kind": "index" if verification == "lookup_index" else None,
+        }
+
+    source = library_relpath_from_source(_active_document_source(selected)) or _active_document_source(
+        selected
+    )
+    link = markdown_link_for_source(source, public_origin=origin)
+    title = str(selected.get("title") or selected.get("doc_no") or "").strip()
+    selected = dict(selected)
+    selected["source"] = source
+    selected.pop("pending_action", None)
+    if part:
+        selected["part_number"] = part
+    if chassis_topic:
+        selected["topic"] = "controllogix_chassis_power"
+        selected["chassis_power"] = True
+        if slot_n:
+            selected["chassis_slots"] = slot_n
+
+    header = f"From the engineering library"
+    if part:
+        header += f" for **{part}**"
+    elif chassis_topic:
+        header += " for ControlLogix chassis/power supply sizing"
+        if slot_n:
+            header += f" (**{slot_n}-slot**)"
+    if title:
+        header += f" ({title})"
+    header += ":"
+    reply = f"{header}\n\n{passage}\n\nSource: {link}"
+    if electrical:
+        if chassis_topic:
+            spoken = (
+                "From the ControlLogix system manual"
+                + (f" for a {slot_n}-slot chassis" if slot_n else "")
+                + ", "
+                + re.sub(r"\s+", " ", passage)[:220].rsplit(" ", 1)[0]
+                + ". Source link is on screen."
+            )
+        else:
+            spoken = _compact_electrical_spoken(part, passage)
+        if re.search(r"\b120\s*v\b", msg, re.I) and re.search(
+            r"v\s*dc|10…30|10 to 30 volt DC", passage, re.I
+        ):
+            reply += (
+                "\n\nNote: the cited publication classifies this catalog number as "
+                "**DC**, not a 120 VAC module. Use the manual voltage class."
+            )
+    else:
+        compact = re.sub(r"\s+", " ", passage)
+        if len(compact) > 220:
+            compact = compact[:217].rsplit(" ", 1)[0] + "."
+        spoken = ("For " + part + ", " if part else "") + compact + " Source link is on screen."
+
+    reply = _strip_chain_of_thought(reply)
+    spoken = _strip_chain_of_thought(spoken)
+    if _opinionated_electrical_leak(reply) or _opinionated_electrical_leak(spoken):
+        # Hard fail-closed if any opinion slang leaked into the grounded path.
+        reply, spoken, pending = _electrical_not_found_reply(
+            part, query=msg if not chassis_topic else f"ControlLogix chassis power {msg}",
+            public_origin=origin,
+        )
+        keep = dict(selected)
+        if pending:
+            keep["pending_action"] = pending
+        return {
+            "handled": True,
+            "reply": reply,
+            "spoken_reply": spoken,
+            "source": None,
+            "active_document": keep,
+            "pending_action": pending,
+            "error": None,
+            "engineering_rag_answer": True,
+            "verification": "not_found",
+            "part_number": part or None,
+        }
+    # Keep spoken compact and complete — never truncated mid-thought.
+    if len(spoken) > 420:
+        spoken = spoken[:417].rsplit(" ", 1)[0] + "."
+    if "Source link is on screen" not in spoken:
+        spoken = spoken.rstrip(".") + ". Source link is on screen."
+    return {
+        "handled": True,
+        "reply": reply,
+        "spoken_reply": spoken,
+        "source": source,
+        "active_document": selected,
+        "error": None,
+        "engineering_rag_answer": True,
+        "verification": "source_grounded",
+        "part_number": part or None,
+    }
+
+
+
+def jarvis_n8n_handoff_enabled() -> bool:
+    """Opt-in gate for Smedley Library → Jarvis-N8N PA briefing handoff."""
+    raw = (os.environ.get(JARVIS_N8N_HANDOFF_ENABLE_ENV) or "1").strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _load_jarvis_n8n_propose_token() -> str:
+    token = (os.environ.get(JARVIS_N8N_TOKEN_ENV) or "").strip()
+    path = (os.environ.get(JARVIS_N8N_TOKEN_FILE_ENV) or "").strip()
+    if path:
+        try:
+            file_token = open(path, encoding="utf-8").read().strip()
+            if file_token:
+                token = file_token
+        except OSError:
+            pass
+    return token
+
+
+def _jarvis_n8n_briefing_url() -> str:
+    return (
+        os.environ.get(JARVIS_N8N_BRIEFING_URL_ENV) or DEFAULT_JARVIS_N8N_BRIEFING_URL
+    ).strip()
+
+
+def _extract_jarvis_briefing_speak(payload: object) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    for key in ("speak", "answer", "summary"):
+        value = payload.get(key)
+        if value:
+            return str(value).strip()
+    for nest_key in ("briefing", "biggy_direct_reply", "briefing_response", "response"):
+        nested = payload.get(nest_key)
+        if isinstance(nested, dict):
+            for key in ("speak", "answer", "summary", "text"):
+                value = nested.get(key)
+                if value:
+                    return str(value).strip()
+    return ""
+
+
+def try_jarvis_n8n_engineering_handoff(
+    query: object,
+    matches: list[dict[str, Any]],
+    *,
+    public_origin: object = "",
+) -> Optional[dict[str, Any]]:
+    """Send Smedley Library retrieve evidence through Jarvis PA governed briefing.
+
+    Preserves Smedley RAG as the evidence source. Returns None when handoff is
+    disabled, unauthenticated, or Jarvis fails — callers keep local excerpt fallback.
+    """
+    if not jarvis_n8n_handoff_enabled():
+        return None
+    token = _load_jarvis_n8n_propose_token()
+    if not token:
+        logger.info("jarvis n8n handoff skipped: propose token not configured")
+        return None
+    origin = normalize_public_origin(public_origin)
+    excerpts: list[str] = []
+    citations: list[dict[str, str]] = []
+    for match in (matches or [])[:5]:
+        if not isinstance(match, dict):
+            continue
+        source = str(match.get("source") or "").strip()
+        if not source:
+            continue
+        link = markdown_link_for_source(source, public_origin=origin)
+        snip = str(match.get("snippet") or match.get("text") or "").strip()[:400]
+        cite = {
+            "source": source,
+            "url": str(match.get("url") or link),
+            "provenance": "smedley_library_rag",
+        }
+        if match.get("match_kind"):
+            cite["match_kind"] = str(match.get("match_kind"))
+        if match.get("part_number"):
+            cite["part_number"] = str(match.get("part_number"))
+        if match.get("observed_part"):
+            cite["observed_part"] = str(match.get("observed_part"))
+        if isinstance(match.get("document_identity"), dict):
+            cite["document_identity"] = match.get("document_identity")
+        if match.get("revision"):
+            cite["revision"] = str(match.get("revision"))
+        if match.get("page_hint") is not None:
+            cite["page_hint"] = match.get("page_hint")
+        if match.get("index_href"):
+            cite["index_href"] = str(match.get("index_href"))
+        if match.get("retrieval"):
+            cite["retrieval"] = str(match.get("retrieval"))
+        citations.append(cite)
+        excerpts.append(f"- {source}: {snip}" if snip else f"- {source} ({link})")
+    if not excerpts:
+        return None
+
+    import uuid
+    from datetime import datetime, timezone
+
+    corr = "smedley-rag-jarvis-" + datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    corr = f"{corr}-{uuid.uuid4().hex[:8]}"
+    objective = (
+        "Smedley engineering RAG handoff. Using ONLY the Smedley Library excerpts "
+        "below, answer the operator question. Cite the library source path/URL. "
+        "Do not invent documents or values.\n\n"
+        f"Operator question: {str(query or '').strip()}\n\n"
+        "Smedley Library excerpts:\n" + "\n".join(excerpts)
+    )
+    payload = {
+        "schema": "jarvis.briefing_request.v1",
+        "type": "jarvis.briefing_request",
+        "correlation_id": corr,
+        "objective": objective,
+        "source": "smedley_rag_call",
+        "authority": "owner_authorized_smedley_handoff",
+        "authorization_ref": "smedley-engineering-rag-jarvis-n8n",
+        "requester": "smedley",
+        "response_channel": "biggy_direct_speak",
+        "smedley_rag": {
+            "schema": "smedley.library_retrieve.v1",
+            "match_count": len(matches or []),
+            "citations": citations,
+        },
+    }
+    request = urllib.request.Request(
+        _jarvis_n8n_briefing_url(),
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+            "X-GPT-Propose-Token": token,
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            body = response.read()
+            status = getattr(response, "status", 200)
+    except urllib.error.HTTPError as exc:
+        body = exc.read() if hasattr(exc, "read") else b""
+        status = int(getattr(exc, "code", 0) or 0)
+        logger.warning(
+            "jarvis n8n handoff HTTP %s: %s",
+            status,
+            body[:200].decode("utf-8", "replace"),
+        )
+        return None
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("jarvis n8n handoff failed: %s", type(exc).__name__)
+        return None
+    try:
+        parsed = json.loads(body.decode("utf-8"))
+    except Exception:
+        return None
+    speak = _extract_jarvis_briefing_speak(parsed)
+    if status != 200 or not speak:
+        return None
+    active_document = active_document_from_matches(matches, query=query, public_origin=origin)
+    source = _active_document_source(active_document)
+    # Keep sidecar provenance visible even when Jarvis speak omits the markdown link.
+    if source and WEBUI_CORPUS_SIDECAR not in speak:
+        speak = f"{speak.rstrip()}\n\nSource: {markdown_link_for_source(source, public_origin=origin)}"
+    return {
+        "handled": True,
+        "reply": speak,
+        "spoken_reply": sanitize_for_spoken_output(speak),
+        "source": source,
+        "active_document": active_document,
+        "jarvis_n8n_handoff": True,
+        "correlation_id": corr,
+        "error": None,
+    }
+
+
+def try_document_route(
+    query: object, *, topk: int = 8, public_origin: object = ""
+) -> Optional[dict[str, Any]]:
+    """If query is a document request, retrieve and return a deterministic reply.
+
+    Returns None when the query is not a document request (ordinary chat).
+    """
+    if not document_route_enabled():
+        return None
+    msg = str(query or "").strip()
+    if not is_document_request(msg):
+        return None
+    origin = normalize_public_origin(public_origin)
+    try:
+        retrieval_query = project_spec_lookup_query(msg) if is_specification_number_request(msg) else msg
+        payload = retrieve_documents(retrieval_query, topk=topk, public_origin=origin)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("smedley document route retrieve failed: %s", type(exc).__name__)
+        reply = (
+            "Document request detected, but Smedley RAG retrieval is unavailable "
+            f"({type(exc).__name__}). Ordinary chat was not used for this turn."
+        )
+        return {
+            "handled": True,
+            "query": msg,
+            "reply": reply,
+            "spoken_reply": sanitize_for_spoken_output(reply),
+            "matches": [],
+            "collection": "",
+            "error": type(exc).__name__,
+        }
+    matches = payload.get("matches") or []
+    if is_specification_number_request(msg):
+        matches = prioritize_gp_brewton_spec_matches(matches, msg)
+        # A spec-number request needs the governing identity, not a long list
+        # of generic handbooks that happened to rank nearby.
+        if matches:
+            matches = matches[:1]
+    # Exact Honeywell part-number index hits: keep the canonical exact PDF only.
+    # Apply vendor/kind gates before truncating so an unrelated corpus hit
+    # (e.g. Allen-Bradley knowledgebase xlsx) cannot displace the Honeywell manual.
+    if _HW_PART.search(msg):
+        manual, index = select_operator_document_match(matches, query=msg)
+        gated: list[dict[str, Any]] = []
+        if isinstance(manual, dict):
+            gated.append(manual)
+        if isinstance(index, dict) and index is not manual:
+            gated.append(index)
+        if gated:
+            matches = gated
+        exact = [
+            m
+            for m in matches
+            if isinstance(m, dict) and str(m.get("match_kind") or "") == "exact"
+        ]
+        if exact:
+            matches = exact[:1]
+        elif matches:
+            matches = matches[:1]
+    reply, pending = build_operator_document_reply(
+        matches, query=msg, public_origin=origin
+    )
+    active_document = active_document_from_matches(
+        matches, query=msg, public_origin=origin
+    )
+    if pending and isinstance(active_document, dict) and active_document.get("source"):
+        # Bind the offered follow-up to the exact active manual shown to the operator.
+        pending = dict(pending)
+        pending["source"] = str(active_document.get("source") or pending.get("source") or "")
+        pending["title"] = str(active_document.get("title") or pending.get("title") or "")
+        if active_document.get("part_number"):
+            pending["part_number"] = active_document.get("part_number")
+        if active_document.get("doc_no") or active_document.get("revision"):
+            pending["doc_no"] = active_document.get("doc_no") or active_document.get("revision")
+        active_document = dict(active_document)
+        active_document["pending_action"] = pending
+    # Hard fail-closed: never leave LAN/loopback corpus URLs in the emitted reply.
+    reply = neutralize_lan_url_text(reply, public_origin=origin)
+    assert "192.168.0.15:8789" not in reply
+    assert "127.0.0.1:8789" not in reply
+    assert "localhost:8789" not in reply
+    assert "lan_url" not in reply.lower()
+    spoken = build_compact_spoken_document_reply(matches, query=msg)
+    # Compact spoken is already TTS-safe prose; do not re-run chrome strippers that
+    # can mangle part numbers / document identities.
+    spoken = re.sub(r"\s+", " ", str(spoken or "")).strip()
+    receipt = build_retrieval_receipt(matches, query=msg)
+    return {
+        "handled": True,
+        "query": msg,
+        "reply": reply,
+        "spoken_reply": spoken,
+        "matches": matches,
+        "collection": payload.get("collection") or "",
+        "active_document": active_document if active_document else None,
+        "pending_action": pending,
+        "retrieval": payload.get("retrieval") or "",
+        "retrieval_receipt": receipt,
+        "error": None,
+    }
+
+
+def maybe_rewrite_sidecar_rag_json(
+    extension_id: object,
+    proxy_path: object,
+    body: bytes,
+    content_type: object = "",
+    *,
+    public_origin: object = "",
+) -> bytes:
+    """Neutralize lan_url fields on smedley-engineering RAG JSON proxy responses."""
+    if str(extension_id or "") != "smedley-engineering":
+        return body
+    path = str(proxy_path or "").lstrip("/")
+    if not (path == "rag/retrieve" or path.startswith("rag/")):
+        return body
+    ctype = str(content_type or "").lower()
+    if ctype and "json" not in ctype and "text/" not in ctype and "octet-stream" not in ctype:
+        # Unknown binary — leave alone.
+        if not body[:1] in (b"{", b"["):
+            return body
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except Exception:
+        return body
+    if not isinstance(payload, dict) or "matches" not in payload:
+        return body
+    rewritten = neutralize_retrieve_payload(
+        payload, public_origin=normalize_public_origin(public_origin)
+    )
+    return json.dumps(rewritten, ensure_ascii=False).encode("utf-8")

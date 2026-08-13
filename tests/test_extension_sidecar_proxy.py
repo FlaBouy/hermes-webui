@@ -727,6 +727,73 @@ def test_extension_sidecar_proxy_route_rejects_oversized_upstream_response(monke
     }
 
 
+def test_extension_sidecar_proxy_streams_oversized_doc_bodies(monkeypatch):
+    """doc/ preview opens must stream past the JSON 512 KiB buffer limit."""
+    from api import routes
+
+    payload = b"%PDF-" + (b"x" * (routes._EXTENSION_SIDECAR_PROXY_MAX_RESPONSE_BYTES + 2048))
+
+    monkeypatch.setattr(
+        "api.extensions.resolve_extension_sidecar_proxy_target",
+        lambda extension_id, proxy_path, query="": {
+            "extension_id": extension_id,
+            "origin": "http://127.0.0.1:17787",
+            "proxy_path": "/api/extensions/smedley-engineering/sidecar/",
+            "upstream_url": "http://127.0.0.1:17787/doc/CAD%20Resources/sample.pdf",
+        },
+    )
+
+    class FakeResponse:
+        def __init__(self):
+            self.status = 200
+            self.headers = {
+                "Content-Type": "application/pdf",
+                "Content-Length": str(len(payload)),
+            }
+            self._buf = io.BytesIO(payload)
+
+        def read(self, size=-1):
+            return self._buf.read(size)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeOpener:
+        def open(self, request, timeout=10):
+            assert timeout == routes._EXTENSION_SIDECAR_PROXY_STREAM_TIMEOUT_SECONDS
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        routes,
+        "_extension_sidecar_proxy_same_origin_opener",
+        lambda allowed_origin: FakeOpener(),
+    )
+
+    handler = FakeHandler()
+    handler.headers = {
+        "Origin": "http://webui.local",
+        "Host": "webui.local",
+        "Sec-Fetch-Site": "same-origin",
+    }
+
+    result = routes.handle_get(
+        handler,
+        SimpleNamespace(
+            path="/api/extensions/smedley-engineering/sidecar/doc/CAD%20Resources/sample.pdf",
+            query="",
+        ),
+    )
+    assert result is True
+    assert handler.status == 200
+    assert handler.header("Content-Type") == "application/pdf"
+    assert handler.header("Content-Length") == str(len(payload))
+    assert bytes(handler.body) == payload
+    assert bytes(handler.body)[:5] == b"%PDF-"
+
+
 def test_extension_sidecar_proxy_route_rejects_oversized_upstream_http_error(monkeypatch):
     from api import routes
     from urllib.error import HTTPError
