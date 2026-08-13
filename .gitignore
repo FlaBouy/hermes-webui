@@ -77,3 +77,8 @@ graphify-out/
 node_modules/
 package-lock.json
 docs/ui-ux/review-shots/
+# Machine-local / backups — never publish
+*.bak.*
+P:\DATA/
+P:\\DATA/
+**/agent-feeds/
