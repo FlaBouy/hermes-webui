@@ -1,0 +1,17 @@
+{
+  "id": "smedley-engineering",
+  "name": "Smedley Engineering Workspace",
+  "version": "0.2.5",
+  "description": "RAG retrieval, PTT, and deterministic electrical tools around the existing Smedley WebUI session.",
+  "scripts": [
+    "smedley-engineering.v0.2.5.js"
+  ],
+  "stylesheets": [
+    "smedley-engineering.v0.2.5.css"
+  ],
+  "sidecar": {
+    "type": "loopback",
+    "origin": "http://127.0.0.1:5004",
+    "health_path": "/health"
+  }
+}
