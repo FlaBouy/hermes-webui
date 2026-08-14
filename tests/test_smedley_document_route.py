@@ -393,7 +393,7 @@ def test_wiring_extract_uses_bound_pdf_pages_not_vision(monkeypatch):
     )
 
     assert result is not None and result["handled"] is True
-    assert "Verified PDF page **159**" in result["reply"]
+    assert "PDF viewer page **159**" in result["reply"]
     assert "Open wiring page" in result["reply"]
     assert "snapshot" not in result["reply"].lower()
     assert "No page loaded" not in result["reply"]
@@ -401,6 +401,78 @@ def test_wiring_extract_uses_bound_pdf_pages_not_vision(monkeypatch):
     assert "159" in result["spoken_reply"]
     assert result["active_document"]["page_hint"] == 159
     assert result["extraction"]["pages"][0]["pdf_page"] == 159
+
+
+def test_wiring_extract_states_pdf_and_printed_page_and_labels_link_correctly(monkeypatch):
+    """PDF-viewer page and the document's own printed page must both be
+    stated explicitly; the page-specific link must only be labeled 'Open
+    wiring page' when a real page fragment was actually appended."""
+    active = {
+        "source": "Vendor Data/Honeywell/x/pm20520.pdf",
+        "title": "Process Manager I/O Installation",
+        "doc_no": "PM20-520",
+        "part_number": "MU-TDIY22",
+        "url": f"{ORIGIN}/api/extensions/smedley-engineering/sidecar/doc/Vendor%20Data/x/pm20520.pdf",
+    }
+    monkeypatch.setattr(
+        docroute,
+        "resolve_active_document_filesystem_path",
+        lambda _ad: "/tmp/fake-pm20520.pdf",
+    )
+    monkeypatch.setattr(
+        docroute,
+        "extract_wiring_pages_from_pdf",
+        lambda *_a, **_k: [
+            {
+                "pdf_page": 172,
+                "printed_page": "152",
+                "score": 97,
+                "reasons": ["part_hit", "figure", "connection_diagram", "wiring"],
+                "excerpt": "Figure 4-12 Model MU-TDIY22 24 Vdc Digital Input FTA Connection Diagram",
+            }
+        ],
+    )
+
+    result = docroute.try_active_document_review(
+        "Extract the wiring diagram.", active, public_origin=ORIGIN
+    )
+
+    assert result is not None and result["handled"] is True
+    reply = result["reply"]
+    assert "PDF viewer page **172**" in reply
+    assert "printed manual page **152**" in reply
+    assert "#page=172" in reply
+    assert "[Open wiring page]" in reply
+    assert "172" in result["spoken_reply"]
+    assert "152" in result["spoken_reply"]
+
+
+def test_wiring_extract_omits_wiring_page_label_when_no_link():
+    """If no open_href can be built at all, there must be no link and
+    certainly no 'Open wiring page' label pointing at nothing."""
+    active = {
+        "source": "",
+        "title": "Process Manager I/O Installation",
+        "doc_no": "PM20-520",
+        "part_number": "MU-TDIY22",
+        "url": "",
+    }
+    pages = [
+        {
+            "pdf_page": 172,
+            "printed_page": "152",
+            "score": 97,
+            "reasons": ["part_hit", "figure"],
+            "excerpt": "Figure 4-12 excerpt",
+        }
+    ]
+    reply, spoken, receipt = docroute.build_wiring_extract_reply(
+        active, pages, public_origin=ORIGIN
+    )
+    assert "Open wiring page" not in reply
+    assert "Open manual" not in reply
+    assert "PDF viewer page **172**" in reply
+    assert "printed manual page **152**" in reply
 
 
 def test_wiring_extract_honest_failure_retains_context(monkeypatch):

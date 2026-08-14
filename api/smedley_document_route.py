@@ -18,6 +18,7 @@ import logging
 import os
 import re
 import subprocess
+import sys
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -87,6 +88,11 @@ _AFFIRMATIVE_FOLLOWUP_RE = re.compile(
     r"^\s*(?:yes|yep|yeah|yup|sure|ok|okay|please|do\s+it|go\s+ahead|"
     r"proceed|affirmative|sounds\s+good|that\s+works|do\s+that|"
     r"yes\s+please|please\s+do)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+_NEGATIVE_FOLLOWUP_RE = re.compile(
+    r"^\s*(?:no|nope|nah|negative|not\s+now|no\s+thanks?|"
+    r"don'?t\s+bother|skip\s+it|never\s*mind)\s*[.!]?\s*$",
     re.IGNORECASE,
 )
 _PENDING_EXTRACT_ACTION = "extract_wiring_schematic"
@@ -164,10 +170,17 @@ _ACTIVE_DOCUMENT_FOLLOWUP_RE = re.compile(
     re.IGNORECASE,
 )
 _ACTIVE_DOCUMENT_WIRING_EXTRACT_RE = re.compile(
-    r"\b(?:extract|pull|show|open|find|get|locate|display|bring\s+up)\b.{0,40}\b"
+    r"\b(?:extract|pull|show|open|find|get|locate|display|bring\s+up|hand|send|give)\b.{0,40}\b"
     r"(?:wiring|schematic|connection\s+diagram|terminal\s+diagram|diagram)\b"
     r"|\b(?:wiring|schematic|connection)\s+(?:diagram|page|schematic|drawing)s?\b"
-    r"|\bextract\s+(?:it|that|the\s+(?:page|diagram|schematic|wiring))\b",
+    r"|\bextract\s+(?:it|that|the\s+(?:page|diagram|schematic|wiring))\b"
+    # Natural continuations naming the page number rather than the verb
+    # "extract" — order-flexible so "page number for the schematic" and
+    # "schematic page number" both match. Scoped by requiring both a
+    # page-number phrase AND a wiring/schematic/diagram/connection noun
+    # within a short span, so ordinary questions are not swept in.
+    r"|\bpage\s*(?:number|no\.?|#)\b.{0,60}\b(?:wiring|schematic|diagram|connection)\b"
+    r"|\b(?:wiring|schematic|diagram|connection)\b.{0,60}\bpage\s*(?:number|no\.?|#)\b",
     re.IGNORECASE,
 )
 _ACTIVE_DOCUMENT_RECOMMENDATION_RE = re.compile(
@@ -1264,6 +1277,11 @@ def is_affirmative_followup(query: object) -> bool:
     return bool(_AFFIRMATIVE_FOLLOWUP_RE.match(str(query or "").strip()))
 
 
+def is_negative_followup(query: object) -> bool:
+    """True for short explicit declines that reject the offered next action."""
+    return bool(_NEGATIVE_FOLLOWUP_RE.match(str(query or "").strip()))
+
+
 def is_wiring_extract_followup(query: object) -> bool:
     """True for offered follow-ups like 'extract the wiring diagram'.
 
@@ -1305,6 +1323,10 @@ def is_active_document_review_request(query: object, active_document: object) ->
     if is_wiring_extract_followup(msg):
         return True
     if is_affirmative_followup(msg) and _pending_extract_bound(active_document):
+        return True
+    # A bare decline only means something when there is an actual pending
+    # offer to decline -- otherwise leave it to fall through as ordinary chat.
+    if is_negative_followup(msg) and _pending_extract_bound(active_document):
         return True
     # Do not steal a new document-route lookup into review of a prior binding.
     if is_document_request(msg) and not is_affirmative_followup(msg):
@@ -1445,6 +1467,49 @@ def _text_mentions_part(text: object, part: object) -> bool:
     return False
 
 
+def _part_mention_span(text: object, part: object) -> tuple[int, int] | None:
+    """First boundary-aware span of any part-family needle in text, or None."""
+    low = str(text or "").lower()
+    for needle in _part_match_needles(part):
+        if not needle:
+            continue
+        m = re.search(rf"(?<![a-z0-9]){re.escape(needle)}(?![a-z0-9])", low)
+        if m:
+            return m.span()
+    return None
+
+
+def _part_centered_excerpt(text: object, part: object, *, width: int = 900) -> str:
+    """Excerpt centered on the verified part mention, not a naive page-start slice.
+
+    A multi-part comparison table can put unrelated family text before the
+    exact part's own sentence; slicing from character 0 can foreground that
+    unrelated text and cut the part confirmation off entirely. Center the
+    window on the actual match so the part-number sentence is visible.
+    """
+    raw = str(text or "")
+    collapsed = re.sub(r"\s+", " ", raw).strip()
+    if not collapsed:
+        return ""
+    span = _part_mention_span(collapsed, part)
+    if not span:
+        return collapsed[:width]
+    start, end = span
+    mid = (start + end) // 2
+    half = width // 2
+    win_start = max(0, mid - half)
+    win_end = win_start + width
+    if win_end > len(collapsed):
+        win_end = len(collapsed)
+        win_start = max(0, win_end - width)
+    excerpt = collapsed[win_start:win_end]
+    if win_start > 0:
+        excerpt = "…" + excerpt
+    if win_end < len(collapsed):
+        excerpt = excerpt + "…"
+    return excerpt
+
+
 def _score_wiring_page(text: str, *, part: str) -> tuple[int, list[str]]:
     low = str(text or "").lower()
     reasons: list[str] = []
@@ -1477,6 +1542,78 @@ def _figure_refs(text: str) -> list[str]:
     refs = re.findall(r"\bFigure\s+(\d+[-\u2013]\d+)\b", str(text or ""), flags=re.I)
     # Normalize en-dash
     return list(dict.fromkeys(r.replace("\u2013", "-") for r in refs))
+
+
+_SCHEMATIC_CAPTION_RE = re.compile(
+    r"\b(?:wiring|schematic|cabling|cable|connection|pinning|pin[- ]?out)\b",
+    re.IGNORECASE,
+)
+
+
+def _verified_figure_for_part(text: object, part: object) -> str:
+    """Figure number of a wiring/schematic/cabling/pinning figure captioned FOR
+    this exact part/model, or '' if none.
+
+    A page that merely mentions the part in a compatibility table -- while an
+    unrelated figure for a different assembly happens to sit on the same page
+    -- must not qualify. The figure's OWN caption line must name this part's
+    model family, not just co-occur with it.
+    """
+    raw = str(text or "")
+    if not str(part or "").strip():
+        return ""
+    low = raw.lower()
+    # A "List of Figures" / table-of-contents page repeats many captions with
+    # trailing page-number leaders -- it is not the actual figure page and
+    # must never be claimed as a verified diagram location.
+    if "table of contents" in low or low.count("figure ") > 5:
+        return ""
+    for m in re.finditer(r"\bFigure\s+(\d+[-\u2013]\d+)\s*([^\n]{0,160})", raw, re.IGNORECASE):
+        fig_no, caption = m.group(1), m.group(2)
+        if not _SCHEMATIC_CAPTION_RE.search(caption):
+            continue
+        if _text_mentions_part(caption, part):
+            return fig_no.replace("\u2013", "-")
+    return ""
+
+
+def _printed_page_number(text: object) -> str:
+    """Derive the document's own printed/footer page number from its own
+    header/footer line, e.g. '152 Process Manager I/O Installation 3/98' ->
+    '152', or '3/98 Process Manager I/O Installation 151' -> '151'.
+
+    This is derived per-page from the document's own rendered header/footer,
+    never assumed from a universal PDF-index-to-printed-page offset --
+    different manuals (and even different sections of the same manual, e.g.
+    front matter vs. body) can shift that offset. Extraction backend also
+    varies (pypdf renders this line first; the pdftotext -layout fallback can
+    place the same physical footer line last), so both ends are checked.
+    """
+    raw = str(text or "")
+    lines = [ln.strip() for ln in raw.split("\n") if ln.strip()]
+    if not lines:
+        return ""
+
+    def _page_num_in_line(line: str) -> str:
+        tokens = line.split()
+        if not tokens:
+            return ""
+        # Only trust this as a page-number line when a revision-code token
+        # (e.g. '3/98') is also present -- otherwise a bare leading/trailing
+        # number could be an unrelated figure/table digit.
+        if not any(re.fullmatch(r"\d{1,2}/\d{2,4}", tok) for tok in tokens):
+            return ""
+        if re.fullmatch(r"\d{1,4}", tokens[0]):
+            return tokens[0]
+        if re.fullmatch(r"\d{1,4}", tokens[-1]):
+            return tokens[-1]
+        return ""
+
+    for candidate in (lines[0], lines[-1]):
+        found = _page_num_in_line(candidate)
+        if found:
+            return found
+    return ""
 
 
 def _pdf_page_texts(pdf_path: str) -> list[str]:
@@ -1522,6 +1659,122 @@ def _pdf_page_texts(pdf_path: str) -> list[str]:
     return pages
 
 
+_COMPATIBLE_FTA_SENTENCE_RE = re.compile(
+    r"[^.]*\bcompatible\s+with\s+the\s+model\b[^.]*\.",
+    re.IGNORECASE,
+)
+_FTA_MODEL_TOKEN_RE = re.compile(r"\b(?:MU|MC)-[A-Z]{2,8}\d{1,4}\b", re.IGNORECASE)
+
+
+def _explicitly_compatible_fta_models(page_texts: list[str], part: object) -> list[str]:
+    """FTA/module models the BOUND document's own text names as compatible
+    with this exact part -- extracted from its compatibility sentence, never
+    guessed or substituted from a family/near-model heuristic."""
+    part_norm = str(part or "").strip()
+    if not part_norm:
+        return []
+    out: list[str] = []
+    for text in page_texts:
+        for sent_m in _COMPATIBLE_FTA_SENTENCE_RE.finditer(str(text or "")):
+            sentence = sent_m.group(0)
+            if not _text_mentions_part(sentence, part_norm):
+                continue
+            for tok in _FTA_MODEL_TOKEN_RE.findall(sentence):
+                norm = tok.upper()
+                # Skip the requested part's own MU-/MC- conformal-coat variant --
+                # that is a self-reference, not a distinct compatible FTA.
+                if norm in out or _text_mentions_part(norm, part_norm):
+                    continue
+                out.append(norm)
+    return out
+
+
+def authoritative_tdc3000_schematic_search(
+    part: object, extra_models: object = None
+) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """Search the TDC3000 authoritative custom index (all 4 formats: csv,
+    json, xlsx, html) plus their index-linked PDFs for a genuine wiring/FTA
+    connection figure captioned for ``part`` or one of ``extra_models``
+    (explicitly-verified compatible FTAs -- never a guessed family manual).
+
+    Returns (result_or_None, checked_entries). ``result`` identifies the
+    exact authoritative document/page/figure found. ``checked_entries``
+    lists every index-linked document actually inspected, for a disclosed
+    "nothing found" outcome that never claims more than was really checked.
+    """
+    try:
+        _bin_dir = "/Users/rick/bin"
+        if _bin_dir not in sys.path:
+            sys.path.insert(0, _bin_dir)
+        import tdc3000_index_lookup as tdc  # noqa: WPS433 (deliberate lazy import)
+    except Exception:
+        return None, []
+    try:
+        by_filename = tdc.get_index_by_filename()
+    except Exception:
+        return None, []
+    if not by_filename:
+        return None, []
+
+    targets: list[str] = []
+    for candidate in [str(part or "").strip()] + [str(x).strip() for x in (extra_models or [])]:
+        norm = candidate.upper()
+        if norm and norm not in targets:
+            targets.append(norm)
+
+    root = library_root()
+    checked: list[dict[str, Any]] = []
+    seen_docs: set[str] = set()
+    for target in targets:
+        try:
+            hits = tdc._scan_exact_identifier(target, by_filename)  # noqa: SLF001
+        except Exception:
+            continue
+        for hit in hits:
+            source = str(hit.get("library_source") or "")
+            if not source or source in seen_docs:
+                continue
+            seen_docs.add(source)
+            entry = {
+                "target": target,
+                "filename": hit.get("filename"),
+                "title": hit.get("title"),
+                "doc_no": hit.get("doc_no"),
+                "source": source,
+                "index_formats": hit.get("index_formats"),
+            }
+            checked.append(entry)
+            if not root:
+                continue
+            full = os.path.join(root, source)
+            if not os.path.isfile(full):
+                continue
+            try:
+                texts = _pdf_page_texts(full)
+            except Exception:
+                continue
+            for idx, text in enumerate(texts):
+                fig = _verified_figure_for_part(text, target)
+                if not fig:
+                    continue
+                return (
+                    {
+                        "source": source,
+                        "title": hit.get("title") or "",
+                        "doc_no": hit.get("doc_no") or "",
+                        "filename": hit.get("filename") or "",
+                        "pdf_page": idx + 1,
+                        "figure": fig,
+                        "matched_model": target,
+                        "requested_part": str(part or "").strip(),
+                        "index_href": hit.get("index_href"),
+                        "index_formats": hit.get("index_formats"),
+                    },
+                    checked,
+                )
+    return None, checked
+
+
 def extract_wiring_pages_from_pdf(
     pdf_path: object,
     *,
@@ -1535,9 +1788,16 @@ def extract_wiring_pages_from_pdf(
     page_texts = _pdf_page_texts(path)
     part = str(part_number or "").strip()
 
+    # A page may only be claimed as a verified wiring/schematic answer when it
+    # carries its own figure/caption directly applicable to this part (or the
+    # part's explicitly named model) -- not merely a page where the part is
+    # mentioned in a compatibility table while an unrelated figure for a
+    # different assembly happens to share the page.
     part_pages: list[tuple[int, int, list[str], str]] = []
     for index, text in enumerate(page_texts):
         if part and not _text_mentions_part(text, part):
+            continue
+        if part and not _verified_figure_for_part(text, part):
             continue
         score, reasons = _score_wiring_page(text, part=part)
         if score < 50:
@@ -1545,7 +1805,7 @@ def extract_wiring_pages_from_pdf(
         part_pages.append((score, index + 1, reasons, text))
     if not part_pages and part:
         for index, text in enumerate(page_texts):
-            if _text_mentions_part(text, part):
+            if _text_mentions_part(text, part) and _verified_figure_for_part(text, part):
                 score, reasons = _score_wiring_page(text, part=part)
                 part_pages.append((score, index + 1, reasons, text))
     if not part_pages:
@@ -1563,9 +1823,10 @@ def extract_wiring_pages_from_pdf(
     selected: list[dict[str, Any]] = [
         {
             "pdf_page": best_page,
+            "printed_page": _printed_page_number(best_text),
             "score": best_score,
             "reasons": best_reasons,
-            "excerpt": re.sub(r"\s+", " ", best_text).strip()[:900],
+            "excerpt": _part_centered_excerpt(best_text, part),
         }
     ]
     seen = {best_page}
@@ -1584,9 +1845,10 @@ def extract_wiring_pages_from_pdf(
             selected.append(
                 {
                     "pdf_page": page_no,
+                    "printed_page": _printed_page_number(text),
                     "score": score + 30,
                     "reasons": reasons + [f"figure_ref:{fig}"],
-                    "excerpt": re.sub(r"\s+", " ", text).strip()[:900],
+                    "excerpt": _part_centered_excerpt(text, part),
                 }
             )
             seen.add(page_no)
@@ -1600,12 +1862,18 @@ def extract_wiring_pages_from_pdf(
         score, reasons = _score_wiring_page(text, part=part)
         if "connection_diagram" not in reasons and "schematic" not in reasons:
             continue
+        # Proximity to the verified page is not enough -- a nearby figure for a
+        # DIFFERENT assembly (e.g. a shared power-distribution module) must not
+        # be retained as if it were relevant to this part.
+        if part and not _verified_figure_for_part(text, part):
+            continue
         selected.append(
             {
                 "pdf_page": page_no,
+                "printed_page": _printed_page_number(text),
                 "score": score,
                 "reasons": reasons + ["near_part_context"],
-                "excerpt": re.sub(r"\s+", " ", text).strip()[:900],
+                "excerpt": _part_centered_excerpt(text, part),
             }
         )
         seen.add(page_no)
@@ -1664,51 +1932,201 @@ def build_wiring_extract_reply(
         return reply, spoken, receipt
     if not pages:
         reply = (
-            f"I searched **{identity}** for **{part or 'the requested part'}** wiring/schematic pages, "
-            "but could not verify a specific diagram page from the PDF text layer. "
+            f"I searched **{identity}** for a wiring/schematic figure captioned for "
+            f"**{part or 'the requested part'}** itself. None is verified in this manual — "
+            f"{part or 'the part'} appears only in compatibility/reference text here, not in a "
+            "figure or caption of its own. I will not substitute a nearby module's diagram or "
+            "claim a page as the strongest context without a verified figure. "
             "The document context stays bound."
         )
         if open_href:
             reply += f"\n\n[Open manual]({open_href})"
         spoken = (
-            f"I could not verify a wiring diagram page in {title or 'the active manual'} yet. "
-            "The manual is still bound."
+            f"No verified wiring diagram for this part in {title or 'the active manual'}. "
+            "I will not substitute a different module's figure. The manual is still bound."
         )
         return reply, spoken, receipt
 
     top = pages[0]
     page_no = top.get("pdf_page")
+    printed_no = str(top.get("printed_page") or "").strip()
+    # A page is only linkable as a page-specific "wiring page" when a real
+    # page fragment was actually appended -- never label a bare whole-manual
+    # link that way.
     page_href = open_href
+    has_page_fragment = False
     if open_href and page_no:
-        # Fragment is advisory for PDF viewers; same sidecar document bytes.
-        joiner = "&" if "?" in open_href else "#"
-        # Prefer hash page for browser PDF viewers.
         page_href = f"{open_href}#page={page_no}"
+        has_page_fragment = True
+    page_stmt = f"PDF viewer page **{page_no}**"
+    if printed_no:
+        page_stmt += f", printed manual page **{printed_no}**"
+    else:
+        page_stmt += " (printed manual page not determinable from this page's own header/footer)"
     lines = [
         f"Using the bound manual **{identity}**"
         + (f" for **{part}**" if part else "")
         + ":",
         "",
-        f"Verified PDF page **{page_no}** contains the strongest wiring/schematic context for this part.",
+        f"Verified figure found — {page_stmt} contains the strongest wiring/schematic context for this part.",
     ]
     if top.get("excerpt"):
-        lines.extend(["", str(top["excerpt"])[:700]])
+        # Excerpt is already a bounded, part-centered window — do not re-slice
+        # from the front, or the part-number confirmation can be cut again.
+        lines.extend(["", str(top["excerpt"])])
     if len(pages) > 1:
         extras = ", ".join(f"p.{p.get('pdf_page')}" for p in pages[1:])
         lines.extend(["", f"Related pages also retained: {extras}."])
-    if page_href:
+    if has_page_fragment:
         lines.extend(["", f"[Open wiring page]({page_href})"])
     elif open_href:
         lines.extend(["", f"[Open manual]({open_href})"])
     lines.extend(["", "Want me to pull another figure or FTA connection diagram from this manual?"])
     reply = "\n".join(lines)
     doc_spoken = re.sub(r"([A-Z]+)(\d{2})-(\d{3})", r"\1 \2-\3", doc_no) if doc_no else ""
+    printed_spoken = f", printed page {printed_no}" if printed_no else ""
     spoken = (
         f"I extracted wiring context from {title or 'the bound manual'}"
         + (f", document {doc_spoken}" if doc_spoken else "")
         + (f" for {part}" if part else "")
-        + f", PDF page {page_no}. The page link is on screen."
+        + f", PDF viewer page {page_no}{printed_spoken}. The page link is on screen."
     )
+    return reply, spoken, receipt
+
+
+def build_authoritative_schematic_reply(
+    active_document: object,
+    found: dict[str, Any] | None,
+    checked: list[dict[str, Any]],
+    compatible_ftas: list[str],
+    *,
+    public_origin: object = "",
+) -> tuple[str, str, dict[str, Any]]:
+    """Outcome A/B reply when the bound manual has no verified figure itself.
+
+    Outcome A: an index-proven authoritative document elsewhere in the TDC3000
+    library has a genuine wiring/FTA figure for the part or an explicitly
+    compatible FTA model -- cited with its own identity/page/link.
+    Outcome B: a structured, disclosed "nothing found" result naming every
+    authoritative index entry actually checked. The originally bound
+    document's identity/compatibility text is never treated as a schematic.
+    """
+    origin = normalize_public_origin(public_origin)
+    bound_source = _active_document_source(active_document)
+    bound_title = ""
+    part = ""
+    bound_doc_no = ""
+    bound_url = ""
+    if isinstance(active_document, dict):
+        bound_title = str(active_document.get("title") or "").strip()
+        part = str(active_document.get("part_number") or "").strip()
+        bound_doc_no = str(active_document.get("doc_no") or active_document.get("revision") or "").strip()
+        bound_url = str(active_document.get("url") or "").strip()
+    bound_identity = bound_title or (bound_source.rsplit("/", 1)[-1] if bound_source else "the active manual")
+    if bound_doc_no:
+        bound_identity = f"{bound_identity} ({bound_doc_no})"
+    bound_open_href = normalize_corpus_url(
+        bound_url, source=bound_source, public_origin=origin
+    ) or absolutize_sidecar_href(
+        sidecar_preview_path(bound_source) if bound_source else "", public_origin=origin
+    )
+
+    checked_receipt = [
+        {"target": c.get("target"), "filename": c.get("filename"), "doc_no": c.get("doc_no"), "source": c.get("source")}
+        for c in checked
+    ]
+
+    if found:
+        found_href = absolutize_sidecar_href(
+            sidecar_preview_path(found.get("source") or ""), public_origin=origin
+        )
+        page_no = found.get("pdf_page")
+        has_page_fragment = bool(found_href and page_no)
+        page_href = f"{found_href}#page={page_no}" if has_page_fragment else found_href
+        found_identity = str(found.get("title") or found.get("filename") or "the indexed manual")
+        if found.get("doc_no"):
+            found_identity = f"{found_identity} ({found['doc_no']})"
+        matched_model = str(found.get("matched_model") or part).strip()
+        via_note = (
+            "" if matched_model.upper() == part.upper()
+            else f" via its explicitly compatible FTA model **{matched_model}**"
+        )
+        # Derive the printed page independently from this specific page's own
+        # header/footer (never a re-used or assumed offset) -- presentation
+        # only, does not alter what authoritative_tdc3000_schematic_search
+        # actually matched.
+        printed_no = ""
+        if page_no:
+            found_root = library_root()
+            found_full = os.path.join(found_root, found.get("source") or "") if found_root else ""
+            if found_full and os.path.isfile(found_full):
+                try:
+                    found_texts = _pdf_page_texts(found_full)
+                    if 0 < int(page_no) <= len(found_texts):
+                        printed_no = _printed_page_number(found_texts[int(page_no) - 1])
+                except Exception:
+                    printed_no = ""
+        page_stmt = f"PDF viewer page **{page_no}**"
+        if printed_no:
+            page_stmt += f", printed manual page **{printed_no}**"
+        else:
+            page_stmt += " (printed manual page not determinable from this page's own header/footer)"
+        receipt = {
+            "schema": "smedley.authoritative_tdc3000_schematic.v1",
+            "outcome": "found",
+            "requested_part": part,
+            "matched_model": matched_model,
+            "bound_document": {"source": bound_source, "title": bound_title, "doc_no": bound_doc_no},
+            "found_document": {**found, "printed_page": printed_no or None},
+            "checked": checked_receipt,
+        }
+        reply = (
+            f"**{bound_identity}** (bound manual for **{part}**) has no wiring/schematic figure of its own — "
+            "its compatibility text is supporting identity evidence only, not a schematic. "
+            f"Searching the authoritative TDC3000 index (all 4 formats) for {part}{via_note} found a verified "
+            f"figure in **{found_identity}**: Figure **{found['figure']}**, {page_stmt}.\n\n"
+        )
+        reply += (
+            f"[Open wiring page]({page_href})" if has_page_fragment else f"[Open {found_identity}]({page_href})"
+        )
+        printed_spoken = f", printed page {printed_no}" if printed_no else ""
+        spoken = (
+            f"{bound_title or 'The bound manual'} has no schematic of its own for {part}. "
+            f"The TDC3000 index found one in {found.get('title') or found.get('filename')}, "
+            f"PDF viewer page {page_no}{printed_spoken}."
+        )
+        return reply, spoken, receipt
+
+    checked_lines = "; ".join(
+        f"{c.get('filename')} ({c.get('doc_no') or c.get('title') or 'untitled'})" for c in checked
+    ) or "no index-linked documents matched this part or its compatible FTA models"
+    fta_note = (
+        f" or its explicitly compatible FTA models ({', '.join(compatible_ftas)})"
+        if compatible_ftas
+        else ""
+    )
+    reply = (
+        f"No authoritative schematic found in the indexed TDC3000 library for **{part}**{fta_note}. "
+        f"**{bound_identity}** contains only supporting identity/compatibility text for {part} — never treated "
+        f"as a schematic. Authoritative index entries checked (all 4 formats: csv/json/xlsx/html): {checked_lines}. "
+        "I will not invent a substitute manual."
+    )
+    if bound_open_href:
+        reply += f"\n\n[Open manual]({bound_open_href})"
+    spoken = (
+        f"No authoritative wiring schematic was found in the TDC3000 index for {part}"
+        + (f" or its compatible FTAs" if compatible_ftas else "")
+        + f". {len(checked)} indexed documents were checked. The bound manual is still {bound_title or 'retained'}."
+    )
+    receipt = {
+        "schema": "smedley.authoritative_tdc3000_schematic.v1",
+        "outcome": "not_found",
+        "requested_part": part,
+        "compatible_ftas": compatible_ftas,
+        "bound_document": {"source": bound_source, "title": bound_title, "doc_no": bound_doc_no},
+        "found_document": None,
+        "checked": checked_receipt,
+    }
     return reply, spoken, receipt
 
 
@@ -1720,6 +2138,26 @@ def try_active_document_review(
         return None
     source = _active_document_source(active_document)
     origin = normalize_public_origin(public_origin)
+
+    # Explicit decline of a pending extract offer: clear the pending action
+    # without executing it or dropping the bound document/active identity.
+    if is_negative_followup(query) and _pending_extract_bound(active_document):
+        active_out = dict(active_document) if isinstance(active_document, dict) else {}
+        active_out.pop("pending_action", None)
+        title = str(active_out.get("title") or "").strip() or "the active manual"
+        part = str(active_out.get("part_number") or "").strip()
+        reply = (
+            f"Understood — skipping the wiring-schematic extraction. "
+            f"**{title}**" + (f" for **{part}**" if part else "") + " stays bound if you need it later."
+        )
+        return {
+            "handled": True,
+            "reply": reply,
+            "spoken_reply": f"Skipping the wiring extraction. {title} is still bound.",
+            "source": source,
+            "active_document": active_out,
+            "error": None,
+        }
 
     # Offered follow-up: explicit extract phrasing OR affirmative on pending extract.
     wants_extract = is_wiring_extract_followup(query) or (
@@ -1742,6 +2180,43 @@ def try_active_document_review(
             except Exception as exc:  # noqa: BLE001
                 err = type(exc).__name__
                 logger.warning("wiring extract failed: %s", err)
+
+        # The bound manual itself has no verified figure: never fall back to
+        # merely re-showing the generic manual. Search the authoritative
+        # TDC3000 index (all 4 formats, plus the part's own explicitly
+        # compatible FTA models) and return outcome A (found, cited) or
+        # outcome B (disclosed, naming what was checked) -- never both silent
+        # and never a guessed substitute.
+        if not err and not pages and part and pdf_path.lower().endswith(".pdf"):
+            compatible_ftas: list[str] = []
+            try:
+                bound_texts = _pdf_page_texts(pdf_path)
+                compatible_ftas = _explicitly_compatible_fta_models(bound_texts, part)
+            except Exception:
+                compatible_ftas = []
+            found, checked = authoritative_tdc3000_schematic_search(part, compatible_ftas)
+            reply, spoken, receipt = build_authoritative_schematic_reply(
+                active_document, found, checked, compatible_ftas, public_origin=origin
+            )
+            active_out = dict(active_document) if isinstance(active_document, dict) else {}
+            active_out.pop("pending_action", None)
+            if found:
+                active_out["verified_schematic"] = {
+                    "source": found.get("source"),
+                    "pdf_page": found.get("pdf_page"),
+                    "matched_model": found.get("matched_model"),
+                    "figure": found.get("figure"),
+                }
+            return {
+                "handled": True,
+                "reply": reply,
+                "spoken_reply": spoken,
+                "source": source,
+                "active_document": active_out,
+                "extraction": receipt,
+                "error": None,
+            }
+
         reply, spoken, receipt = build_wiring_extract_reply(
             active_document, pages, public_origin=origin, error=err
         )

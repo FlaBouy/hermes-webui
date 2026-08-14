@@ -125,6 +125,19 @@
     return RAG_PROXY+'/'+route+'/'+rel.split('/').map(encodeURIComponent).join('/');
   }
   function normalizeCorpusSidecarUrl(pathOrUrl){
+    // Preserve any #page=N fragment across normalization. Every branch below
+    // works on hash-stripped inputs (fragments never reach the server), so
+    // capture it once here and reattach to whatever canonical href comes out
+    // -- otherwise a page-specific citation link silently degrades to the
+    // whole-document link once opened.
+    const rawWithHash=String(pathOrUrl||'').trim();
+    const hashIdx=rawWithHash.indexOf('#');
+    const pageHash=hashIdx>=0?rawWithHash.slice(hashIdx):'';
+    const result=_normalizeCorpusSidecarUrlCore(pathOrUrl);
+    if(!result || !pageHash) return result;
+    return result.includes('#')?result:(result+pageHash);
+  }
+  function _normalizeCorpusSidecarUrlCore(pathOrUrl){
     const raw=String(pathOrUrl||'').trim();
     if(!raw) return '';
     // Never promote lan_url / corpus-serve.
@@ -286,6 +299,13 @@
         return;
       }
     }
+    // The eventual open target is a blob: URL (fetched bytes), which has no
+    // relation to the sidecar path the browser's PDF viewer would otherwise
+    // read #page= from. Capture the page fragment now and reattach it to the
+    // blob URL below -- Chrome/Firefox's built-in PDF viewer honors #page=N
+    // on blob: URLs the same as on a normal http(s) URL.
+    let pageHash='';
+    try{ pageHash=new URL(target, window.location.origin).hash||''; }catch(_){}
     // Always fetch same-origin sidecar path so local :8787 cookies authorize the open,
     // even when the rendered markdown href is an absolute Tailscale/public origin.
     try{
@@ -305,9 +325,10 @@
       const buf=await res.arrayBuffer();
       const blob=new Blob([buf],{type:ctype||'application/octet-stream'});
       const blobUrl=URL.createObjectURL(blob);
-      const win=window.open(blobUrl,'_blank');
+      const openUrl=pageHash?(blobUrl+pageHash):blobUrl;
+      const win=window.open(openUrl,'_blank');
       if(!win){
-        window.location.assign(target);
+        window.location.assign(pageHash?(target+pageHash):target);
         return;
       }
       setTimeout(()=>{ try{ URL.revokeObjectURL(blobUrl); }catch(_){ } }, 120000);
