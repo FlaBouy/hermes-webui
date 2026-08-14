@@ -47,6 +47,10 @@ _apply_lock = threading.Lock()   # prevents concurrent stash/pull/pop on same re
 CACHE_TTL = 1800  # 30 minutes
 _AGENT_GATEWAY_RESTART_RETRY_DELAY_S = 1.0
 _GIT_DIAGNOSTIC_MAX_CHARS = 300
+# Native Windows runs the WebUI as a windowed process: every git child spawned
+# without this flag flashes a console host on the user's desktop. Zero on POSIX,
+# where subprocess only rejects a NON-zero creationflags value.
+_NO_CONSOLE_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == 'win32' else 0
 _CREDENTIAL_IN_URL_RE = re.compile(r"([a-zA-Z][a-zA-Z0-9+.-]*://)([^/@\s'\"]+)@")
 _GITHUB_TOKEN_RE = re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9_]{20,}|github_pat_[A-Za-z0-9_]{20,})\b")
 _QUERY_SECRET_RE = re.compile(r"([?&](?:access_token|oauth_token|private_token|client_secret|app_secret|api[_-]?key|token|password|secret|auth|key)=)[^&\s'\"]+", re.IGNORECASE)
@@ -218,6 +222,7 @@ def _run_git(args, cwd, timeout=10):
             [git_executable] + args, cwd=str(cwd), capture_output=True,
             text=True, timeout=timeout,
             encoding='utf-8', errors='replace',
+            creationflags=_NO_CONSOLE_WINDOW,
         )
         # On non-UTF-8 locales (e.g. Chinese Windows GBK), a binary git
         # output that fails to decode used to leave r.stdout = None and crash
@@ -2114,6 +2119,7 @@ def _list_checkout_processes(path: Path, *, limit: int = 25) -> list[dict]:
             timeout=5,
             encoding='utf-8',
             errors='replace',
+            creationflags=_NO_CONSOLE_WINDOW,
         )
     except (OSError, subprocess.TimeoutExpired):
         return []

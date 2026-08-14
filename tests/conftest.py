@@ -469,6 +469,28 @@ def _pytest_session_safe_execv(_exe, _args):  # pragma: no cover — never calle
 
 os.execv = _pytest_session_safe_execv
 
+# ── Windows counterpart of the execv guard ─────────────────────────────────
+# The guard above only covers the POSIX branch of _schedule_restart(). On
+# Windows os.execv() does not replace the process, so _schedule_restart()
+# instead spawns a DETACHED copy of the current command line and then calls
+# os._exit(0). Inside pytest that command line is the pytest invocation
+# itself: a late-firing daemon thread kills the runner mid-session AND
+# relaunches the whole suite detached, which then schedules its own restarts
+# — a self-multiplying storm of background pytest sessions.
+#
+# os.execv can be neutered in place because it is a leaf call; the Windows
+# branch cannot, because the damage is done by the Popen() before os._exit().
+# So the whole scheduler is made inert for the session instead. Tests that
+# assert restart behaviour monkeypatch _schedule_restart themselves and are
+# unaffected; production never imports this conftest.
+if sys.platform == 'win32':  # pragma: no cover — POSIX CI never takes this path
+    try:
+        import api.updates as _hermes_updates
+
+        _hermes_updates._schedule_restart = lambda delay=2.0: None
+    except Exception:
+        pass
+
 # ── Hermetic network isolation ─────────────────────────────────────────────
 # Tests must not reach the public internet. Outbound to Anthropic / OpenAI /
 # Amazon / OpenRouter / etc. is forbidden by default. The test suite already
