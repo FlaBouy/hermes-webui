@@ -1556,8 +1556,8 @@ def _verified_figure_for_part(text: object, part: object) -> str:
 
     A page that merely mentions the part in a compatibility table -- while an
     unrelated figure for a different assembly happens to sit on the same page
-    -- must not qualify. The figure's OWN caption line must name this part's
-    model family, not just co-occur with it.
+    -- must not qualify. The figure's OWN caption must name this part's model
+    family, not just co-occur with it.
     """
     raw = str(text or "")
     if not str(part or "").strip():
@@ -1568,13 +1568,60 @@ def _verified_figure_for_part(text: object, part: object) -> str:
     # must never be claimed as a verified diagram location.
     if "table of contents" in low or low.count("figure ") > 5:
         return ""
-    for m in re.finditer(r"\bFigure\s+(\d+[-\u2013]\d+)\s*([^\n]{0,160})", raw, re.IGNORECASE):
-        fig_no, caption = m.group(1), m.group(2)
+    for m in re.finditer(r"\bFigure\s+(\d+[-\u2013]\d+)[ \t]*", raw, re.IGNORECASE):
+        fig_no = m.group(1)
+        window = raw[m.end():m.end() + 300]
+        # A genuine figure CAPTION is a heading -- "Figure 4-8          Model
+        # MU-TDID52/72 ...". A narrative body sentence that merely REFERS to
+        # a figure elsewhere on the page reads as a lowercase continuation --
+        # "Figure 4-8 is a connection diagram for the screw terminal-type
+        # model MU-TDID52...". Requiring the immediate next token to start
+        # uppercase (a heading) rejects the narrative-sentence case, which
+        # would otherwise let an unrelated compatible-FTA name mentioned
+        # later in that same sentence falsely verify this page.
+        first_char = window.lstrip(" \t")[:1]
+        if first_char.isalpha() and first_char.islower():
+            continue
+        # A real figure caption often wraps across 2-4 lines in extracted PDF
+        # text (e.g. "...24 Vdc Digital Input FTA\nConnection Diagram") --
+        # capturing only the first line silently drops the very word
+        # ("Connection"/"Diagram"/"Wiring") that proves it is a schematic.
+        # Join the caption block: everything up to the next blank line or the
+        # next "Figure N-N" token, capped to a few lines so an unrelated body
+        # paragraph further down the page can never be pulled in.
+        caption_lines: list[str] = []
+        for line in window.split("\n"):
+            stripped = line.strip()
+            if not stripped:
+                break
+            if re.match(r"^Figure\s+\d+[-\u2013]\d+\b", stripped, re.IGNORECASE):
+                break
+            caption_lines.append(stripped)
+            if len(caption_lines) >= 4:
+                break
+        caption = " ".join(caption_lines)
         if not _SCHEMATIC_CAPTION_RE.search(caption):
             continue
         if _text_mentions_part(caption, part):
             return fig_no.replace("\u2013", "-")
     return ""
+
+
+def _caption_model_label(text: object, fig_no: object, fallback: object) -> str:
+    """The figure's own caption model token (e.g. 'MU-TDID52/72'), verbatim,
+    or ``fallback`` if the caption text can't be isolated. Used only for
+    display -- never changes which figure/page was actually verified."""
+    raw = str(text or "")
+    fig = str(fig_no or "").strip()
+    if fig:
+        m = re.search(
+            rf"\bFigure\s+{re.escape(fig)}\b[ \t]*Model\s+((?:MU|MC)-[A-Z0-9]+(?:\s*/\s*\d+)?)",
+            raw,
+            re.IGNORECASE,
+        )
+        if m:
+            return re.sub(r"\s*/\s*", "/", m.group(1).upper())
+    return str(fallback or "").strip()
 
 
 def _printed_page_number(text: object) -> str:
@@ -1691,16 +1738,20 @@ def _explicitly_compatible_fta_models(page_texts: list[str], part: object) -> li
 
 def authoritative_tdc3000_schematic_search(
     part: object, extra_models: object = None
-) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Search the TDC3000 authoritative custom index (all 4 formats: csv,
-    json, xlsx, html) plus their index-linked PDFs for a genuine wiring/FTA
-    connection figure captioned for ``part`` or one of ``extra_models``
+    json, xlsx, html) plus their index-linked PDFs for genuine wiring/FTA
+    connection figures captioned for ``part`` or one of ``extra_models``
     (explicitly-verified compatible FTAs -- never a guessed family manual).
 
-    Returns (result_or_None, checked_entries). ``result`` identifies the
-    exact authoritative document/page/figure found. ``checked_entries``
-    lists every index-linked document actually inspected, for a disclosed
-    "nothing found" outcome that never claims more than was really checked.
+    Returns (found_list, checked_entries). ``found_list`` holds every
+    distinct verified figure found for ``part`` or any of ``extra_models`` --
+    a part can have several applicable FTA connection-diagram variants (e.g.
+    one per terminal type), and the caller must let the operator pick the
+    one matching their actual hardware rather than silently returning only
+    the first hit. ``checked_entries`` lists every index-linked document
+    actually inspected, for a disclosed "nothing found" outcome that never
+    claims more than was really checked.
     """
     try:
         _bin_dir = "/Users/rick/bin"
@@ -1708,13 +1759,13 @@ def authoritative_tdc3000_schematic_search(
             sys.path.insert(0, _bin_dir)
         import tdc3000_index_lookup as tdc  # noqa: WPS433 (deliberate lazy import)
     except Exception:
-        return None, []
+        return [], []
     try:
         by_filename = tdc.get_index_by_filename()
     except Exception:
-        return None, []
+        return [], []
     if not by_filename:
-        return None, []
+        return [], []
 
     targets: list[str] = []
     for candidate in [str(part or "").strip()] + [str(x).strip() for x in (extra_models or [])]:
@@ -1724,7 +1775,14 @@ def authoritative_tdc3000_schematic_search(
 
     root = library_root()
     checked: list[dict[str, Any]] = []
-    seen_docs: set[str] = set()
+    found: list[dict[str, Any]] = []
+    # Dedup keys are scoped per-target, not per-document: the same PDF (e.g.
+    # the already-bound manual) can legitimately carry a genuine figure for
+    # one target (an FTA model) while having none for another (the IOP part
+    # itself) -- marking a document "seen" globally after its first target
+    # pass would wrongly skip re-scanning its pages for a later target.
+    seen_checked: set[tuple[str, str]] = set()
+    seen_found: set[tuple[str, int, str]] = set()
     for target in targets:
         try:
             hits = tdc._scan_exact_identifier(target, by_filename)  # noqa: SLF001
@@ -1732,18 +1790,21 @@ def authoritative_tdc3000_schematic_search(
             continue
         for hit in hits:
             source = str(hit.get("library_source") or "")
-            if not source or source in seen_docs:
+            if not source:
                 continue
-            seen_docs.add(source)
-            entry = {
-                "target": target,
-                "filename": hit.get("filename"),
-                "title": hit.get("title"),
-                "doc_no": hit.get("doc_no"),
-                "source": source,
-                "index_formats": hit.get("index_formats"),
-            }
-            checked.append(entry)
+            checked_key = (source, target)
+            if checked_key not in seen_checked:
+                seen_checked.add(checked_key)
+                checked.append(
+                    {
+                        "target": target,
+                        "filename": hit.get("filename"),
+                        "title": hit.get("title"),
+                        "doc_no": hit.get("doc_no"),
+                        "source": source,
+                        "index_formats": hit.get("index_formats"),
+                    }
+                )
             if not root:
                 continue
             full = os.path.join(root, source)
@@ -1757,7 +1818,11 @@ def authoritative_tdc3000_schematic_search(
                 fig = _verified_figure_for_part(text, target)
                 if not fig:
                     continue
-                return (
+                found_key = (source, idx + 1, fig)
+                if found_key in seen_found:
+                    continue
+                seen_found.add(found_key)
+                found.append(
                     {
                         "source": source,
                         "title": hit.get("title") or "",
@@ -1765,14 +1830,17 @@ def authoritative_tdc3000_schematic_search(
                         "filename": hit.get("filename") or "",
                         "pdf_page": idx + 1,
                         "figure": fig,
-                        "matched_model": target,
+                        # Display label from the figure's own caption verbatim
+                        # (e.g. "MU-TDID52/72") when isolable, falling back to
+                        # the matched search target -- presentation only, does
+                        # not change which figure/page was actually verified.
+                        "matched_model": _caption_model_label(text, fig, target),
                         "requested_part": str(part or "").strip(),
                         "index_href": hit.get("index_href"),
                         "index_formats": hit.get("index_formats"),
-                    },
-                    checked,
+                    }
                 )
-    return None, checked
+    return found, checked
 
 
 def extract_wiring_pages_from_pdf(
@@ -1994,9 +2062,19 @@ def build_wiring_extract_reply(
     return reply, spoken, receipt
 
 
+def _conformal_coat_counterpart(part: object) -> str:
+    """The other MC-/MU- coating variant of ``part``, or '' if not that style."""
+    raw = str(part or "").strip().upper()
+    m = re.match(r"^(MC|MU)-([A-Z0-9]+)$", raw)
+    if not m:
+        return ""
+    prefix, body = m.group(1), m.group(2)
+    return f"{'MU' if prefix == 'MC' else 'MC'}-{body}"
+
+
 def build_authoritative_schematic_reply(
     active_document: object,
-    found: dict[str, Any] | None,
+    found_list: list[dict[str, Any]],
     checked: list[dict[str, Any]],
     compatible_ftas: list[str],
     *,
@@ -2004,9 +2082,13 @@ def build_authoritative_schematic_reply(
 ) -> tuple[str, str, dict[str, Any]]:
     """Outcome A/B reply when the bound manual has no verified figure itself.
 
-    Outcome A: an index-proven authoritative document elsewhere in the TDC3000
-    library has a genuine wiring/FTA figure for the part or an explicitly
-    compatible FTA model -- cited with its own identity/page/link.
+    Outcome A: one or more index-proven authoritative documents have a
+    genuine wiring/FTA connection figure for the part or an explicitly
+    compatible FTA model. A part can have several applicable FTA variants
+    (e.g. one connection diagram per terminal type) -- every one actually
+    verified is listed with its own page/link so the operator can pick the
+    one matching their real hardware; none is ever presented as a direct
+    diagram of the IOP/part itself when it is really an FTA diagram.
     Outcome B: a structured, disclosed "nothing found" result naming every
     authoritative index entry actually checked. The originally bound
     document's identity/compatibility text is never treated as a schematic.
@@ -2030,70 +2112,91 @@ def build_authoritative_schematic_reply(
     ) or absolutize_sidecar_href(
         sidecar_preview_path(bound_source) if bound_source else "", public_origin=origin
     )
+    counterpart = _conformal_coat_counterpart(part)
 
     checked_receipt = [
         {"target": c.get("target"), "filename": c.get("filename"), "doc_no": c.get("doc_no"), "source": c.get("source")}
         for c in checked
     ]
 
-    if found:
-        found_href = absolutize_sidecar_href(
-            sidecar_preview_path(found.get("source") or ""), public_origin=origin
-        )
-        page_no = found.get("pdf_page")
-        has_page_fragment = bool(found_href and page_no)
-        page_href = f"{found_href}#page={page_no}" if has_page_fragment else found_href
-        found_identity = str(found.get("title") or found.get("filename") or "the indexed manual")
-        if found.get("doc_no"):
-            found_identity = f"{found_identity} ({found['doc_no']})"
-        matched_model = str(found.get("matched_model") or part).strip()
-        via_note = (
-            "" if matched_model.upper() == part.upper()
-            else f" via its explicitly compatible FTA model **{matched_model}**"
-        )
-        # Derive the printed page independently from this specific page's own
-        # header/footer (never a re-used or assumed offset) -- presentation
-        # only, does not alter what authoritative_tdc3000_schematic_search
-        # actually matched.
-        printed_no = ""
-        if page_no:
-            found_root = library_root()
-            found_full = os.path.join(found_root, found.get("source") or "") if found_root else ""
-            if found_full and os.path.isfile(found_full):
-                try:
-                    found_texts = _pdf_page_texts(found_full)
-                    if 0 < int(page_no) <= len(found_texts):
-                        printed_no = _printed_page_number(found_texts[int(page_no) - 1])
-                except Exception:
-                    printed_no = ""
-        page_stmt = f"PDF viewer page **{page_no}**"
-        if printed_no:
-            page_stmt += f", printed manual page **{printed_no}**"
-        else:
-            page_stmt += " (printed manual page not determinable from this page's own header/footer)"
+    if found_list:
+        entries: list[dict[str, Any]] = []
+        lines: list[str] = [
+            (
+                f"**{part}** is the conformally coated counterpart of **{counterpart}**; "
+                f"**{bound_identity}** documents both under the same IOP entry. "
+                if counterpart else f"**{bound_identity}** is the bound manual for **{part}**. "
+            )
+            + (
+                f"{part} has no wiring/schematic figure of its own — that lives on its FTA (field termination "
+                "assembly), not the IOP card. Its own compatibility text is supporting identity evidence only, "
+                "not a schematic."
+            ),
+            "",
+            f"Searching the authoritative TDC3000 index (all 4 formats) found "
+            f"{len(found_list)} verified FTA connection diagram"
+            f"{'s' if len(found_list) != 1 else ''} for {part}'s explicitly compatible FTA model"
+            f"{'s' if len(found_list) != 1 else ''} — select the one matching the FTA actually wired to your "
+            f"{part}:",
+            "",
+        ]
+        for found in found_list:
+            found_href = absolutize_sidecar_href(
+                sidecar_preview_path(found.get("source") or ""), public_origin=origin
+            )
+            page_no = found.get("pdf_page")
+            has_page_fragment = bool(found_href and page_no)
+            page_href = f"{found_href}#page={page_no}" if has_page_fragment else found_href
+            found_identity = str(found.get("title") or found.get("filename") or "the indexed manual")
+            if found.get("doc_no"):
+                found_identity = f"{found_identity} ({found['doc_no']})"
+            matched_model = str(found.get("matched_model") or part).strip()
+            # Derive the printed page independently from this specific page's
+            # own header/footer (never a re-used or assumed offset) --
+            # presentation only, does not alter what the search matched.
+            printed_no = ""
+            if page_no:
+                found_root = library_root()
+                found_full = os.path.join(found_root, found.get("source") or "") if found_root else ""
+                if found_full and os.path.isfile(found_full):
+                    try:
+                        found_texts = _pdf_page_texts(found_full)
+                        if 0 < int(page_no) <= len(found_texts):
+                            printed_no = _printed_page_number(found_texts[int(page_no) - 1])
+                    except Exception:
+                        printed_no = ""
+            page_stmt = f"PDF viewer page **{page_no}**"
+            if printed_no:
+                page_stmt += f", printed manual page **{printed_no}**"
+            else:
+                page_stmt += " (printed manual page not determinable from this page's own header/footer)"
+            link_label = f"Open Figure {found['figure']} ({matched_model} FTA diagram)"
+            lines.append(
+                f"- Figure **{found['figure']}** — **{matched_model}** FTA connection diagram, in "
+                f"**{found_identity}**, {page_stmt}. [{link_label}]({page_href})"
+            )
+            entries.append({**found, "printed_page": printed_no or None})
+        lines.extend([
+            "",
+            f"None of these is a direct {part} diagram — each is the connection diagram for the named FTA "
+            f"terminal assembly that {part} plugs into.",
+        ])
+        reply = "\n".join(lines)
         receipt = {
             "schema": "smedley.authoritative_tdc3000_schematic.v1",
             "outcome": "found",
             "requested_part": part,
-            "matched_model": matched_model,
+            "conformal_coat_counterpart": counterpart or None,
+            "matched_models": [str(f.get("matched_model") or "") for f in found_list],
             "bound_document": {"source": bound_source, "title": bound_title, "doc_no": bound_doc_no},
-            "found_document": {**found, "printed_page": printed_no or None},
+            "found_documents": entries,
             "checked": checked_receipt,
         }
-        reply = (
-            f"**{bound_identity}** (bound manual for **{part}**) has no wiring/schematic figure of its own — "
-            "its compatibility text is supporting identity evidence only, not a schematic. "
-            f"Searching the authoritative TDC3000 index (all 4 formats) for {part}{via_note} found a verified "
-            f"figure in **{found_identity}**: Figure **{found['figure']}**, {page_stmt}.\n\n"
-        )
-        reply += (
-            f"[Open wiring page]({page_href})" if has_page_fragment else f"[Open {found_identity}]({page_href})"
-        )
-        printed_spoken = f", printed page {printed_no}" if printed_no else ""
         spoken = (
             f"{bound_title or 'The bound manual'} has no schematic of its own for {part}. "
-            f"The TDC3000 index found one in {found.get('title') or found.get('filename')}, "
-            f"PDF viewer page {page_no}{printed_spoken}."
+            f"The TDC3000 index found {len(found_list)} FTA connection diagram"
+            f"{'s' if len(found_list) != 1 else ''} for its compatible FTA models — pick the one matching your "
+            "hardware. Links are on screen."
         )
         return reply, spoken, receipt
 
@@ -2194,19 +2297,22 @@ def try_active_document_review(
                 compatible_ftas = _explicitly_compatible_fta_models(bound_texts, part)
             except Exception:
                 compatible_ftas = []
-            found, checked = authoritative_tdc3000_schematic_search(part, compatible_ftas)
+            found_list, checked = authoritative_tdc3000_schematic_search(part, compatible_ftas)
             reply, spoken, receipt = build_authoritative_schematic_reply(
-                active_document, found, checked, compatible_ftas, public_origin=origin
+                active_document, found_list, checked, compatible_ftas, public_origin=origin
             )
             active_out = dict(active_document) if isinstance(active_document, dict) else {}
             active_out.pop("pending_action", None)
-            if found:
-                active_out["verified_schematic"] = {
-                    "source": found.get("source"),
-                    "pdf_page": found.get("pdf_page"),
-                    "matched_model": found.get("matched_model"),
-                    "figure": found.get("figure"),
-                }
+            if found_list:
+                active_out["verified_schematics"] = [
+                    {
+                        "source": f.get("source"),
+                        "pdf_page": f.get("pdf_page"),
+                        "matched_model": f.get("matched_model"),
+                        "figure": f.get("figure"),
+                    }
+                    for f in found_list
+                ]
             return {
                 "handled": True,
                 "reply": reply,
