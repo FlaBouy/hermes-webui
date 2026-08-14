@@ -1406,3 +1406,53 @@ def test_apply_update_pull_lock_no_stash_when_clean(tmp_path, monkeypatch):
     # No stash pop on a clean pull-lock path.
     assert not any(c[0] == 'stash' for c in git_calls)
 
+
+def test_real_repo_force_dirty_tracked_recovery_contains_exact_bytes(tmp_path, monkeypatch):
+    """Force-update recovery artifact must reload the exact dirty tracked bytes."""
+    from tests.test_update_stash_recovery import (
+        _DIRTY_BYTES,
+        _git_bytes,
+        _patch_agent_update,
+        _prepare_history,
+    )
+
+    _origin, agent = _prepare_history(
+        tmp_path, 'behind', dirty_tracked=True, untracked_collider=False,
+    )
+    _patch_agent_update(monkeypatch, agent)
+    result = updates.apply_force_update('agent')
+    assert result.get('ok') is True, result
+    branch = result.get('recovery_ref') or result.get('backup_branch')
+    assert branch, result
+    assert _git_bytes(agent, 'show', f'{branch}:tracked.txt') == _DIRTY_BYTES
+
+
+def test_real_repo_normal_untracked_collider_does_not_keep_only_upstream_bytes(
+    tmp_path, monkeypatch,
+):
+    """Normal apply must recover exact untracked collider bytes, not only upstream."""
+    from tests.test_update_stash_recovery import (
+        _UNTRACKED_LOCAL,
+        _UNTRACKED_UPSTREAM,
+        _git,
+        _git_bytes,
+        _patch_agent_update,
+        _prepare_history,
+    )
+
+    _origin, agent = _prepare_history(
+        tmp_path, 'behind', dirty_tracked=False, untracked_collider=True,
+    )
+    head_before = _git(agent, 'rev-parse', 'HEAD')
+    _patch_agent_update(monkeypatch, agent)
+    result = updates._apply_update_inner('agent')
+    if not result.get('ok'):
+        assert _git(agent, 'rev-parse', 'HEAD') == head_before
+        assert (agent / 'collide.txt').read_bytes() == _UNTRACKED_LOCAL
+        return
+    branch = result.get('recovery_ref') or result.get('backup_branch')
+    assert branch, result
+    recovered = _git_bytes(agent, 'show', f'{branch}:collide.txt')
+    assert recovered == _UNTRACKED_LOCAL
+    assert recovered != _UNTRACKED_UPSTREAM
+

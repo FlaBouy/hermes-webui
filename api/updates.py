@@ -16,6 +16,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import urllib.error
@@ -214,14 +215,28 @@ def _run_git(args, cwd, timeout=10):
     On failure, returns stderr (or stdout as fallback) so callers can
     surface actionable git error messages instead of empty strings.
     """
+    return _run_git_env(args, cwd, timeout=timeout)
+
+
+def _run_git_env(args, cwd, timeout=10, env=None):
+    """Run git, optionally with extra environment (used for temp-index snapshots).
+
+    Intentionally separate from ``_run_git`` so mocked apply tests that replace
+    ``_run_git`` do not intercept the lossless snapshot object-db writes.
+    """
     git_executable = _resolve_git_executable()
     if not git_executable:
         return 'git executable not found', False
+    run_env = None
+    if env:
+        run_env = os.environ.copy()
+        run_env.update(env)
     try:
         r = subprocess.run(
             [git_executable] + args, cwd=str(cwd), capture_output=True,
             text=True, timeout=timeout,
             encoding='utf-8', errors='replace',
+            env=run_env,
             creationflags=_NO_CONSOLE_WINDOW,
         )
         # On non-UTF-8 locales (e.g. Chinese Windows GBK), a binary git
@@ -2002,26 +2017,26 @@ def apply_force_update(target: str, channel=None) -> dict:
                 'refused_rewind': True,
             }
 
-        # Preserve local commits before destructive reset. Force-update still
-        # discards the working tree tip, but never silently deletes commits.
+        # Preserve local commits AND working-tree bytes before destructive reset.
+        # Force-update still moves HEAD, but recovery must reload exact dirty
+        # tracked / untracked bytes when we claim a backup/recovery artifact.
         sync = _describe_checkout_sync(path, compare_ref)
+        snapshot = None
         backup_branch = None
-        if sync.get('relationship') in {'ahead', 'diverged'} or (
-            isinstance(sync.get('ahead'), int) and sync['ahead'] > 0
-        ) or sync.get('dirty_tracked'):
-            backup = _create_update_backup_branch(path)
-            if backup.get('ok'):
-                backup_branch = backup['branch']
-            else:
+        if _needs_update_snapshot(sync):
+            snapshot = _create_update_recovery_snapshot(path, sync)
+            if not snapshot.get('ok'):
                 return {
                     'ok': False,
                     'message': (
-                        'Force update aborted: could not create a backup branch '
-                        f'before reset ({backup.get("error") or "unknown error"}). '
+                        'Force update aborted: could not create a verified '
+                        'recovery snapshot before reset '
+                        f'({snapshot.get("error") or "unknown error"}). '
                         'Local commits/modifications were left untouched.'
                     ),
                     'target': target,
                 }
+            backup_branch = snapshot['branch']
 
         # Discard local modifications and untracked colliders before resetting.
         # Do not use -x: ignored build/cache artifacts should survive force update.
@@ -2045,7 +2060,12 @@ def apply_force_update(target: str, channel=None) -> dict:
             )
         _, ok = _run_git(['reset', '--hard', compare_ref], path)
         if not ok:
-            return {'ok': False, 'message': f'Force reset to {compare_ref} failed'}
+            response = {
+                'ok': False,
+                'message': f'Force reset to {compare_ref} failed',
+                'target': target,
+            }
+            return _attach_recovery(response, path, snapshot)
 
         with _cache_lock:
             _update_cache['checked_at'] = 0
@@ -2053,12 +2073,13 @@ def apply_force_update(target: str, channel=None) -> dict:
         if target == 'agent':
             gateway_ok, gateway_result = _ensure_gateway_restart_for_agent_update()
             if not gateway_ok:
-                return {
+                response = {
                     'ok': False,
                     'message': _agent_gateway_restart_failure_message(target, gateway_result),
                     'target': target,
                     'gateway_restart': gateway_result.get('status'),
                 }
+                return _attach_recovery(response, path, snapshot)
 
         _schedule_restart()
 
@@ -2066,12 +2087,14 @@ def apply_force_update(target: str, channel=None) -> dict:
             'ok': True,
             'message': (
                 f'{target} force-updated to {compare_ref}'
-                + (f' (local tip preserved on {backup_branch})' if backup_branch else '')
+                + (f' (local state preserved on {backup_branch})' if backup_branch else '')
             ),
             'target': target,
             'restart_scheduled': True,
             'backup_branch': backup_branch,
         }
+        if backup_branch:
+            response['recovery_ref'] = backup_branch
         if target == 'agent':
             response['gateway_restart'] = gateway_result.get('status')
         return response
@@ -2221,7 +2244,125 @@ def _describe_checkout_sync(path: Path, compare_ref: str | None) -> dict:
     return result
 
 
-def _create_update_backup_branch(path: Path, *, prefix: str = 'hermes-update-backup') -> dict:
+_UPDATE_RECOVERY_PREFIX = 'hermes-update-backup'
+_SHA_RE = re.compile(r'^[0-9a-f]{40,64}$')
+
+
+def _is_real_git_checkout(path: Path) -> bool:
+    """Return True when ``path`` has a usable git HEAD (not a tests-only ``.git`` stub)."""
+    git_dir = path / '.git'
+    if git_dir.is_file():
+        return True
+    return git_dir.is_dir() and (git_dir / 'HEAD').exists()
+
+
+def _needs_update_snapshot(sync: dict) -> bool:
+    """True when local commits, dirty tracked files, or untracked files exist."""
+    if sync.get('relationship') in {'ahead', 'diverged'}:
+        return True
+    ahead = sync.get('ahead')
+    if isinstance(ahead, int) and ahead > 0:
+        return True
+    if sync.get('dirty_tracked') or sync.get('dirty'):
+        return True
+    if sync.get('untracked_count') or sync.get('untracked_files'):
+        return True
+    return False
+
+
+def _posix_relpath(path: Path, rel: str) -> str:
+    return Path(rel).as_posix().lstrip('./')
+
+
+def _iter_worktree_files(root: Path, rel: str) -> list[str]:
+    """Expand a porcelain path to concrete files (handles untracked directories)."""
+    rel = _posix_relpath(root, rel)
+    target = root / rel
+    if target.is_dir():
+        return [
+            f.relative_to(root).as_posix()
+            for f in target.rglob('*')
+            if f.is_file()
+        ]
+    if target.is_file() or target.is_symlink():
+        return [rel]
+    return []
+
+
+def _list_snapshot_paths(path: Path) -> list[str]:
+    """Dirty tracked paths plus untracked, non-ignored files."""
+    dirty, dirty_ok = _run_git_env(['diff', '--name-only', 'HEAD'], path)
+    staged, staged_ok = _run_git_env(['diff', '--name-only', '--cached'], path)
+    untracked, untracked_ok = _run_git_env(
+        ['ls-files', '-z', '--others', '--exclude-standard'], path,
+    )
+    names: list[str] = []
+    if dirty_ok and dirty:
+        names.extend(dirty.splitlines())
+    if staged_ok and staged:
+        names.extend(staged.splitlines())
+    if untracked_ok and untracked:
+        names.extend(p for p in untracked.split('\0') if p)
+    expanded: list[str] = []
+    seen: set[str] = set()
+    for name in names:
+        for rel in _iter_worktree_files(path, name):
+            if rel not in seen:
+                seen.add(rel)
+                expanded.append(rel)
+    return expanded
+
+
+def _list_untracked_files(path: Path) -> tuple[list[str], bool]:
+    """Untracked, non-ignored files only. Never includes dirty tracked paths."""
+    out, ok = _run_git_env(
+        ['ls-files', '-z', '--others', '--exclude-standard'], path,
+    )
+    if not ok:
+        return [], False
+    expanded: list[str] = []
+    seen: set[str] = set()
+    for name in (p for p in out.split('\0') if p):
+        for rel in _iter_worktree_files(path, name):
+            if rel not in seen:
+                seen.add(rel)
+                expanded.append(rel)
+    return expanded, True
+
+
+def _recovery_ref_instructions(path: Path, branch: str | None) -> str:
+    if not branch:
+        return (
+            f'No recovery snapshot is available. Inspect with: git -C {path} status'
+        )
+    return (
+        f'Recovery snapshot is {branch} and must be retained. '
+        f'Inspect: git -C {path} log -1 --stat {branch}. '
+        f'Restore exact bytes for a path: git -C {path} show {branch}:PATH. '
+        f'Restore the snapshotted tree: git -C {path} checkout {branch} -- .'
+    )
+
+
+def _attach_recovery(response: dict, path: Path, snapshot: dict | None) -> dict:
+    """Stamp recovery fields onto an update response. Never drops the recovery ref."""
+    if not snapshot or not snapshot.get('branch'):
+        return response
+    branch = snapshot['branch']
+    response['backup_branch'] = branch
+    response['recovery_ref'] = branch
+    if snapshot.get('commit'):
+        response['recovery_commit'] = snapshot['commit']
+    captured = snapshot.get('captured_paths') or []
+    if captured:
+        response['recovery_paths'] = captured
+    message = (response.get('message') or '').rstrip()
+    instructions = _recovery_ref_instructions(path, branch)
+    if instructions not in message:
+        response['message'] = f'{message} {instructions}'.strip()
+    return response
+
+
+def _create_update_backup_branch(path: Path, *, prefix: str = _UPDATE_RECOVERY_PREFIX) -> dict:
     """Create a timestamped branch at HEAD. Never moves/deletes existing refs."""
     stamp = _utc_stamp()
     branch = f'{prefix}/{stamp}'
@@ -2231,9 +2372,160 @@ def _create_update_backup_branch(path: Path, *, prefix: str = 'hermes-update-bac
         branch = f'{prefix}/{stamp}-{os.getpid()}'
         out, ok = _run_git(['branch', branch, 'HEAD'], path)
     if not ok:
-        return {'ok': False, 'branch': None, 'error': out}
+        return {'ok': False, 'branch': None, 'commit': None, 'error': out}
     head_sha, _ = _run_git(['rev-parse', 'HEAD'], path)
-    return {'ok': True, 'branch': branch, 'head_sha': head_sha, 'error': None}
+    return {
+        'ok': True,
+        'branch': branch,
+        'head_sha': head_sha,
+        'commit': head_sha,
+        'captured_paths': [],
+        'error': None,
+    }
+
+
+def _verify_snapshot_bytes(path: Path, commit: str, captured_paths: list[str]) -> tuple[bool, str]:
+    """Confirm every captured working-tree path hashes identically in ``commit``."""
+    for rel in captured_paths:
+        wt_hash, wt_ok = _run_git_env(['hash-object', '--', rel], path)
+        blob, blob_ok = _run_git_env(['rev-parse', f'{commit}:{rel}'], path)
+        if not wt_ok or not blob_ok or not wt_hash or wt_hash != blob:
+            return False, (
+                f'snapshot verification failed for {rel}: '
+                f'working-tree {wt_hash or "(missing)"} vs snapshot {blob or "(missing)"}'
+            )
+    return True, ''
+
+
+def _create_worktree_snapshot_commit(path: Path, captured_paths: list[str]) -> dict:
+    """Commit HEAD + dirty tracked + untracked bytes without mutating the checkout.
+
+    Uses a temporary index (GIT_INDEX_FILE) so the real index and working tree
+    stay untouched. Verifies blob hashes before the recovery ref is created.
+    """
+    head_sha, head_ok = _run_git_env(['rev-parse', 'HEAD'], path)
+    if not head_ok or not _SHA_RE.match(head_sha or ''):
+        return {'ok': False, 'error': f'cannot resolve HEAD: {head_sha}'}
+
+    stamp = _utc_stamp()
+    pid = os.getpid()
+    index_path = Path(tempfile.gettempdir()) / f'hermes-update-tmp-index-{stamp}-{pid}'
+    env = {
+        'GIT_INDEX_FILE': str(index_path),
+        'GIT_AUTHOR_NAME': 'hermes-webui',
+        'GIT_AUTHOR_EMAIL': 'hermes-webui@localhost',
+        'GIT_COMMITTER_NAME': 'hermes-webui',
+        'GIT_COMMITTER_EMAIL': 'hermes-webui@localhost',
+    }
+    try:
+        out, ok = _run_git_env(['read-tree', 'HEAD'], path, env=env)
+        if not ok:
+            return {'ok': False, 'error': f'read-tree failed: {out}'}
+        out, ok = _run_git_env(['add', '-A', '--'], path, env=env)
+        if not ok:
+            return {'ok': False, 'error': f'git add -A failed: {out}'}
+        tree, ok = _run_git_env(['write-tree'], path, env=env)
+        if not ok or not _SHA_RE.match(tree or ''):
+            return {'ok': False, 'error': f'write-tree failed: {tree}'}
+        message = f'hermes-update-recovery {stamp}'
+        commit, ok = _run_git_env(
+            ['commit-tree', tree, '-p', head_sha, '-m', message],
+            path,
+            env=env,
+        )
+        if not ok or not _SHA_RE.match(commit or ''):
+            return {'ok': False, 'error': f'commit-tree failed: {commit}'}
+        verified, verify_error = _verify_snapshot_bytes(path, commit, captured_paths)
+        if not verified:
+            return {'ok': False, 'error': verify_error, 'commit': commit}
+        branch = f'{_UPDATE_RECOVERY_PREFIX}/{stamp}'
+        out, ok = _run_git_env(['branch', branch, commit], path)
+        if not ok:
+            branch = f'{_UPDATE_RECOVERY_PREFIX}/{stamp}-{pid}'
+            out, ok = _run_git_env(['branch', branch, commit], path)
+        if not ok:
+            return {
+                'ok': False,
+                'error': f'failed to create recovery branch: {out}',
+                'commit': commit,
+            }
+        return {
+            'ok': True,
+            'branch': branch,
+            'commit': commit,
+            'head_sha': head_sha,
+            'captured_paths': list(captured_paths),
+            'error': None,
+        }
+    finally:
+        try:
+            index_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        try:
+            Path(str(index_path) + '.lock').unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _create_update_recovery_snapshot(path: Path, sync: dict | None = None) -> dict:
+    """Create a verified recovery ref capturing local commits and working-tree bytes.
+
+    Abort contract: callers must not reset/checkout/clean/pull if this returns
+    ``ok: False``. Ignored files are omitted because the updater never uses
+    ``git clean -x``; they survive force update.
+    """
+    sync = sync or {}
+    captured: list[str] = []
+    if _is_real_git_checkout(path) and (
+        sync.get('dirty_tracked') or sync.get('dirty') or sync.get('untracked_count')
+        or sync.get('untracked_files') or sync.get('modified_files')
+    ):
+        captured = _list_snapshot_paths(path)
+
+    if captured:
+        snapshot = _create_worktree_snapshot_commit(path, captured)
+        if snapshot.get('ok'):
+            return snapshot
+        return snapshot
+
+    # HEAD-only ref: local commits with a clean tree, or mocked .git stubs.
+    backup = _create_update_backup_branch(path)
+    if backup.get('ok'):
+        backup['captured_paths'] = []
+    return backup
+
+
+def _untracked_colliders(path: Path, compare_ref: str, untracked_files: list[str]) -> list[str]:
+    """Untracked working-tree files that ``compare_ref`` already tracks."""
+    if not compare_ref or not untracked_files:
+        return []
+    tree_out, tree_ok = _run_git(['ls-tree', '-r', '--name-only', compare_ref], path)
+    if not tree_ok:
+        return []
+    tracked = {line.strip() for line in tree_out.splitlines() if line.strip()}
+    colliders: list[str] = []
+    seen: set[str] = set()
+    for name in untracked_files:
+        for rel in _iter_worktree_files(path, name):
+            if rel in tracked and rel not in seen:
+                seen.add(rel)
+                colliders.append(rel)
+    return colliders
+
+
+def _remove_untracked_colliders(path: Path, colliders: list[str]) -> tuple[bool, str]:
+    """Delete colliding untracked files after a verified snapshot exists."""
+    for rel in colliders:
+        target = path / rel
+        try:
+            if target.is_file() or target.is_symlink():
+                target.unlink()
+            elif target.is_dir():
+                shutil.rmtree(target)
+        except OSError as exc:
+            return False, f'failed to move colliding untracked path {rel} aside: {exc}'
+    return True, ''
 
 
 def _stash_message() -> str:
@@ -2398,39 +2690,81 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
             'behind': sync.get('behind'),
         }
 
+    snapshot = None
     backup_branch = None
     local_commits = sync.get('relationship') in {'ahead', 'diverged'} or (
         isinstance(sync.get('ahead'), int) and sync['ahead'] > 0
     )
-    if local_commits:
-        backup = _create_update_backup_branch(path)
-        if not backup.get('ok'):
+    collider_paths: list[str] = []
+    if _needs_update_snapshot(sync):
+        snapshot = _create_update_recovery_snapshot(path, sync)
+        if not snapshot.get('ok'):
             return {
                 'ok': False,
                 'message': (
-                    f'The local {target} checkout has commits not on '
-                    f'{compare_ref}, and creating a backup branch failed '
-                    f'({backup.get("error") or "unknown error"}). '
-                    'Update aborted without discarding local commits. '
+                    f'Update aborted before mutating {target}: could not create '
+                    'a verified recovery snapshot '
+                    f'({snapshot.get("error") or "unknown error"}). '
+                    'Local commits, dirty tracked files, and untracked files '
+                    'were left untouched. '
                     f'Inspect with: git -C {path} status && '
                     f'git -C {path} log --oneline {compare_ref}..HEAD'
                 ),
-                'diverged': True,
+                'diverged': bool(local_commits),
                 'relationship': sync.get('relationship'),
                 'ahead': sync.get('ahead'),
                 'behind': sync.get('behind'),
             }
-        backup_branch = backup['branch']
+        backup_branch = snapshot['branch']
         logger.info(
-            'update preflight: preserved %s HEAD %s on backup branch %s '
-            '(relationship=%s ahead=%s behind=%s)',
+            'update preflight: preserved %s HEAD %s on recovery ref %s '
+            '(relationship=%s ahead=%s behind=%s captured=%s)',
             target,
-            backup.get('head_sha'),
+            snapshot.get('head_sha'),
             backup_branch,
             sync.get('relationship'),
             sync.get('ahead'),
             sync.get('behind'),
+            snapshot.get('captured_paths'),
         )
+
+    if _is_real_git_checkout(path) and (sync.get('untracked_count') or sync.get('untracked_files')):
+        # Must come from git, not from the snapshot's captured_paths: those also
+        # contain dirty TRACKED files, and treating one as a collider would
+        # unlink it from the working tree before the stash push.
+        untracked, listed = _list_untracked_files(path)
+        if not listed:
+            untracked = list(sync.get('untracked_files') or [])
+        collider_paths = _untracked_colliders(path, compare_ref, untracked)
+        if collider_paths and not backup_branch:
+            return {
+                'ok': False,
+                'message': (
+                    f'Update aborted before mutating {target}: untracked path(s) '
+                    f'{", ".join(collider_paths)} collide with {compare_ref} and '
+                    'no verified recovery snapshot exists. Local bytes were left '
+                    f'untouched. Inspect with: git -C {path} status'
+                ),
+                'conflict': True,
+                'relationship': sync.get('relationship'),
+                'ahead': sync.get('ahead'),
+                'behind': sync.get('behind'),
+            }
+        if collider_paths:
+            cleared, clear_error = _remove_untracked_colliders(path, collider_paths)
+            if not cleared:
+                response = {
+                    'ok': False,
+                    'message': (
+                        f'Update aborted before reset/checkout/clean: {clear_error} '
+                        'Colliding untracked files were left in the working tree.'
+                    ),
+                    'conflict': True,
+                    'relationship': sync.get('relationship'),
+                    'ahead': sync.get('ahead'),
+                    'behind': sync.get('behind'),
+                }
+                return _attach_recovery(response, path, snapshot)
 
     stashed = False
     stash_label = None
@@ -2438,7 +2772,7 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
         stash_label = _stash_message()
         _, ok = _run_git(['stash', 'push', '-m', stash_label], path)
         if not ok:
-            return {
+            response = {
                 'ok': False,
                 'message': (
                     'Failed to stash local changes before update; '
@@ -2448,6 +2782,7 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
                 'backup_branch': backup_branch,
                 'relationship': sync.get('relationship'),
             }
+            return _attach_recovery(response, path, snapshot)
         stashed = True
 
     # Agent production checkouts should track upstream. When local commits make
@@ -2463,12 +2798,12 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
                 stash_recovery_note = _restore_stash_after_pull_failure(
                     target, path, f'reset --hard {compare_ref} failed'
                 )
-            return {
+            return _attach_recovery({
                 'ok': False,
                 'message': (
                     f'Failed to reset {target} to {compare_ref} after creating '
-                    f'backup branch {backup_branch}. Local commits are still on '
-                    f'that branch.'
+                    f'recovery snapshot {backup_branch}. Local commits and '
+                    'working-tree bytes remain on that ref.'
                     + (f' {stash_recovery_note}' if stash_recovery_note else '')
                 ),
                 'diverged': True,
@@ -2476,7 +2811,7 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
                 'relationship': sync.get('relationship'),
                 'ahead': sync.get('ahead'),
                 'behind': sync.get('behind'),
-            }
+            }, path, snapshot)
         used_safe_reset = True
         pull_out, pull_ok = f'Reset to {compare_ref}', True
     elif local_commits and target == 'webui':
@@ -2500,7 +2835,7 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
             'Use Force Update to discard the local branch tip after confirming '
             f'the backup, or recover with: git -C {path} checkout {backup_branch}'
         )
-        return {
+        return _attach_recovery({
             'ok': False,
             'message': ' '.join(message_parts),
             'diverged': True,
@@ -2509,7 +2844,7 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
             'relationship': sync.get('relationship'),
             'ahead': sync.get('ahead'),
             'behind': sync.get('behind'),
-        }
+        }, path, snapshot)
     else:
         # Pull with ff-only (no merge commits).
         # Split tracking refs like 'origin/main' into separate remote + branch
@@ -2538,12 +2873,12 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
                 message = f'{message} {stash_recovery_note}'
             if backup_branch:
                 message = f'{message} Local commits remain on {backup_branch}.'
-            return {
+            return _attach_recovery({
                 'ok': False,
                 'message': message,
                 'lock_conflict': True,
                 'backup_branch': backup_branch,
-            }
+            }, path, snapshot)
         pull_lower = pull_out.lower()
         detail = pull_out.strip()[:300] if pull_out.strip() else '(no output from git)'
         untracked_collision = (
@@ -2579,7 +2914,7 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
                     }
                     if diverged_failure:
                         response['diverged'] = True
-                    return response
+                    return _attach_recovery(response, path, snapshot)
                 response = {
                     'ok': False,
                     'message': (
@@ -2596,7 +2931,7 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
                 }
                 if diverged_failure:
                     response['diverged'] = True
-                return response
+                return _attach_recovery(response, path, snapshot)
 
         restored_note_parts = []
         if restored_stash:
@@ -2640,7 +2975,7 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
                     'Run: git -C ' + str(path) + ' fetch origin && '
                     'git -C ' + str(path) + ' reset --hard ' + compare_ref
                 )
-            return {
+            return _attach_recovery({
                 'ok': False,
                 'message': ' '.join(message_parts),
                 'diverged': True,
@@ -2648,7 +2983,7 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
                 'relationship': sync.get('relationship'),
                 'ahead': sync.get('ahead'),
                 'behind': sync.get('behind'),
-            }
+            }, path, snapshot)
         if 'does not track' in pull_lower or 'no tracking information' in pull_lower:
             message_parts = [
                 f'The local {target} branch has no upstream tracking branch configured.'
@@ -2658,11 +2993,11 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
             message_parts.append(
                 'Run: git -C ' + str(path) + ' branch --set-upstream-to=' + compare_ref
             )
-            return {
+            return _attach_recovery({
                 'ok': False,
                 'message': ' '.join(message_parts),
                 'backup_branch': backup_branch,
-            }
+            }, path, snapshot)
         # Generic fallback — include the raw git output for debugging.
         message_parts = [f'Pull failed: {detail}']
         if restored_note:
@@ -2674,7 +3009,7 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
         }
         if untracked_collision:
             response['conflict'] = True
-        return response
+        return _attach_recovery(response, path, snapshot)
 
     # Re-apply stash if we stashed.
     stash_drop_failed = False
@@ -2686,47 +3021,58 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
         else:
             _, reset_ok = _run_git(['reset', '--hard', 'HEAD'], path)
             if not reset_ok:
-                return {
+                return _attach_recovery({
                     'ok': False,
                     'message': (
                         'Updated successfully, but failed to clean up a '
                         'stash-apply conflict. Manual intervention needed: '
                         'run git -C ' + str(path) + ' reset --hard HEAD to '
                         'remove conflict markers. Your changes remain in the '
-                        'git stash.'
+                        'git stash and on the recovery snapshot.'
                     ),
                     'stash_conflict': True,
-                }
+                }, path, snapshot)
             with _cache_lock:
                 _update_cache['checked_at'] = 0
 
             if target == 'agent':
                 gateway_ok, gateway_result = _ensure_gateway_restart_for_agent_update()
                 if not gateway_ok:
-                    return {
+                    return _attach_recovery({
                         'ok': False,
                         'message': _agent_gateway_restart_failure_message(target, gateway_result),
                         'target': target,
                         'gateway_restart': gateway_result.get('status'),
-                    }
+                        'stash_conflict': True,
+                    }, path, snapshot)
             _schedule_restart()
+            conflict_message = (
+                f'{target} updated to the latest version. Your local '
+                'modifications conflicted with upstream changes and were '
+                'set aside in a git stash. To inspect: '
+                'git -C ' + str(path) + ' stash show -p. To re-apply: '
+                'git -C ' + str(path) + ' stash apply, then resolve '
+                'conflicts. Drop the stash after you are satisfied.'
+            )
+            if collider_paths:
+                conflict_message += (
+                    f' Untracked path(s) {", ".join(collider_paths)} collided with '
+                    f'{compare_ref} and were replaced by upstream content; recover '
+                    f'exact local bytes with: git -C {path} show '
+                    f'{backup_branch or "<recovery-ref>"}:PATH'
+                )
             response = {
                 'ok': True,
-                'message': (
-                    f'{target} updated to the latest version. Your local '
-                    'modifications conflicted with upstream changes and were '
-                    'set aside in a git stash. To inspect: '
-                    'git -C ' + str(path) + ' stash show -p. To re-apply: '
-                    'git -C ' + str(path) + ' stash apply, then resolve '
-                    'conflicts. Drop the stash after you are satisfied.'
-                ),
+                'message': conflict_message,
                 'target': target,
                 'restart_scheduled': True,
                 'stash_conflict': True,
             }
+            if collider_paths:
+                response['untracked_colliders'] = collider_paths
             if target == 'agent':
                 response['gateway_restart'] = gateway_result.get('status')
-            return response
+            return _attach_recovery(response, path, snapshot)
 
     # Invalidate cache
     with _cache_lock:
@@ -2735,12 +3081,12 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
     if target == 'agent':
         gateway_ok, gateway_result = _ensure_gateway_restart_for_agent_update()
         if not gateway_ok:
-            return {
+            return _attach_recovery({
                 'ok': False,
                 'message': _agent_gateway_restart_failure_message(target, gateway_result),
                 'target': target,
                 'gateway_restart': gateway_result.get('status'),
-            }
+            }, path, snapshot)
 
     # Schedule a self-restart so the updated code is loaded fresh.  A plain
     # git pull leaves stale Python modules in sys.modules — agent imports that
@@ -2757,8 +3103,14 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
     message = f'{target} updated successfully'
     if used_safe_reset and backup_branch:
         message = (
-            f'{target} updated to {compare_ref} after preserving local commits '
-            f'on backup branch {backup_branch}'
+            f'{target} updated to {compare_ref} after preserving local state '
+            f'on recovery snapshot {backup_branch}'
+        )
+    if collider_paths and backup_branch:
+        message += (
+            f'. Untracked path(s) {", ".join(collider_paths)} collided with '
+            f'{compare_ref} and were preserved on {backup_branch}; recover exact '
+            f'bytes with: git -C {path} show {backup_branch}:PATH'
         )
     if stash_drop_failed:
         message += (
@@ -2775,6 +3127,10 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
         'relationship': sync.get('relationship'),
         'safe_reset': used_safe_reset,
     }
+    if backup_branch:
+        response['recovery_ref'] = backup_branch
+    if collider_paths:
+        response['untracked_colliders'] = collider_paths
     if target == 'agent':
         response['gateway_restart'] = gateway_result.get('status')
     return response

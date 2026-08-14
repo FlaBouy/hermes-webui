@@ -1,5 +1,9 @@
 """Tests for graceful stash-apply recovery in _apply_update_inner."""
+import subprocess
+import sys
 from unittest.mock import patch
+
+import pytest
 
 import api.updates as updates
 
@@ -694,3 +698,347 @@ def test_diagnose_checkout_reports_sync_fields(tmp_path):
     assert report['relationship'] == 'behind'
     assert report['behind'] == 2
     assert report['modified_files'] == ['foo.py']
+
+
+# ── Real-git lossless snapshot regressions (reviewer exact-head blockers) ─────
+
+
+_DIRTY_BYTES = b'dirty-tracked-UNIQUE-\x00-bytes\n'
+_UNTRACKED_LOCAL = b'untracked-local-UNIQUE-\x00-bytes\n'
+_UNTRACKED_UPSTREAM = b'untracked-upstream-OVERWRITE\n'
+_TRACKED_UPSTREAM = b'tracked-upstream-changed\n'
+_MUTATING_GIT = {'reset', 'checkout', 'clean', 'pull', 'merge', 'rebase'}
+
+
+# Windows spawns a console host for every git child unless this flag is set.
+# These tests run hundreds of git commands, so without it a local run carpets
+# the desktop with popup windows. Zero on POSIX, where subprocess only rejects
+# a NON-zero creationflags value.
+_NO_CONSOLE_WINDOW = (
+    getattr(subprocess, 'CREATE_NO_WINDOW', 0) if sys.platform == 'win32' else 0
+)
+
+
+def _git_raw(repo, args, check=True):
+    proc = subprocess.run(
+        ['git', *args],
+        cwd=str(repo),
+        capture_output=True,
+        check=False,
+        creationflags=_NO_CONSOLE_WINDOW,
+    )
+    if check and proc.returncode != 0:
+        raise AssertionError(
+            f'git {args} failed: {proc.stderr.decode("utf-8", "replace")}'
+        )
+    return proc
+
+
+def _git(repo, *args):
+    return _git_raw(repo, args).stdout.decode('utf-8', 'replace').strip()
+
+
+def _git_bytes(repo, *args):
+    return _git_raw(repo, args).stdout
+
+
+def _configure_git(repo):
+    # One process instead of four: config --local accepts repeated pairs via
+    # separate invocations only, so write the file directly.
+    config = repo / ('config' if (repo / 'HEAD').exists() else '.git/config')
+    with open(config, 'a', encoding='utf-8') as fh:
+        fh.write(
+            '[user]\n\temail = t@t.co\n\tname = Test\n'
+            '[commit]\n\tgpgsign = false\n'
+            '[core]\n\tautocrlf = false\n'
+        )
+
+
+def _make_agent_pair(tmp_path):
+    """Bare origin + one working clone, built without intermediate seed clones."""
+    origin = tmp_path / 'origin.git'
+    _git(tmp_path, 'init', '--bare', '-q', '-b', 'main', str(origin))
+    agent = tmp_path / 'agent'
+    agent.mkdir()
+    _git(agent, 'init', '-q', '-b', 'main')
+    _configure_git(agent)
+    (agent / 'README').write_bytes(b'base-readme\n')
+    (agent / 'tracked.txt').write_bytes(b'tracked-clean\n')
+    _git(agent, 'add', 'README', 'tracked.txt')
+    _git(agent, 'commit', '-q', '-m', 'base')
+    _git(agent, 'remote', 'add', 'origin', str(origin))
+    _git(agent, 'push', '-q', '-u', 'origin', 'main')
+    return origin, agent
+
+
+def _origin_work_clone(tmp_path, origin):
+    """Reused upstream working clone — one per test, not one per upstream commit."""
+    work = tmp_path / 'origin-work'
+    if not work.exists():
+        _git(tmp_path, 'clone', '-q', str(origin), str(work))
+        _configure_git(work)
+    return work
+
+
+def _advance_origin(tmp_path, origin, files, message):
+    work = _origin_work_clone(tmp_path, origin)
+    for name, content in files.items():
+        path = work / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        _git(work, 'add', name)
+    _git(work, 'commit', '-q', '-m', message)
+    _git(work, 'push', '-q', 'origin', 'HEAD:main')
+
+
+def _patch_agent_update(monkeypatch, agent, *, gateway=None):
+    monkeypatch.setattr(updates, '_AGENT_DIR', agent)
+    monkeypatch.setattr(updates, 'REPO_ROOT', agent)
+    monkeypatch.setattr(
+        updates, '_select_apply_compare_ref',
+        lambda path, channel='stable', target=None: 'origin/main',
+    )
+    monkeypatch.setattr(updates, '_schedule_restart', lambda delay=2.0: None)
+    if gateway is None:
+        gateway = lambda: (True, {'status': 'completed'})
+    monkeypatch.setattr(updates, '_ensure_gateway_restart_for_agent_update', gateway)
+
+
+def _prepare_history(tmp_path, history, *, dirty_tracked=False, untracked_collider=False):
+    origin, agent = _make_agent_pair(tmp_path)
+    if history in {'ahead', 'diverged'}:
+        (agent / 'local-only.txt').write_bytes(b'local-only-commit\n')
+        _git(agent, 'add', 'local-only.txt')
+        _git(agent, 'commit', '-q', '-m', 'local-only')
+
+    origin_files = {}
+    if history in {'behind', 'diverged'}:
+        origin_files['upstream-new.txt'] = b'upstream-new\n'
+    if untracked_collider:
+        origin_files['collide.txt'] = _UNTRACKED_UPSTREAM
+    if dirty_tracked and history in {'behind', 'diverged'}:
+        origin_files['tracked.txt'] = _TRACKED_UPSTREAM
+    if origin_files:
+        _advance_origin(tmp_path, origin, origin_files, f'upstream-{history}')
+
+    if dirty_tracked:
+        (agent / 'tracked.txt').write_bytes(_DIRTY_BYTES)
+    if untracked_collider:
+        (agent / 'collide.txt').write_bytes(_UNTRACKED_LOCAL)
+    return origin, agent
+
+
+def _recovery_has_bytes(agent, result, rel, expected):
+    branch = result.get('recovery_ref') or result.get('backup_branch')
+    assert branch, f'expected recovery ref, got {result!r}'
+    assert _git_bytes(agent, 'show', f'{branch}:{rel}') == expected
+    # The recovery ref itself must still exist after the update attempt.
+    _git(agent, 'rev-parse', '--verify', branch)
+    return branch
+
+
+@pytest.mark.parametrize('history', ['behind', 'ahead', 'diverged'])
+@pytest.mark.parametrize('dirt', ['dirty_tracked', 'untracked_collider', 'both'])
+def test_real_repo_normal_update_preserves_local_bytes_or_aborts(tmp_path, monkeypatch, history, dirt):
+    """Normal Agent apply must not destroy dirty tracked or untracked collider bytes."""
+    dirty_tracked = dirt in {'dirty_tracked', 'both'}
+    untracked_collider = dirt in {'untracked_collider', 'both'}
+    _origin, agent = _prepare_history(
+        tmp_path, history,
+        dirty_tracked=dirty_tracked,
+        untracked_collider=untracked_collider,
+    )
+    head_before = _git(agent, 'rev-parse', 'HEAD')
+    _patch_agent_update(monkeypatch, agent)
+
+    result = updates._apply_update_inner('agent')
+
+    if untracked_collider:
+        # Upstream began tracking collide.txt. Local bytes must survive in the
+        # recovery artifact (or the update must abort before HEAD moves).
+        if not result.get('ok'):
+            assert _git(agent, 'rev-parse', 'HEAD') == head_before
+            assert (agent / 'collide.txt').read_bytes() == _UNTRACKED_LOCAL
+        else:
+            branch = _recovery_has_bytes(agent, result, 'collide.txt', _UNTRACKED_LOCAL)
+            recovered = _git_bytes(agent, 'show', f'{branch}:collide.txt')
+            assert recovered == _UNTRACKED_LOCAL
+            assert recovered != _UNTRACKED_UPSTREAM
+            assert 'collide.txt' in (result.get('message') or '') or result.get('untracked_colliders')
+            assert _git(agent, 'rev-parse', 'HEAD') == _git(agent, 'rev-parse', 'origin/main')
+
+    if dirty_tracked and result.get('ok') and not result.get('stash_conflict'):
+        # Stash restore may put dirty bytes back when they do not collide.
+        restored = (agent / 'tracked.txt').read_bytes()
+        if restored != _DIRTY_BYTES:
+            _recovery_has_bytes(agent, result, 'tracked.txt', _DIRTY_BYTES)
+    elif dirty_tracked and result.get('ok') and result.get('stash_conflict'):
+        _recovery_has_bytes(agent, result, 'tracked.txt', _DIRTY_BYTES)
+        assert 'git -C' in result['message']
+    elif dirty_tracked and not result.get('ok'):
+        assert (agent / 'tracked.txt').read_bytes() == _DIRTY_BYTES or result.get('backup_branch')
+
+
+@pytest.mark.parametrize('history', ['behind', 'ahead', 'diverged'])
+@pytest.mark.parametrize('dirt', ['dirty_tracked', 'both'])
+def test_real_repo_force_update_recovery_reloads_dirty_bytes(tmp_path, monkeypatch, history, dirt):
+    """Force update must put exact dirty tracked bytes on the returned recovery ref."""
+    _origin, agent = _prepare_history(
+        tmp_path, history,
+        dirty_tracked=True,
+        untracked_collider=(dirt == 'both'),
+    )
+    wt_before = (agent / 'tracked.txt').read_bytes()
+    assert wt_before == _DIRTY_BYTES
+    _patch_agent_update(monkeypatch, agent)
+
+    result = updates.apply_force_update('agent')
+
+    if result.get('refused_rewind'):
+        # Ahead of origin/main: rewind guard must not mutate dirty bytes.
+        assert (agent / 'tracked.txt').read_bytes() == _DIRTY_BYTES
+        return
+
+    assert result.get('backup_branch') or result.get('recovery_ref'), result
+    _recovery_has_bytes(agent, result, 'tracked.txt', _DIRTY_BYTES)
+    if dirt == 'both' and (agent / 'collide.txt').exists() is False:
+        _recovery_has_bytes(agent, result, 'collide.txt', _UNTRACKED_LOCAL)
+
+
+@pytest.mark.parametrize('history', ['behind', 'ahead', 'diverged'])
+def test_real_repo_snapshot_failure_aborts_before_mutation(tmp_path, monkeypatch, history):
+    _origin, agent = _prepare_history(
+        tmp_path, history, dirty_tracked=True, untracked_collider=True,
+    )
+    head_before = _git(agent, 'rev-parse', 'HEAD')
+    dirty_before = (agent / 'tracked.txt').read_bytes()
+    untracked_before = (agent / 'collide.txt').read_bytes()
+    mutating = []
+    real_run = updates._run_git
+
+    def spy(args, cwd, timeout=10):
+        if args and args[0] in _MUTATING_GIT:
+            mutating.append(list(args))
+        return real_run(args, cwd, timeout=timeout)
+
+    monkeypatch.setattr(updates, '_run_git', spy)
+    monkeypatch.setattr(
+        updates, '_create_update_recovery_snapshot',
+        lambda path, sync=None: {'ok': False, 'error': 'injected snapshot failure'},
+    )
+    _patch_agent_update(monkeypatch, agent)
+
+    result = updates._apply_update_inner('agent')
+    assert result['ok'] is False
+    assert 'aborted before mutating' in result['message'] or 'recovery snapshot' in result['message']
+    assert _git(agent, 'rev-parse', 'HEAD') == head_before
+    assert (agent / 'tracked.txt').read_bytes() == dirty_before
+    assert (agent / 'collide.txt').read_bytes() == untracked_before
+    assert mutating == []
+
+    mutating.clear()
+    result_force = updates.apply_force_update('agent')
+    assert result_force['ok'] is False
+    assert _git(agent, 'rev-parse', 'HEAD') == head_before
+    assert (agent / 'tracked.txt').read_bytes() == dirty_before
+    if result_force.get('refused_rewind'):
+        assert (agent / 'collide.txt').read_bytes() == untracked_before
+    else:
+        assert 'aborted' in result_force['message']
+        assert not any(args and args[0] in {'reset', 'checkout', 'clean'} for args in mutating)
+
+
+@pytest.mark.parametrize('history', ['behind', 'ahead', 'diverged'])
+def test_real_repo_stash_restore_conflict_retains_recovery_ref(tmp_path, monkeypatch, history):
+    origin, agent = _prepare_history(
+        tmp_path, history, dirty_tracked=True, untracked_collider=False,
+    )
+    # Ensure origin also changed tracked.txt so stash restore conflicts after pull/reset.
+    if history == 'ahead':
+        _advance_origin(tmp_path, origin, {'tracked.txt': _TRACKED_UPSTREAM}, 'conflict-ahead')
+    _patch_agent_update(monkeypatch, agent)
+
+    result = updates._apply_update_inner('agent')
+    branch = result.get('recovery_ref') or result.get('backup_branch')
+    assert branch, result
+    _git(agent, 'rev-parse', '--verify', branch)
+    assert _git_bytes(agent, 'show', f'{branch}:tracked.txt') == _DIRTY_BYTES
+    if result.get('stash_conflict') or not result.get('ok'):
+        assert 'git -C' in result['message']
+        assert branch in result['message']
+
+
+@pytest.mark.parametrize('history', ['behind', 'ahead', 'diverged'])
+def test_real_repo_gateway_restart_failure_retains_recovery_ref(tmp_path, monkeypatch, history):
+    _origin, agent = _prepare_history(
+        tmp_path, history, dirty_tracked=True, untracked_collider=True,
+    )
+    _patch_agent_update(
+        monkeypatch, agent,
+        gateway=lambda: (False, {
+            'status': 'failed',
+            'message': 'gateway restart exploded',
+        }),
+    )
+
+    result = updates._apply_update_inner('agent')
+    assert result['ok'] is False
+    assert result.get('gateway_restart') == 'failed'
+    branch = result.get('recovery_ref') or result.get('backup_branch')
+    assert branch, result
+    _git(agent, 'rev-parse', '--verify', branch)
+    assert _git_bytes(agent, 'show', f'{branch}:tracked.txt') == _DIRTY_BYTES
+    assert _git_bytes(agent, 'show', f'{branch}:collide.txt') == _UNTRACKED_LOCAL
+    assert branch in result['message']
+    assert 'git -C' in result['message']
+
+    # Force update needs its own checkout: the apply above already moved this
+    # one to upstream, so a force run there would have nothing dirty to protect.
+    force_root = tmp_path / 'force'
+    force_root.mkdir()
+    _origin2, agent2 = _prepare_history(
+        force_root, history, dirty_tracked=True, untracked_collider=True,
+    )
+    _patch_agent_update(
+        monkeypatch, agent2,
+        gateway=lambda: (False, {
+            'status': 'failed',
+            'message': 'gateway restart exploded',
+        }),
+    )
+
+    force = updates.apply_force_update('agent')
+    if force.get('refused_rewind'):
+        assert (agent2 / 'tracked.txt').read_bytes() == _DIRTY_BYTES
+        return
+    assert force.get('gateway_restart') == 'failed'
+    force_branch = force.get('recovery_ref') or force.get('backup_branch')
+    assert force_branch, force
+    _git(agent2, 'rev-parse', '--verify', force_branch)
+    assert _git_bytes(agent2, 'show', f'{force_branch}:tracked.txt') == _DIRTY_BYTES
+    assert _git_bytes(agent2, 'show', f'{force_branch}:collide.txt') == _UNTRACKED_LOCAL
+    assert force_branch in force['message']
+
+
+def test_real_repo_local_commit_plus_untracked_collider_with_newly_tracked_upstream(
+    tmp_path, monkeypatch,
+):
+    """Exact reviewer probe: local-only commit + untracked path origin starts tracking."""
+    _origin, agent = _prepare_history(
+        tmp_path, 'diverged', dirty_tracked=False, untracked_collider=True,
+    )
+    assert (agent / 'local-only.txt').read_bytes() == b'local-only-commit\n'
+    assert (agent / 'collide.txt').read_bytes() == _UNTRACKED_LOCAL
+    head_before = _git(agent, 'rev-parse', 'HEAD')
+    _patch_agent_update(monkeypatch, agent)
+
+    result = updates._apply_update_inner('agent')
+    if not result.get('ok'):
+        assert _git(agent, 'rev-parse', 'HEAD') == head_before
+        assert (agent / 'collide.txt').read_bytes() == _UNTRACKED_LOCAL
+        return
+    branch = _recovery_has_bytes(agent, result, 'collide.txt', _UNTRACKED_LOCAL)
+    assert _git_bytes(agent, 'show', f'{branch}:local-only.txt') == b'local-only-commit\n'
+    recovered = _git_bytes(agent, 'show', f'{branch}:collide.txt')
+    assert recovered == _UNTRACKED_LOCAL
+    assert recovered != _UNTRACKED_UPSTREAM
