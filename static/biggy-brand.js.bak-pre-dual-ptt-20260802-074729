@@ -1,0 +1,840 @@
+(() => {
+  'use strict';
+  if (window.__biggyBrandLoaded) return;
+  window.__biggyBrandLoaded = true;
+
+  const DOC_TITLE = 'Biggy — Local Fleet Coordinator';
+  const ROLE = 'Local Fleet Coordinator';
+  const BRAND = 'Biggy';
+  const PLACEHOLDER = 'Message Biggy…';
+  const IWO_CLASS = 'biggy-brand-iwo';
+  const BODY_CLASS = 'biggy-brand';
+  const PTT_PROXY = '/api/extensions/biggy-brand/sidecar';
+
+  const state = {
+    profile: 'biggy',
+    model: '',
+    provider: '',
+    providerLabel: '',
+    ready: false,
+  };
+  let identityTimer = null;
+  let started = false;
+  let pttInstalled = false;
+
+  function esc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+
+  function el(tag, className, html) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (html !== undefined) node.innerHTML = html;
+    return node;
+  }
+
+  function providerLabel(id) {
+    const raw = String(id || '').trim();
+    if (!raw) return '';
+    const key = raw.toLowerCase();
+    if (key === 'lmstudio' || key === 'lm-studio' || key === 'lm_studio') return 'LM Studio';
+    if (key === 'openai') return 'OpenAI';
+    if (key === 'anthropic') return 'Anthropic';
+    if (key === 'custom' || key.startsWith('custom:')) return 'Custom';
+    return raw;
+  }
+
+  function brandVisibleText(value) {
+    if (typeof value !== 'string' || !value) return value;
+    let next = value.replace(/GPT Voice/g, 'Biggy Voice');
+    if (/hermes/i.test(next)) {
+      next = next
+        .replace(/\bHERMES\b/g, 'BIGGY')
+        .replace(/\bHermes\b/g, 'Biggy')
+        .replace(/\bhermes\b/g, 'biggy');
+    }
+    return next;
+  }
+
+  function rewriteGptVoiceInLocales() {
+    try {
+      if (typeof LOCALES !== 'object' || !LOCALES) return;
+      Object.keys(LOCALES).forEach((lang) => {
+        const bag = LOCALES[lang];
+        if (!bag || typeof bag !== 'object') return;
+        Object.keys(bag).forEach((key) => {
+          const val = bag[key];
+          if (typeof val !== 'string' || !/GPT Voice/i.test(val)) return;
+          bag[key] = brandVisibleText(val);
+        });
+      });
+    } catch (_) {}
+    try {
+      if (typeof applyLocaleToDOM === 'function') applyLocaleToDOM();
+    } catch (_) {}
+  }
+
+  function rewriteGptVoiceInDom(root) {
+    const scope = root || document;
+    const ATTRS = ['data-tooltip', 'title', 'aria-label', 'placeholder', 'alt'];
+    const nodes = scope.querySelectorAll
+      ? scope.querySelectorAll('#btnGptVoice, #gptVoiceLabel, #gptVoiceBar, #btnGptVoiceStop, #btnGptVoiceTalk, [data-i18n*="gpt_voice"], [data-i18n-title*="gpt_voice"], [data-tooltip*="GPT Voice"], [aria-label*="GPT Voice"]')
+      : [];
+    nodes.forEach((node) => {
+      ATTRS.forEach((attr) => {
+        if (!node.hasAttribute || !node.hasAttribute(attr)) return;
+        const cur = node.getAttribute(attr);
+        const next = brandVisibleText(cur);
+        if (next !== cur) node.setAttribute(attr, next);
+      });
+      if (node.childNodes && node.childNodes.length === 1 && node.firstChild.nodeType === Node.TEXT_NODE) {
+        const cur = node.textContent;
+        const next = brandVisibleText(cur);
+        if (next !== cur) node.textContent = next;
+      }
+    });
+    // Catch settings copy and any leftover text nodes under voice chrome.
+    [
+      'gptVoiceLabel',
+      'btnGptVoice',
+      'btnGptVoiceStop',
+      'settings_label_gpt_realtime_voice',
+    ].forEach((id) => {
+      const node = document.getElementById(id);
+      if (!node || typeof node.textContent !== 'string') return;
+      const next = brandVisibleText(node.textContent);
+      if (next !== node.textContent) node.textContent = next;
+    });
+    document.querySelectorAll('[data-i18n="settings_label_gpt_realtime_voice"], [data-i18n="settings_desc_gpt_realtime_voice"]').forEach((node) => {
+      const next = brandVisibleText(node.textContent || '');
+      if (next && next !== node.textContent) node.textContent = next;
+    });
+  }
+
+  function installBiggyVoiceLabels() {
+    rewriteGptVoiceInLocales();
+    rewriteGptVoiceInDom(document);
+    if (window.__biggyVoiceLabelTimer) return;
+    // realtime_voice.js rewrites labels on state changes; keep Biggy naming sticky.
+    window.__biggyVoiceLabelTimer = setInterval(() => {
+      rewriteGptVoiceInDom(document);
+    }, 1500);
+  }
+
+  function smedleyWebUiUrl() {
+    try {
+      const url = new URL(window.location.href);
+      url.port = '8787';
+      url.pathname = '/';
+      url.search = '';
+      url.hash = '';
+      return url.toString();
+    } catch (_) {
+      return 'http://127.0.0.1:8787/';
+    }
+  }
+
+  function openSmedleyGui() {
+    const target = smedleyWebUiUrl();
+    window.open(target, 'smedley-webui', 'noopener,noreferrer');
+  }
+
+  function isPhoneOrTabletClient() {
+    try {
+      const ua = String(navigator.userAgent || '');
+      if (/iPhone|iPod|Android.+Mobile|Windows Phone|Mobile.+Safari/i.test(ua)) return true;
+      if (/iPad|Android(?!.+Mobile)|Tablet|Kindle|Silk/i.test(ua)) return true;
+      // iPadOS 13+ reports as Mac; treat touch Macs with coarse pointer as tablets.
+      if (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) return true;
+      if (window.matchMedia && window.matchMedia('(pointer: coarse)').matches && window.matchMedia('(max-width: 1100px)').matches) {
+        return true;
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function stripGlassLabelsForSpeech(text) {
+    let clean = String(text || '');
+    // Glass / board chrome — never voice pills, lane names, or card title prefixes.
+    const labelRes = [
+      /\bOwner\s*ACK\b\s*:?/gi,
+      /\bOwnerACK\b\s*:?/gi,
+      /\bOPEN BIGGY TO DISPOSE\b/gi,
+      /\bOpen Biggy to (?:APPROVE|REJECT|DISPOSE)\b/gi,
+      /\b(?:please\s+)?(?:APPROVE|REJECT)\b(?=\s*[.!?,]|$)/gi,
+      /\bCLOSE\s*\/\s*ACK\b/gi,
+      /\bCLOSE STALE\b/gi,
+      /\bCANCEL SCHEDULED\b/gi,
+      /\b(?:BIGGY|HERMES|CURSOR|CLAUDE|GPT|VAL|FLEET)\s+(?:pill|lane|card|label|badge|source)\b/gi,
+      /\b(?:pill|lane|card|label|badge)\s+(?:BIGGY|HERMES|CURSOR|CLAUDE|GPT|VAL|FLEET)\b/gi,
+      /\bsource[_ ](?:pill|system|host)\b/gi,
+      /\b(?:on|in|the)\s+Attention\b/gi,
+      /\bAttention\s+(?:pane|column|lane)\b/gi,
+      /\b(?:Scheduled|Archived|Complete)\s+(?:pane|column|lane|card)\b/gi,
+      /\bACK-[A-Za-z0-9._-]+\b/g,
+      /\bt_[0-9a-f]{8}\b/gi,
+      /(?:^|[\s"'(])(?:OwnerACK|Cursor(?:\/[A-Za-z0-9._-]+)?|Hermes(?:\/[A-Za-z0-9._-]+)?|Claude)\s*[:\/—-]+\s*/gi,
+    ];
+    for (let i = 0; i < 3; i += 1) {
+      for (const re of labelRes) clean = clean.replace(re, ' ');
+    }
+    clean = clean.replace(/(?:^|[\s,;:])(?:BIGGY|HERMES|CURSOR|CLAUDE|GPT|VAL|FLEET|UNKNOWN)(?=\s|[.,!?;:]|$)\s*/g, ' ');
+    for (let i = 0; i < 4; i += 1) {
+      const next = clean.replace(/\b(?:with|a|an|the|says?|needs?|for|to|on|in|of|and|or)\s*[.!?]*\s*$/i, '').trim();
+      if (next === clean.trim()) break;
+      clean = next;
+    }
+    return clean.replace(/\s+/g, ' ').replace(/\s+([.!?])/g, '$1').trim();
+  }
+
+  function stripForSmedleySpeak(raw) {
+    let clean = String(raw || '');
+    if (typeof window._stripForTTS === 'function') {
+      try { clean = String(window._stripForTTS(clean) || ''); } catch (_) {}
+    } else {
+      clean = clean
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/`([^`]*)`/g, '$1')
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
+        .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+        .replace(/#{1,6}\s/g, '')
+        .replace(/[*_~]+/g, '')
+        .replace(/\n{2,}/g, '. ')
+        .replace(/\n/g, ' ');
+    }
+    return stripGlassLabelsForSpeech(clean);
+  }
+
+  async function speakOnSmedley(text) {
+    const clean = stripForSmedleySpeak(text);
+    if (!clean) return false;
+    try {
+      // Existing Smedley RAG sidecar: ElevenLabs → room soundbar/speakers or headset.
+      await proxyJson('/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: clean.slice(0, 800) }),
+      });
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function isGreetingPrompt(text) {
+    return /^\s*good\s+(morning|afternoon)\s*,?\s*biggy\b/i.test(String(text || '').trim());
+  }
+
+  function installGreetingAck() {
+    if (window.__biggyGreetingAckPatched) return;
+    window.__biggyGreetingAckPatched = true;
+    const fire = (raw) => {
+      try {
+        if (!isGreetingPrompt(raw)) return;
+        // Immediate ack while Hermes/prefill catches up.
+        speakOnSmedley('Just a sec, Rick...');
+      } catch (_) {}
+    };
+    // Capture send from common Hermes/Biggy composers.
+    document.addEventListener('keydown', (ev) => {
+      try {
+        if (ev.key !== 'Enter' || ev.shiftKey) return;
+        const t = ev.target;
+        if (!t) return;
+        const tag = (t.tagName || '').toLowerCase();
+        if (tag !== 'textarea' && tag !== 'input' && !t.isContentEditable) return;
+        const val = t.isContentEditable ? (t.textContent || '') : (t.value || '');
+        fire(val);
+      } catch (_) {}
+    }, true);
+    document.addEventListener('click', (ev) => {
+      try {
+        const btn = ev.target && ev.target.closest
+          ? ev.target.closest('button[type="submit"], button.send, .send-button, [data-testid="send"], #send-button')
+          : null;
+        if (!btn) return;
+        const box = document.querySelector('textarea, [contenteditable="true"], .composer textarea, #prompt');
+        if (!box) return;
+        const val = box.isContentEditable ? (box.textContent || '') : (box.value || '');
+        fire(val);
+      } catch (_) {}
+    }, true);
+  }
+
+  function installSmedleyAudioPolicy() {
+    const mobile = isPhoneOrTabletClient();
+    window.__biggyAudioSink = mobile ? 'local' : 'smedley';
+    document.body.dataset.biggyAudioSink = window.__biggyAudioSink;
+    if (mobile) return; // phones/tablets keep local Biggy Voice / browser TTS
+
+    // Desktop/remote GUIs: never play Biggy on the viewing machine.
+    // Spoken output is Smedley room (soundbar/speakers) or headset via pedal TTS.
+    try {
+      if (window.speechSynthesis && !window.__biggySpeechSynthPatched) {
+        const synth = window.speechSynthesis;
+        const origSpeak = synth.speak.bind(synth);
+        synth.speak = function biggySinkSpeak(utter) {
+          try {
+            const text = utter && typeof utter.text === 'string' ? utter.text : '';
+            if (text) speakOnSmedley(text);
+            if (utter && typeof utter.onend === 'function') {
+              setTimeout(() => { try { utter.onend(); } catch (_) {} }, 0);
+            }
+          } catch (_) {}
+          try { synth.cancel(); } catch (_) {}
+        };
+        window.__biggySpeechSynthPatched = true;
+        window.__biggySpeechSynthOrigSpeak = origSpeak;
+      }
+    } catch (_) {}
+
+    // Keep the Biggy Voice button visible. Desktop browser TTS / auto-read
+    // still sinks to Smedley room/headset via /speak; WebRTC Biggy Voice remains
+    // available for hold-to-talk when the operator wants it.
+
+    // Route hands-free / auto-read assistant replies to Smedley speakers.
+    if (!window.__biggyAutoReadPatched && typeof window.autoReadLastAssistant === 'function') {
+      const prior = window.autoReadLastAssistant;
+      window.autoReadLastAssistant = function biggyAutoReadToSmedley() {
+        try {
+          const rows = document.querySelectorAll('.msg-row[data-role="assistant"], .assistant-segment[data-raw-text]');
+          const last = rows.length ? rows[rows.length - 1] : null;
+          const raw = last && (last.dataset.rawText || last.textContent) || '';
+          if (raw.trim()) {
+            speakOnSmedley(raw);
+            return;
+          }
+        } catch (_) {}
+        // Fall through only if we couldn't extract text.
+        try { return prior.apply(this, arguments); } catch (_) {}
+      };
+      window.__biggyAutoReadPatched = true;
+    }
+
+    const note = document.getElementById('biggyHeaderNote');
+    if (note && !note.textContent) {
+      note.textContent = 'Audio → Smedley room/headset';
+      setTimeout(() => {
+        if (note.textContent === 'Audio → Smedley room/headset') note.textContent = '';
+      }, 5000);
+    }
+  }
+
+  function isBiggyInstance() {
+    if (state.ready && state.profile === 'biggy') return true;
+    try {
+      if (typeof S !== 'undefined' && S && String(S.activeProfile || '').toLowerCase() === 'biggy') {
+        return true;
+      }
+    } catch (_) {}
+    return state.profile === 'biggy';
+  }
+
+  function installDocumentTitle() {
+    document.title = DOC_TITLE;
+    const apple = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    if (apple) apple.setAttribute('content', BRAND);
+  }
+
+  function installComposerBranding() {
+    const composer = document.getElementById('msg');
+    if (!composer) return;
+    if (composer.getAttribute('placeholder') !== PLACEHOLDER) {
+      composer.setAttribute('placeholder', PLACEHOLDER);
+    }
+  }
+
+  function forceChromeLabels() {
+    const title = document.getElementById('appTitlebarTitle');
+    if (title && title.textContent.trim() !== BRAND) title.textContent = BRAND;
+
+    const profileLabel = document.getElementById('profileChipLabel');
+    if (profileLabel && profileLabel.textContent.trim().toLowerCase() === 'default') {
+      profileLabel.textContent = 'biggy';
+    }
+    const titleProfile = document.getElementById('titlebarProfileLabel');
+    if (titleProfile && titleProfile.textContent.trim().toLowerCase() === 'default') {
+      titleProfile.textContent = 'biggy';
+    }
+
+    try {
+      window._botName = BRAND;
+      if (typeof S !== 'undefined' && S) {
+        if (!S.activeProfile || S.activeProfile === 'default') {
+          S.activeProfile = 'biggy';
+          S.activeProfileIsDefault = false;
+        }
+      }
+    } catch (_) {}
+
+    const onboardingTitle = document.getElementById('onboardingTitle');
+    if (onboardingTitle) {
+      const next = brandVisibleText(onboardingTitle.textContent || '');
+      if (next && next !== onboardingTitle.textContent) onboardingTitle.textContent = 'Welcome to Biggy';
+      else if (/hermes/i.test(onboardingTitle.textContent || '')) onboardingTitle.textContent = 'Welcome to Biggy';
+    }
+    const onboardingLead = document.getElementById('onboardingLead');
+    if (onboardingLead && /hermes/i.test(onboardingLead.textContent || '')) {
+      onboardingLead.textContent =
+        'A quick guided setup will check your Biggy install, choose a workspace and model, and optionally protect the app with a password.';
+    }
+
+    [
+      'appTitlebarTitle',
+      'offlineAutorefresh',
+      'agentHealthTitle',
+    ].forEach((id) => {
+      const node = document.getElementById(id);
+      if (!node || !node.firstChild || node.firstChild.nodeType !== Node.TEXT_NODE) {
+        if (node && typeof node.textContent === 'string' && /hermes/i.test(node.textContent)) {
+          node.textContent = brandVisibleText(node.textContent);
+        }
+        return;
+      }
+      const next = brandVisibleText(node.textContent);
+      if (next !== node.textContent) node.textContent = next;
+    });
+  }
+
+  function removeCaduceus() {
+    document.querySelectorAll('#emptyState .empty-logo').forEach((node) => node.remove());
+  }
+
+  function updateIdentityChip() {
+    const meta = document.getElementById('biggyBrandMeta');
+    const sub = document.getElementById('biggyBrandSubtitle');
+    if (!meta && !sub) return;
+    const model = state.model || '—';
+    const provider = state.providerLabel || providerLabel(state.provider) || '—';
+    const profile = state.profile || 'biggy';
+    if (sub) sub.textContent = ROLE;
+    if (meta) {
+      meta.innerHTML =
+        `<div><span>PROFILE</span> ${esc(profile)}</div>` +
+        `<div><span>PROVIDER</span> ${esc(provider)}</div>` +
+        `<div><span>MODEL</span> ${esc(model)}</div>`;
+    }
+  }
+
+  function syncModelFromDom() {
+    const sel = document.getElementById('modelSelect');
+    if (!sel || !sel.value) return;
+    if (!state.model || state.model === 'Unknown' || /claude|gpt-4|gpt-5|sonnet|opus/i.test(state.model)) {
+      if (sel.value && !/unknown/i.test(sel.value)) state.model = sel.value;
+    }
+    const opt = sel.selectedOptions && sel.selectedOptions[0];
+    const dataProvider = opt && (opt.getAttribute('data-provider') || opt.dataset.provider);
+    if (dataProvider && (!state.provider || state.provider === 'Unknown')) {
+      state.provider = dataProvider;
+      state.providerLabel = providerLabel(dataProvider);
+    }
+  }
+
+  async function jsonGet(path) {
+    if (typeof window.api === 'function') return window.api(path);
+    const response = await fetch(path, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  }
+
+  async function proxyJson(path, options = {}) {
+    const url = `${PTT_PROXY}${path}`;
+    if (typeof window.api === 'function' && url.startsWith('/api/')) {
+      return window.api(url, options);
+    }
+    const response = await fetch(url, { ...options, cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    }
+    return response.json();
+  }
+
+  function currentHermesSessionId() {
+    try {
+      const activeRow = document.querySelector('.session-item.active[data-sid]');
+      const activeSid = activeRow && activeRow.dataset && activeRow.dataset.sid;
+      if (activeSid && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(activeSid)) return activeSid;
+    } catch (_) {}
+    try {
+      if (typeof S !== 'undefined' && S && S.session && S.session.session_id) {
+        return String(S.session.session_id);
+      }
+    } catch (_) {}
+    try {
+      const stored = localStorage.getItem('hermes-webui-session');
+      if (stored && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(stored)) return stored;
+    } catch (_) {}
+    return '';
+  }
+
+  function installPttBridge(header) {
+    if (pttInstalled || !header) return;
+    const ptt = header.querySelector('#biggyPtt');
+    const routeBtn = header.querySelector('#biggyAudioRoute');
+    const note = header.querySelector('#biggyHeaderNote');
+    if (!ptt || !routeBtn) return;
+    pttInstalled = true;
+
+    const SESSION_REPOST_INTERVAL_MS = 10000;
+    let postedSession = '';
+    let lastSessionPostAt = 0;
+    let lastCompletionTimestamp = 0;
+    let completionBaselineEstablished = false;
+    let routePending = false;
+
+    function applyAudioRouteStatus(status) {
+      const active = String(status.active_route || 'room').toLowerCase();
+      const desired = String(status.desired_route || active).toLowerCase();
+      const switching = !!status.route_switching || routePending;
+      const headsetAvailable = !!status.headset_available;
+      const shown = (switching ? desired : active) === 'headset' ? 'HEADSET' : 'ROOM';
+      routeBtn.textContent = shown;
+      routeBtn.classList.remove('ok', 'active', 'down');
+      if (!status.pedal_alive) {
+        routeBtn.classList.add('down');
+      } else if (switching) {
+        routeBtn.classList.add('active');
+        if (note) note.textContent = `Switching to ${desired === 'headset' ? 'Headset' : 'Room'}…`;
+      } else if (desired === 'headset' && !headsetAvailable) {
+        routeBtn.classList.add('down');
+        if (note) note.textContent = 'Headset is not connected to Smedley.';
+      } else {
+        routeBtn.classList.add('ok');
+        if (note && /^Switching to (?:Headset|Room)…$/.test(note.textContent || '')) {
+          note.textContent = '';
+        }
+      }
+    }
+
+    routeBtn.addEventListener('click', async () => {
+      if (routePending) return;
+      let status;
+      try {
+        status = await proxyJson('/ptt/status');
+      } catch (_) {
+        if (note) note.textContent = 'PTT sidecar offline.';
+        return;
+      }
+      const active = String(status.active_route || 'room').toLowerCase();
+      const target = active === 'headset' ? 'room' : 'headset';
+      if (target === 'headset' && !status.headset_available) {
+        if (note) note.textContent = 'Headset is not connected to Smedley.';
+        applyAudioRouteStatus(status);
+        return;
+      }
+      routePending = true;
+      applyAudioRouteStatus({ ...status, route_switching: true });
+      try {
+        await proxyJson('/ptt/audio-route', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ route: target }),
+        });
+      } catch (_) {
+        if (note) note.textContent = 'Audio route request failed.';
+      } finally {
+        routePending = false;
+      }
+    });
+
+    function applyPttStatus(status) {
+      const pedalAlive = !!status.pedal_alive;
+      const phase = String(status.phase || 'idle');
+      const busy = pedalAlive && ['listening', 'processing', 'speaking'].includes(phase);
+      ptt.classList.remove('ok', 'active', 'down');
+      if (!pedalAlive) ptt.classList.add('down');
+      else if (busy) ptt.classList.add('active');
+      else ptt.classList.add('ok');
+      applyAudioRouteStatus(status);
+    }
+
+    async function syncActiveSession() {
+      const sid = currentHermesSessionId();
+      if (!sid) return;
+      const now = Date.now();
+      const sessionChanged = sid !== postedSession;
+      const heartbeatStale = (now - lastSessionPostAt) >= SESSION_REPOST_INTERVAL_MS;
+      if (!sessionChanged && !heartbeatStale) return;
+      try {
+        await proxyJson('/ptt/active-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sid }),
+        });
+        postedSession = sid;
+        lastSessionPostAt = now;
+      } catch (_) {}
+    }
+
+    async function pollPttStatus() {
+      await syncActiveSession();
+      try {
+        const status = await proxyJson('/ptt/status');
+        applyPttStatus(status);
+        const completionTs = Number(status.completion_timestamp || 0);
+        const completionSid = String(status.completion_session_id || '');
+        if (!completionBaselineEstablished) {
+          lastCompletionTimestamp = completionTs;
+          completionBaselineEstablished = true;
+          return;
+        }
+        if (completionTs > lastCompletionTimestamp) {
+          lastCompletionTimestamp = completionTs;
+          const sid = currentHermesSessionId() || completionSid;
+          if (sid && typeof window.loadSession === 'function') {
+            try {
+              await window.loadSession(sid, {
+                force: true,
+                externalRefreshReason: 'ptt-completion',
+              });
+            } catch (_) {}
+          }
+        }
+      } catch (_) {
+        ptt.classList.remove('ok', 'active');
+        ptt.classList.add('down');
+        routeBtn.classList.remove('ok', 'active');
+        routeBtn.classList.add('down');
+      }
+    }
+
+    pollPttStatus();
+    setInterval(() => { pollPttStatus().catch(() => {}); }, 1500);
+  }
+
+  async function refreshIdentity() {
+    try {
+      const profiles = await jsonGet('/api/profiles');
+      if (profiles && profiles.active) state.profile = String(profiles.active).trim() || 'biggy';
+      const active = Array.isArray(profiles && profiles.profiles)
+        ? profiles.profiles.find((p) => p && p.is_active) || profiles.profiles[0]
+        : null;
+      if (active) {
+        if (active.model) state.model = String(active.model);
+        if (active.provider) {
+          state.provider = String(active.provider);
+          state.providerLabel = providerLabel(active.provider);
+        }
+      }
+      if (profiles && profiles.single_profile_mode) state.ready = true;
+    } catch (_) {}
+
+    try {
+      const onboard = await jsonGet('/api/onboarding/status');
+      const system = onboard && onboard.system ? onboard.system : {};
+      if (system.current_model) state.model = String(system.current_model);
+      if (system.current_provider) {
+        state.provider = String(system.current_provider);
+        state.providerLabel = providerLabel(system.current_provider);
+      }
+      state.ready = true;
+    } catch (_) {}
+
+    try {
+      const settings = await jsonGet('/api/settings');
+      if (settings && settings.default_model_provider && !state.provider) {
+        state.provider = String(settings.default_model_provider);
+        state.providerLabel = providerLabel(settings.default_model_provider);
+      }
+      window._botName = BRAND;
+    } catch (_) {
+      window._botName = BRAND;
+    }
+
+    try {
+      if (state.model) window._defaultModel = state.model;
+      if (state.provider) window._activeProvider = state.provider;
+      if (typeof S !== 'undefined' && S && state.profile === 'biggy') {
+        S.activeProfile = 'biggy';
+        S.activeProfileIsDefault = false;
+      }
+    } catch (_) {}
+
+    syncModelFromDom();
+    updateIdentityChip();
+    forceChromeLabels();
+    installComposerBranding();
+    installBiggyVoiceLabels();
+    removeCaduceus();
+  }
+
+  const OWNER_ACK_API = 'http://127.0.0.1:8791';
+
+  function ensureOwnerAckPanel() {
+    let panel = document.getElementById('biggyOwnerAckPanel');
+    if (panel) return panel;
+    panel = el('aside', 'biggy-owner-ack-panel');
+    panel.id = 'biggyOwnerAckPanel';
+    panel.innerHTML =
+      `<div class="biggy-owner-ack-head">` +
+      `<span class="biggy-owner-ack-title">OWNER ACK REQUIRED</span>` +
+      `<span class="biggy-owner-ack-count" id="biggyOwnerAckCount">0</span>` +
+      `</div>` +
+      `<div class="biggy-owner-ack-list" id="biggyOwnerAckList">` +
+      `<div class="biggy-owner-ack-empty">No pending GPT/voice tasks</div>` +
+      `</div>`;
+    const mainChat = document.getElementById('mainChat');
+    if (mainChat) mainChat.appendChild(panel);
+    else document.body.appendChild(panel);
+    return panel;
+  }
+
+  async function ownerAckFetch(path, options) {
+    const res = await fetch(OWNER_ACK_API + path, Object      ...(options || {}),
+      cache: 'no-store',
+      headers: { 'Content-Type': 'application/json', ...(options && options.headers || {}) },
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+    return data;
+  }
+
+  async function refreshOwnerAckPanel() {
+    const panel = ensureOwnerAckPanel();
+    const list = document.getElementById('biggyOwnerAckList');
+    const count = document.getElementById('biggyOwnerAckCount');
+    if (!list || !count) return;
+    try {
+      const data = await ownerAckFetch('/v1/owner-ack');
+      const proposals = Array.isArray(data.proposals) ? data.proposals : [];
+      count.textContent = String(proposals.length);
+      panel.classList.toggle('has-pending', proposals.length > 0);
+      if (!proposals.length) {
+        list.innerHTML = '<div class="biggy-owner-ack-empty">No pending GPT/voice tasks</div>';
+        return;
+      }
+      list.innerHTML = proposals.map((p) => {
+        const id = esc(p.id || '');
+        const title = esc(p.title || p.id || 'Task');
+        const lane = esc(String(p.lane || '').toUpperCase());
+        const target = esc(p.target_machine || p.assignee || '—');
+        const prompt = esc(String(p.prompt || '').slice(0, 280));
+        const source = esc(p.source || 'gpt_voice');
+        return (
+          `<article class="biggy-owner-ack-card" data-ack-id="${id}">` +
+          `<div class="biggy-owner-ack-card-title">${title}</div>` +
+          `<div class="biggy-owner-ack-card-meta">${lane} · ${target} · ${source}</div>` +
+          `<div class="biggy-owner-ack-card-body">${prompt}</div>` +
+          `<div class="biggy-owner-ack-actions">` +
+          `<button type="button" class="biggy-ack-approve" data-ack-id="${id}">APPROVE</button>` +
+          `<button type="button" class="biggy-ack-reject" data-ack-id="${id}">REJECT</button>` +
+          `</div></article>`
+        );
+      }).join('');
+    } catch (_) {
+      count.textContent = '?';
+      panel.classList.remove('has-pending');
+      list.innerHTML = '<div class="biggy-owner-ack-empty">Owner-ACK bridge offline (:8791)</div>';
+    }
+  }
+
+  function installOwnerAckPanel() {
+    const panel = ensureOwnerAckPanel();
+    if (panel.dataset.bound === '1') return;
+    panel.dataset.bound = '1';
+    panel.addEventListener('click', (event) => {
+      const approve = event.target.closest('.biggy-ack-approve');
+      const reject = event.target.closest('.biggy-ack-reject');
+      const btn = approve || reject;
+      if (!btn) return;
+      const id = btn.getAttribute('data-ack-id');
+      if (!id) return;
+      btn.disabled = true;
+      const path = approve
+        ? `/v1/owner-ack/${encodeURIComponent(id)}/approve`
+        : `/v1/owner-ack/${encodeURIComponent(id)}/reject`;
+      ownerAckFetch(path, { method: 'POST', body: JSON.stringify({ decided_by: 'owner' }) })
+        .then(() => refreshOwnerAckPanel())
+        .catch((err) => {
+          btn.disabled = false;
+          window.alert('Owner ACK failed: ' + (err && err.message ? err.message : err));
+        });
+    });
+    refreshOwnerAckPanel().catch(() => {});
+    setInterval(() => { refreshOwnerAckPanel().catch(() => {}); }, 4000);
+  }
+
+  function makeHeader() {
+    const header = el('div', 'biggy-brand-header');
+    header.innerHTML =
+      `<div class="biggy-brand-cluster">` +
+      `<img class="biggy-brand-ega" src="/static/ega.jpg" alt="EGA">` +
+      `<div class="biggy-brand-heading">` +
+      `<div class="biggy-brand-title">BIGGY</div>` +
+      `<div class="biggy-brand-subtitle" id="biggyBrandSubtitle">${esc(ROLE)}</div>` +
+      `</div>` +
+      `<img class="biggy-brand-ega" src="/static/ega.jpg" alt="EGA">` +
+      `</div>` +
+      `<div class="biggy-brand-controls">` +
+      `<button id="biggyPtt" type="button" data-testid="biggy-ptt" title="Foot-pedal PTT status">● PTT</button>` +
+      `<button id="biggyAudioRoute" type="button" data-testid="biggy-audio-route" title="Toggle headset / room audio">ROOM</button>` +
+      `<button id="biggyOpenSmedley" type="button" data-testid="biggy-open-smedley" title="Open Smedley GUI (RAG + electrical tools)">SMEDLEY</button>` +
+      `<div id="biggyHeaderNote" class="biggy-brand-header-note"></div>` +
+      `</div>` +
+      `<div class="biggy-brand-status" aria-label="Biggy identity">` +
+      `<div class="biggy-brand-meta" id="biggyBrandMeta">PROFILE biggy</div>` +
+      `</div>`;
+    return header;
+  }
+
+  function installSmedleyButton(header) {
+    const btn = header && header.querySelector('#biggyOpenSmedley');
+    if (!btn || btn.dataset.bound === '1') return;
+    btn.dataset.bound = '1';
+    btn.addEventListener('click', (event) => {
+      event.preventDefault();
+      openSmedleyGui();
+    });
+  }
+
+  function applyShell() {
+    const mainChat = document.getElementById('mainChat');
+    if (!mainChat) return false;
+    document.body.classList.add(BODY_CLASS);
+    mainChat.classList.add(IWO_CLASS);
+    document.querySelectorAll('.biggy-brand-header').forEach((node) => node.remove());
+    pttInstalled = false;
+    const header = makeHeader();
+    mainChat.insertBefore(header, mainChat.firstChild);
+    installPttBridge(header);
+    installSmedleyButton(header);
+    installOwnerAckPanel();
+    installBiggyVoiceLabels();
+    installSmedleyAudioPolicy();
+    installGreetingAck();
+    installDocumentTitle();
+    installComposerBranding();
+    forceChromeLabels();
+    removeCaduceus();
+    updateIdentityChip();
+    return true;
+  }
+
+  async function tryStart() {
+    if (started) return;
+    await refreshIdentity();
+    if (!isBiggyInstance()) return;
+    if (!applyShell()) {
+      setTimeout(() => { tryStart().catch(() => {}); }, 100);
+      return;
+    }
+    started = true;
+    await refreshIdentity();
+    if (identityTimer) clearInterval(identityTimer);
+    identityTimer = setInterval(() => {
+      refreshIdentity().catch(() => {});
+    }, 15000);
+  }
+
+  function start() {
+    tryStart().catch(() => {});
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();

@@ -269,21 +269,34 @@
     return stripGlassLabelsForSpeech(clean);
   }
 
-  function resolveAskJarvisVoiceId() {
-    // Last Ask Jarvis hard-bind turn only — do not change Biggy default Austin.
+  const JARVIS_VOICE_ID = 'dzRy05hNK3bab9ViJ0oU';
+
+  function isJarvisVoiceId(voiceId) {
+    return String(voiceId || '').trim() === JARVIS_VOICE_ID;
+  }
+
+  function lastAskJarvisAssistant() {
     try {
       const msgs = (typeof S !== 'undefined' && Array.isArray(S.messages)) ? S.messages : [];
       for (let i = msgs.length - 1; i >= 0; i--) {
         const m = msgs[i];
-        if (m && m.role === 'assistant' && m.ask_jarvis_hard_bind) {
-          return String(m.tts_voice_id || 'dzRy05hNK3bab9ViJ0oU').trim();
-        }
+        if (m && m.role === 'assistant' && m.ask_jarvis_hard_bind) return m;
         if (m && m.role === 'assistant') break;
       }
-      const rows = document.querySelectorAll('.assistant-segment[data-raw-text]');
-      const last = rows.length ? rows[rows.length - 1] : null;
-      const fromDom = last && last.dataset ? String(last.dataset.ttsVoiceId || '').trim() : '';
-      if (fromDom) return fromDom;
+    } catch (_) {}
+    return null;
+  }
+
+  function resolveAskJarvisVoiceId() {
+    // Final Jarvis turn only. Never treat Biggy Austin ack / pending as Jarvis.
+    try {
+      const m = lastAskJarvisAssistant();
+      if (!m) return '';
+      if (m.ask_jarvis_pending) return '';
+      if (String(m.tts_voice_profile || '') === 'biggy_austin_ack') return '';
+      if (String(m.tts_voice_profile || '') !== 'jarvis') return '';
+      const vid = String(m.tts_voice_id || '').trim();
+      return isJarvisVoiceId(vid) ? vid : '';
     } catch (_) {}
     return '';
   }
@@ -293,14 +306,35 @@
     const clean = stripForSmedleySpeak(text);
     if (!clean) return false;
     try {
-      const body = { text: clean.slice(0, 800) };
+      const body = { text: clean.slice(0, 800), fallback_used: false };
       let voiceId = opts.voice_id ? String(opts.voice_id).trim() : '';
-      // Exact override: speechSynthesis sink and other no-opts callers were
-      // posting /speak with no voice_id → Austin. Ask Jarvis turns must carry
-      // James Michael through this single Smedley-sink choke point.
-      if (!voiceId) voiceId = resolveAskJarvisVoiceId();
-      if (voiceId && /^[A-Za-z0-9_-]{8,64}$/.test(voiceId)) body.voice_id = voiceId;
-      // Existing Smedley RAG sidecar: ElevenLabs → room soundbar/speakers or headset.
+      const forceBiggy = opts.assistant_identity === 'biggy' || opts.biggy === true;
+      const jarvisMsg = lastAskJarvisAssistant();
+      const jarvisFinal = !forceBiggy && !!(jarvisMsg && !jarvisMsg.ask_jarvis_pending
+        && String(jarvisMsg.tts_voice_profile || '') === 'jarvis');
+      if (jarvisFinal || opts.require_jarvis) {
+        if (!voiceId) voiceId = resolveAskJarvisVoiceId();
+        if (!isJarvisVoiceId(voiceId)) {
+          try {
+            console.error('JARVIS_VOICE_CONFIGURATION_UNAVAILABLE', {
+              correlation_id: jarvisMsg && jarvisMsg._correlation_id,
+              assistant_identity: 'jarvis',
+              tts_provider: 'elevenlabs',
+              selected_voice_id: voiceId || null,
+              fallback_used: false,
+              terminal_status: 'JARVIS_VOICE_CONFIGURATION_UNAVAILABLE',
+            });
+          } catch (_) {}
+          return false;
+        }
+        body.voice_id = voiceId;
+        body.assistant_identity = 'jarvis';
+        body.require_jarvis_voice = true;
+      } else {
+        if (!voiceId) voiceId = resolveAskJarvisVoiceId();
+        if (voiceId && /^[A-Za-z0-9_-]{8,64}$/.test(voiceId)) body.voice_id = voiceId;
+        body.assistant_identity = voiceId && isJarvisVoiceId(voiceId) ? 'jarvis' : 'biggy';
+      }
       await proxyJson('/speak', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -323,7 +357,7 @@
       try {
         if (!isGreetingPrompt(raw)) return;
         // Immediate ack while Hermes/prefill catches up.
-        speakOnSmedley('Just a sec, Rick...');
+        speakOnSmedley('Just a sec, Rick...', { assistant_identity: 'biggy' });
       } catch (_) {}
     };
     // Capture send from common Hermes/Biggy composers.
@@ -412,8 +446,9 @@
             if (spoken) {
               // Final only: James Michael. Never speak Austin ack from client.
               if (String(jarvisMsg.tts_voice_profile || '') === 'biggy_austin_ack') return;
-              const voiceId = jarvisMsg.tts_voice_id || 'dzRy05hNK3bab9ViJ0oU';
-              speakOnSmedley(spoken, { voice_id: voiceId });
+              if (String(jarvisMsg.tts_voice_profile || '') !== 'jarvis') return;
+              const voiceId = String(jarvisMsg.tts_voice_id || '').trim();
+              speakOnSmedley(spoken, { voice_id: voiceId, require_jarvis: true });
               return;
             }
             return;

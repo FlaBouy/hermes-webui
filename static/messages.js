@@ -2067,7 +2067,7 @@ async function send(){
     return;
   }
   // Smedley document-link repair / engineering RAG: deterministic reply, no agent stream.
-  if(startData.document_route || startData.active_document_review || startData.engineering_rag_answer){
+  if(startData.document_route || startData.active_document_review || startData.engineering_rag_answer || startData.jarvis_greeting){
     S.activeStreamId=null;
     if(S.session&&S.session.session_id===activeSid){
       S.session.active_stream_id=null;
@@ -2084,9 +2084,11 @@ async function send(){
     if(typeof updateSendBtn==='function') updateSendBtn();
     try{
       if(typeof loadSession==='function'){
-        const reason=startData.active_document_review
+        const reason=startData.jarvis_greeting
+          ? 'jarvis-greeting'
+          : (startData.active_document_review
           ? 'active-document-review'
-          : (startData.engineering_rag_answer ? 'engineering-rag-answer' : 'document-route');
+          : (startData.engineering_rag_answer ? 'engineering-rag-answer' : 'document-route'));
         await loadSession(activeSid,{force:true,externalRefreshReason:reason});
       }else if(startData.reply){
         const asst={
@@ -2114,6 +2116,13 @@ async function send(){
               if(startData.document_route) m.document_route=true;
               if(startData.active_document_review) m.active_document_review=true;
               if(startData.engineering_rag_answer) m.engineering_rag_answer=true;
+              if(startData.jarvis_greeting) m.jarvis_greeting=true;
+              if(startData.jarvis_voice_bind) m.jarvis_voice_bind=true;
+              if(startData.assistant_identity) m.assistant_identity=String(startData.assistant_identity);
+              if(startData.tts_voice_id) m.tts_voice_id=String(startData.tts_voice_id);
+              if(startData.tts_voice_profile) m.tts_voice_profile=String(startData.tts_voice_profile);
+              if(startData.correlation_id) m._correlation_id=String(startData.correlation_id);
+              if(startData.tts_server_queued) m._tts_final_server_queued=true;
               m.spoken_reply=String(startData.spoken_reply);
               break;
             }
@@ -2121,7 +2130,16 @@ async function send(){
         }
       }catch(_){ }
       try{ window.__smedleyDocSpokenReply=String(startData.spoken_reply||'').trim(); }catch(_){ }
-      setTimeout(()=>autoReadLastAssistant(), 300);
+      if(startData.tts_error==='JARVIS_VOICE_CONFIGURATION_UNAVAILABLE' || startData.terminal_status==='JARVIS_VOICE_CONFIGURATION_UNAVAILABLE'){
+        try{
+          const note=document.getElementById('smedleyHeaderNote');
+          if(note) note.textContent='JARVIS_VOICE_CONFIGURATION_UNAVAILABLE';
+          if(typeof window.__smedleyShowReplayTts==='function') window.__smedleyShowReplayTts('JARVIS_VOICE_CONFIGURATION_UNAVAILABLE');
+        }catch(_){}
+      }
+      if(!startData.tts_server_queued){
+        setTimeout(()=>autoReadLastAssistant(), 300);
+      }
     }
     if(typeof renderSessionList==='function') void renderSessionList();
     return;

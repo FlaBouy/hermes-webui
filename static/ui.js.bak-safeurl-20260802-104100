@@ -7567,8 +7567,8 @@ function renderMd(raw){
     if(/^(javascript|vbscript):/i.test(compact)) return false;
     if(/^https?:\/\//i.test(raw)) return true;
     if(/^(mailto:|tel:|message:)/i.test(raw)) return true;
-    if(img && /^\/?api\//i.test(raw)) return true;
-    if(!img && (/^\/?api\//i.test(raw) || /^#/.test(raw) || _isInternalSessionHref(raw))) return true;
+    if(img && /^api\//i.test(raw)) return true;
+    if(!img && (/^api\//i.test(raw) || /^#/.test(raw) || _isInternalSessionHref(raw))) return true;
     return false;
   }
   function _attrs(raw){
@@ -8501,28 +8501,9 @@ function _copyThinkingText(btn){
 }
 
 // ── TTS: Text-to-Speech via Web Speech API (#499) ──
-// Strips markdown, code blocks, MEDIA: paths, raw WebUI URLs,
-// filenames/link titles, scores, document-route / UI chrome, and raw
-// retrieval payloads so spoken output is answer prose only.
+// Strips markdown, code blocks, and MEDIA: paths for clean speech output.
 function _stripForTTS(text){
-  text=String(text==null?'':text);
-  // Document-route / card-title boilerplate (answer body only).
-  text=text.replace(/(^|\n)[ \t]*Document links(?:\s+for\s+[“"][^”"]*[”"])?(?:\s*\(sidecar preview\))?\s*:?[ \t]*(?=\n|$)/gi,'$1');
-  text=text.replace(/\bDocument links(?:\s+for\s+[“"][^”"]*[”"])?(?:\s*\(sidecar preview\))?\s*:?/gi,' ');
-  text=text.replace(/\(\s*score\s*=\s*[-+]?\d*\.?\d+\s*\)/gi,' ');
-  text=text.replace(/\b(?:sidecar preview|lan_url|card title|source pill|owner\s*ack)\b\s*:?/gi,' ');
-  // Raw retrieval JSON / field dumps (nested match objects first).
-  for(let i=0;i<8;i++){
-    const next=text.replace(/\{[^{}]*\}/g,(body)=>{
-      return /"(?:matches|collection|lan_url|snippet|source|score|url|markdown)"\s*:/i.test(body)?' ':body;
-    });
-    if(next===text) break;
-    text=next;
-  }
-  text=text.replace(/\b(?:matches|collection|snippet|source|topk|library_only|snippet_chars)\b\s*[:=]\s*/gi,' ');
-  if(/"(?:matches|collection)"\s*:/i.test(text) || /\b(?:matches|collection)\b\s*[:=]/i.test(text)){
-    return '';
-  }  // Remove code blocks entirely (```) — line-anchored to match #1438 fix
+  // Remove code blocks entirely (```) — line-anchored to match #1438 fix
   text=text.replace(/(^|\n)[ ]{0,3}```(?:[\s\S]*?\n)?[ ]{0,3}```(?=\n|$)/g,' ');
   // Remove inline code
   text=text.replace(/`[^`]+`/g,' ');
@@ -8533,26 +8514,17 @@ function _stripForTTS(text){
   text=text.replace(/_(.+?)_/g,'$1');
   // Strip headings
   text=text.replace(/^#{1,6}\s+/gm,'');
-  // Images + markdown links drop entirely (no filename / link title spoken)
-  text=text.replace(/!\[[^\]]*\]\([^)]+\)/g,' ');
-  text=text.replace(/\[[^\]]*\]\([^)]+\)/g,' ');
-  // Raw absolute URLs and relative WebUI sidecar paths must not be spoken
-  text=text.replace(/https?:\/\/[^\s<>\]\)"']+/gi,' ');
-  text=text.replace(/\/api\/extensions\/smedley-engineering\/sidecar\/(?:preview|doc)\/[^\s<>\]\)"']*/gi,' ');
-  // Bare corpus filenames left after link stripping
-  text=text.replace(/\b[\w./\\-]+\.(?:pdf|docx?|xlsx?|pptx?|txt|md)\b/gi,' ');
+  // Strip links, keep text
+  text=text.replace(/\[([^\]]+)\]\([^)]+\)/g,'$1');
   // Replace MEDIA: paths with a simple label
   text=text.replace(/MEDIA:[^\s]+/g,'a file');
   // Strip emoji and emoticons
   text=text.replace(/[\u{1F600}-\u{1F64F}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1F1E0}-\u{1F1FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{FE00}-\u{FE0F}\u{1F900}-\u{1F9FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}\u{200D}]/gu,'');
   // Strip HTML tags that may leak through markdown
   text=text.replace(/<[^>]+>/g,' ');
-  // List markers → spaces; newlines → sentence breaks
-  text=text.replace(/(^|\n)[ \t]*[-*•]\s+/g,'$1');
-  text=text.replace(/\n+/g,'. ');
   // Collapse whitespace
-  text=text.replace(/\s+/g,' ').replace(/\s+([,.;:!?])/g,'$1').replace(/\.\s*\./g,'.').trim();
-  return text.replace(/^[\s.\-]+|[\s.\-]+$/g,'');
+  text=text.replace(/\s+/g,' ').trim();
+  return text;
 }
 
 function _splitForTTS(text, maxChars){
@@ -8747,8 +8719,7 @@ function speakMessage(btn){
   speechSynthesis.speak(utter);
 }
 
-function _playElevenLabsTts(text, btn, opts){
-  opts=opts||{};
+function _playElevenLabsTts(text, btn){
   if(btn) btn.dataset.speaking='1';
   _ttsSpeaking=true;
   const _fail=function(msg){
@@ -8756,12 +8727,10 @@ function _playElevenLabsTts(text, btn, opts){
     if(btn)btn.dataset.speaking='0';
     if(msg&&typeof showToast==='function') showToast(msg,4000,'error');
   };
-  const body={text:text, engine:'elevenlabs'};
-  if(opts.voice_id) body.voice_id=String(opts.voice_id);
   fetch(new URL('api/tts', document.baseURI || location.href).href, {
     method:'POST',
     headers:{'Content-Type':'application/json'},
-    body:JSON.stringify(body)
+    body:JSON.stringify({text:text, engine:'elevenlabs'})
   })
   .then(function(r){
     if(!r.ok){
@@ -8875,26 +8844,6 @@ function autoReadLastAssistant(){
   if(engine==='browser'&&!('speechSynthesis' in window)) return;
   const pref=localStorage.getItem('hermes-tts-auto-read');
   if(pref!=='true') return;
-  // Ask Jarvis hard-bind: speak spoken_text only via documented Jarvis ElevenLabs voice.
-  const msgs=(typeof S!=='undefined'&&Array.isArray(S.messages))?S.messages:[];
-  let jarvisMsg=null;
-  for(let i=msgs.length-1;i>=0;i--){
-    if(msgs[i]&&msgs[i].role==='assistant'&&msgs[i].ask_jarvis_hard_bind){ jarvisMsg=msgs[i]; break; }
-    if(msgs[i]&&msgs[i].role==='assistant') break;
-  }
-  if(jarvisMsg){
-    if(jarvisMsg.ask_jarvis_pending) return;
-    if(String(jarvisMsg.tts_voice_profile||'')==='biggy_austin_ack') return;
-    const spoken=String(jarvisMsg.spoken_text||jarvisMsg.spoken_reply||'').trim();
-    if(!spoken) return;
-    const voiceId=String(jarvisMsg.tts_voice_id||'').trim();
-    if(String(jarvisMsg.tts_voice_profile||'')!=='jarvis' || voiceId!=='dzRy05hNK3bab9ViJ0oU'){
-      try{ console.error('JARVIS_VOICE_CONFIGURATION_UNAVAILABLE',{assistant_identity:'jarvis',tts_provider:'elevenlabs',selected_voice_id:voiceId||null,fallback_used:false,terminal_status:'JARVIS_VOICE_CONFIGURATION_UNAVAILABLE',correlation_id:jarvisMsg._correlation_id||null}); }catch(_){}
-      return;
-    }
-    _playElevenLabsTts(spoken, null, {voice_id:voiceId});
-    return;
-  }
   // Find the last assistant message segment in the DOM
   const rows=document.querySelectorAll('.msg-row[data-role="assistant"], .assistant-segment[data-raw-text]');
   if(!rows.length) return;
@@ -16277,12 +16226,7 @@ function renderMessages(options){
     seg.dataset.msgIdx=rawIdx;
     seg.dataset.sessionMsgIdx=_messageSessionIndexForRawIdx(rawIdx);
     seg.dataset.messageAnchorKey=_messageViewportAnchorKeyForMessage(m);
-    // Ask Jarvis hard-bind: TTS/PTT uses spoken_text only; chat body keeps full reply.
-    const _askJarvisSpoken=m&&m.ask_jarvis_hard_bind&&(m.spoken_text||m.spoken_reply);
-    seg.dataset.rawText=String(_askJarvisSpoken||content).trim();
-    if(m.ask_jarvis_hard_bind&&m.evidence_footer) seg.dataset.evidenceFooter=String(m.evidence_footer);
-    if(m.ask_jarvis_hard_bind&&m.tts_voice_id) seg.dataset.ttsVoiceId=String(m.tts_voice_id);
-    if(m.ask_jarvis_hard_bind&&m.tts_voice_profile) seg.dataset.ttsVoiceProfile=String(m.tts_voice_profile);
+    seg.dataset.rawText=String(content).trim();
     if(m._activityBurstId!==undefined&&m._activityBurstId!==null) seg.setAttribute('data-activity-burst-id',String(m._activityBurstId));
     if(Number.isFinite(Number(m._liveSegmentSeq))) seg.setAttribute('data-live-segment-seq',String(Number(m._liveSegmentSeq)));
     const messageBelongsInWorklog=!S.busy&&isCompactWorklogMode()&&_assistantMessageBelongsInWorklog(m, rawIdx, toolCallAssistantIdxs, displayContent, {isTurnFinalAssistant});

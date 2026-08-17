@@ -37,15 +37,15 @@ LAN_MARKDOWN_HREF_RE = re.compile(
     re.IGNORECASE,
 )
 SIDECAR_HREF_RE = re.compile(
-    r"^/api/extensions/smedley-engineering/sidecar/(?:preview|doc)/",
+    r"^/api/extensions/smedley-engineering/sidecar/(?:preview|doc|printed-page)/",
     re.IGNORECASE,
 )
 # Match sidecar route anywhere (including duplicated /doc/.../doc/... prefixes).
 _SIDECAR_ROUTE_PREFIX_RE = re.compile(
-    r"(?i)(?:https?://[^/\s]+)?(/api/extensions/smedley-engineering/sidecar/(?:preview|doc)/)+",
+    r"(?i)(?:https?://[^/\s]+)?(/api/extensions/smedley-engineering/sidecar/(?:preview|doc|printed-page)/)+",
 )
 _SIDECAR_REL_PREFIX_RE = re.compile(
-    r"(?i)^(?:/)?(?:api/extensions/smedley-engineering/sidecar/(?:preview|doc)/)+",
+    r"(?i)^(?:/)?(?:api/extensions/smedley-engineering/sidecar/(?:preview|doc|printed-page)/)+",
 )
 # Unsupported LLM-invented "search UI" citations — never a real sidecar route.
 SIDECAR_SEARCH_PATH_RE = re.compile(
@@ -71,12 +71,17 @@ _LINK_ASK = (
     r"(?:link|url|href|preview)|(?:link|url)\s+to)"
 )
 # Honeywell FTA / IOP model tokens (MC-TDID52, MU-TDID52, MU/MC-…).
+# Require the hyphen so STT tokens like MCP-TIX02 are not treated as MC-TIX02.
 _HW_PART = re.compile(
-    r"\b(?:MU\s*/\s*MC|MC\s*/\s*MU|MU|MC)[- ]?[A-Z]{2,6}\d{2,}[A-Z]?\b",
+    r"\b(?:MU\s*/\s*MC|MC\s*/\s*MU|MU|MC)-[A-Z]{2,6}\d{2,}[A-Z]?\b",
     re.IGNORECASE,
 )
 _AB_PART = re.compile(
-    r"\b(?:1756|1769|1794|5094)[- ]?[A-Z0-9]{2,}\b",
+    # Real Allen-Bradley 1756/1769/1794/5094 catalog suffixes always start
+    # with a letter (IA16, PA75, L61, EN2T, ...) -- never a bare number.
+    # Requiring a leading letter prevents natural phrasing like "1756 13
+    # slot chassis" from being mis-normalized into a fake part "1756-13".
+    r"\b(?:1756|1769|1794|5094)[- ]?[A-Z][A-Z0-9]{1,}\b",
     re.IGNORECASE,
 )
 _DOCNUM = re.compile(r"\b\d{2}-\d{3}\b")  # require hyphen (02-315); never bare ZIP 32444
@@ -93,6 +98,20 @@ _AFFIRMATIVE_FOLLOWUP_RE = re.compile(
 _NEGATIVE_FOLLOWUP_RE = re.compile(
     r"^\s*(?:no|nope|nah|negative|not\s+now|no\s+thanks?|"
     r"don'?t\s+bother|skip\s+it|never\s*mind)\s*[.!]?\s*$",
+    re.IGNORECASE,
+)
+# Narrow governing-source guidance: the user is telling Smedley which already-
+# bound document to treat as the authoritative reference for a stated
+# engineering topic (e.g. "That is the manual to use when asked about 1756
+# power supplies."). This must never be parsed as a brand-new document
+# lookup -- it has no document number of its own to look up.
+_GOVERNING_SOURCE_GUIDANCE_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:that|this)(?:\s+is|'s)\s+the\s+(?:manual|document|doc|reference|source)\s+to\s+use\b"
+    r"|use\s+(?:that|this)\s+(?:manual|document|doc|reference|source)\b"
+    r")\s*(?:whenever|when\s+(?:asked|talking)\s+about|for\s+questions?\s+about|"
+    r"for|to\s+answer(?:\s+questions?)?(?:\s+about)?)?\s*"
+    r"(?P<topic>.+?)\s*[.!]?\s*$",
     re.IGNORECASE,
 )
 _PENDING_EXTRACT_ACTION = "extract_wiring_schematic"
@@ -231,6 +250,10 @@ _SLOT_FOLLOWUP_RE = re.compile(
     r"^\s*(\d{1,2})\s*-?\s*slots?\s*[.?]?\s*$",
     re.IGNORECASE,
 )
+_SLOT_IN_TEXT_RE = re.compile(
+    r"\b(\d{1,2})\s*-?\s*slots?\b",
+    re.IGNORECASE,
+)
 _COMPATIBILITY_FOLLOWUP_RE = re.compile(
     r"\b(?:fusible\s+ifm|ifm|interface\s+module|pre-?wired\s+cable|cable|"
     r"match|compatible|compatibility|wiring\s+system|1492|"
@@ -280,6 +303,17 @@ _SPECIFICATION_NUMBER_RE = re.compile(
     r"\b(?:spec(?:ification)?\s*(?:number|no\.?|#)|(?:general\s+)?(?:wire|cable|piping|hvac)\s+(?:spec|specification))\b",
     re.IGNORECASE,
 )
+# Allen-Bradley 1756 publication tokens: TD0005, TD-0005, 1756-TD005, 1756-UM001, IN619.
+_AB_1756_PUB_TOKEN_RE = re.compile(
+    r"\b(?:1756[-_ ]+)?(TD|UM|IN)[-_ ]*0*(\d{1,4})(?:[A-Z])?(?:[-_]?EN[-_]?[A-Z])?\b",
+    re.IGNORECASE,
+)
+_AB_1756_PUB_FILENAME_RE = re.compile(
+    r"\b1756[-_](td|um|in)0*(\d{1,4})[-_][^\s,]+\.(?:pdf|docx?)\b",
+    re.IGNORECASE,
+)
+_AB_1756_MANIFEST_REL = "ab_1756_publication_manifest.json"
+_AB_1756_LIBRARY_REL = "Vendor Data/Allen Bradley/1756"
 
 
 class _PreviewTextExtractor(HTMLParser):
@@ -318,11 +352,24 @@ def _is_ask_jarvis_traffic(text: object) -> bool:
         )
 
 
+def is_library_path_operation(text: object) -> bool:
+    msg = str(text or "").strip()
+    if not msg:
+        return False
+    return bool(
+        re.search(r"(?i)\bsmb://", msg)
+        or re.search(r"(?i)\\\\192\.168\.0\.25\\RAG_Pool", msg)
+        or re.search(r"(?i)/Users/rick/Mounts/RAG_Pool/Library", msg)
+    )
+
+
 def is_document_request(text: object) -> bool:
     """True when the user is asking to pull/find a document or get a doc link."""
     msg = str(text or "").strip()
     if not msg or len(msg) > 4000:
         return False
+    if is_library_path_operation(msg):
+        return True
     # Biggy → Ask Jarvis: never treat as automatic Smedley document sidecar request.
     if _is_ask_jarvis_traffic(msg):
         return False
@@ -332,9 +379,18 @@ def is_document_request(text: object) -> bool:
     # Already-grounded RAG turns (extension retrieveFromComposer) stay on chat.
     if "<retrieved_library_context>" in msg:
         return False
+    # Governing-source guidance ("That is the manual to use when asked about
+    # X") names no document of its own to look up -- it must never be routed
+    # as a document request, with or without an active_document bound. Real
+    # explicit document requests (doc numbers, publication tokens, spec
+    # numbers, "find/open/pull <manual>") are unaffected by this exclusion.
+    if is_governing_source_guidance(msg):
+        return False
     # A request for a governing project specification is a document lookup even
     # when it does not include a verb such as "find" or "open".
     if _SPECIFICATION_NUMBER_RE.search(msg):
+        return True
+    if extract_ab_1756_publication_tokens(msg):
         return True
     for pattern in _DOCUMENT_REQUEST_RES:
         if pattern.search(msg):
@@ -351,6 +407,156 @@ def is_document_request(text: object) -> bool:
 
 def is_specification_number_request(text: object) -> bool:
     return bool(_SPECIFICATION_NUMBER_RE.search(str(text or "")))
+
+
+def extract_ab_1756_publication_tokens(query: object) -> list[tuple[str, int, str]]:
+    """Return (kind, number, raw_token) for 1756 TD/UM/IN publication mentions."""
+    msg = str(query or "")
+    found: list[tuple[str, int, str]] = []
+    seen: set[tuple[str, int]] = set()
+    for rx in (_AB_1756_PUB_TOKEN_RE, _AB_1756_PUB_FILENAME_RE):
+        for match in rx.finditer(msg):
+            kind = str(match.group(1) or "").upper()
+            try:
+                number = int(match.group(2))
+            except (TypeError, ValueError):
+                continue
+            key = (kind, number)
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append((kind, number, match.group(0)))
+    return found
+
+
+def _load_ab_1756_publication_manifest() -> dict[str, Any]:
+    """Live ingest-reconciled aliases first; committed snapshot is fallback only."""
+    try:
+        from api.ab_1756_publication_reconcile import load_or_reconcile_manifest
+
+        payload = load_or_reconcile_manifest(library_root=library_root(), persist=True)
+        if isinstance(payload, dict) and payload.get("publications"):
+            return payload
+    except Exception:
+        logger.warning("1756 publication reconcile failed; using committed snapshot if present")
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), _AB_1756_MANIFEST_REL)
+    try:
+        with open(path, encoding="utf-8") as handle:
+            payload = json.load(handle)
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _ab_1756_manifest_index() -> dict[tuple[str, int], dict[str, Any]]:
+    payload = _load_ab_1756_publication_manifest()
+    index: dict[tuple[str, int], dict[str, Any]] = {}
+    for entry in payload.get("publications") or []:
+        if not isinstance(entry, dict):
+            continue
+        kind = str(entry.get("kind") or "").upper()
+        try:
+            number = int(entry.get("number"))
+        except (TypeError, ValueError):
+            continue
+        if kind and number >= 0:
+            index[(kind, number)] = entry
+    return index
+
+
+def _ab_1756_pub_present(entry: dict[str, Any]) -> bool:
+    rel = str(entry.get("source") or "").replace("\\", "/")
+    root = library_root()
+    if not rel or not root:
+        return False
+    return os.path.isfile(os.path.join(root, rel))
+
+
+def _format_ab_1756_pub_label(kind: str, number: int, raw: object = "") -> str:
+    token = str(raw or "").strip()
+    if token:
+        return token
+    return f"1756-{kind}{number:03d}"
+
+
+def resolve_ab_1756_publication_alias(query: object) -> dict[str, Any] | None:
+    """Deterministic 1756 publication alias — runs before semantic retrieval.
+
+    Zero/punctuation/case insensitive: TD0005, TD-0005, 1756-TD0005 → on-disk
+    1756-td005. Never substitute a different TD/UM document.
+    """
+    tokens = extract_ab_1756_publication_tokens(query)
+    if not tokens:
+        return None
+    index = _ab_1756_manifest_index()
+    kind, number, raw = tokens[0]
+    entry = index.get((kind, number))
+    label = _format_ab_1756_pub_label(kind, number, raw)
+    payload = _load_ab_1756_publication_manifest()
+    smb = str(payload.get("smb") or "smb://192.168.0.25/RAG_Pool/Library/Vendor Data/Allen Bradley/1756")
+    if not entry:
+        return {
+            "status": "absent",
+            "kind": kind,
+            "number": number,
+            "requested": label,
+            "source": None,
+            "smb": smb,
+            "reason": (
+                f"{label} is not in the 1756 library at {smb}. "
+                f"No 1756-{kind}{number:03d} file is present; I will not substitute another TD/UM document."
+            ),
+        }
+    present = _ab_1756_pub_present(entry)
+    result = dict(entry)
+    result["status"] = "present" if present else "absent"
+    result["present"] = present
+    result["indexed"] = bool(entry.get("indexed"))
+    result["resolvable"] = bool(entry.get("resolvable", present))
+    result["ingest_phase"] = entry.get("ingest_phase")
+    result["requested"] = label
+    result["smb"] = smb
+    if not present:
+        filename = str(entry.get("canonical_filename") or entry.get("source") or "")
+        result["reason"] = (
+            f"{label} maps to {filename or 'its canonical 1756 publication'}, "
+            f"but that file is not present in {smb}. I will not substitute another TD/UM document."
+        )
+    return result
+
+
+def _match_from_ab_1756_alias(
+    alias: dict[str, Any], *, public_origin: object = ""
+) -> dict[str, Any]:
+    origin = normalize_public_origin(public_origin)
+    source = str(alias.get("source") or "").replace("\\", "/")
+    title = str(alias.get("title") or "")
+    doc_no = str(alias.get("doc_no") or "")
+    ident = {
+        "title": title,
+        "doc_no": doc_no,
+        "filename": str(alias.get("canonical_filename") or ""),
+        "publication_identifier": str(alias.get("publication_identifier") or doc_no),
+        "vendor": "Allen-Bradley / Rockwell Automation",
+        "family": "1756 ControlLogix",
+        "revision": alias.get("revision"),
+        "date": alias.get("date"),
+    }
+    url = normalize_corpus_url("", source=source, public_origin=origin)
+    return {
+        "source": source,
+        "score": 1.0,
+        "match_kind": "publication_alias",
+        "retrieval": "ab_1756_publication_alias",
+        "url": url,
+        "revision": alias.get("publication_identifier") or doc_no,
+        "document_identity": ident,
+        "document_kind": "manual",
+    }
+
+
+def _ab_1756_absent_reply(alias: dict[str, Any]) -> str:
+    return str(alias.get("reason") or "That 1756 publication is not in the library.")
 
 
 def project_spec_lookup_query(query: object) -> str:
@@ -444,9 +650,15 @@ def library_relpath_from_source(source: object = "") -> str:
     low = rel.lower()
     last_doc = low.rfind("/api/extensions/smedley-engineering/sidecar/doc/")
     last_prev = low.rfind("/api/extensions/smedley-engineering/sidecar/preview/")
-    last = max(last_doc, last_prev)
+    last_print = low.rfind("/api/extensions/smedley-engineering/sidecar/printed-page/")
+    last = max(last_doc, last_prev, last_print)
     if last >= 0:
-        route = "doc" if last_doc >= last_prev else "preview"
+        if last_print >= last_doc and last_print >= last_prev:
+            route = "printed-page"
+        elif last_doc >= last_prev:
+            route = "doc"
+        else:
+            route = "preview"
         prefix = f"/api/extensions/smedley-engineering/sidecar/{route}/"
         rel = rel[last + len(prefix) :]
     try:
@@ -463,7 +675,118 @@ def sidecar_preview_path(source: object) -> str:
         return ""
     ext = os.path.splitext(rel)[1].lower()
     route = "doc" if ext == ".pdf" else "preview"
-    return f"{WEBUI_CORPUS_SIDECAR}/{route}/{urllib.parse.quote(rel)}"
+    return f"{WEBUI_CORPUS_SIDECAR}/{route}/{urllib.parse.quote(rel, safe='/')}"
+
+
+def sidecar_printed_page_path(source: object, printed_page: object) -> str:
+    """User-facing schematic link: printed page, never PDF ordinal."""
+    rel = library_relpath_from_source(source)
+    printed = str(printed_page or "").strip()
+    if not rel or rel == "?" or not printed.isdigit():
+        return ""
+    return (
+        f"{WEBUI_CORPUS_SIDECAR}/printed-page/{urllib.parse.quote(rel, safe='/')}"
+        f"?printed={printed}"
+    )
+
+
+def resolve_printed_page_to_pdf_page(source: object, printed_page: object) -> int | None:
+    """Map a verified printed/footer page to the 1-based PDF ordinal.
+
+    Uses each PDF page's own header/footer printed number. Never infers a
+    page from a search snippet or a constant offset. Ambiguous matches fail
+    closed.
+    """
+    printed = str(printed_page or "").strip()
+    if not printed.isdigit():
+        return None
+    rel = library_relpath_from_source(source)
+    root = library_root()
+    if not rel or not root:
+        return None
+    full = os.path.join(root, rel)
+    if not os.path.isfile(full):
+        return None
+    try:
+        texts = _pdf_page_texts(full)
+    except Exception:
+        return None
+    hits = [
+        idx + 1
+        for idx, text in enumerate(texts)
+        if _printed_page_number(text) == printed
+    ]
+    if len(hits) != 1:
+        return None
+    return hits[0]
+
+
+def handle_printed_page_sidecar_get(
+    handler,
+    proxy_path: object,
+    query: object = "",
+    *,
+    public_origin: object = "",
+    accept: object = "",
+) -> bool:
+    """Serve the printed-page resolver. True if this request was a printed-page route."""
+    rest = str(proxy_path or "").lstrip("/")
+    if not rest.startswith("printed-page/"):
+        return False
+    rel = urllib.parse.unquote(rest[len("printed-page/") :])
+    rel = library_relpath_from_source(rel)
+    qs = urllib.parse.parse_qs(str(query or ""))
+    printed = str((qs.get("printed") or [""])[0]).strip()
+    pdf_page = resolve_printed_page_to_pdf_page(rel, printed)
+    if not pdf_page:
+        handler.send_response(404)
+        body = b'{"error":"printed page not verified in source document"}'
+        handler.send_header("Content-Type", "application/json")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.send_header("Cache-Control", "no-store")
+        handler.end_headers()
+        handler.wfile.write(body)
+        return True
+    doc_path = sidecar_preview_path(rel)
+    doc_href = doc_path
+    viewer_href = f"{doc_path}#page={pdf_page}"
+    want_json = "application/json" in str(accept or "").lower()
+    if want_json:
+        payload = json.dumps(
+            {
+                "source": rel,
+                "printed_page": printed,
+                "pdf_page": pdf_page,
+                "doc_url": doc_href,
+                "viewer_url": viewer_href,
+            }
+        ).encode("utf-8")
+        handler.send_response(200)
+        handler.send_header("Content-Type", "application/json; charset=utf-8")
+        handler.send_header("Content-Length", str(len(payload)))
+        handler.send_header("Cache-Control", "no-store")
+        handler.end_headers()
+        handler.wfile.write(payload)
+        return True
+    from html import escape as _html_escape
+
+    safe_view = _html_escape(viewer_href, quote=True)
+    html = (
+        "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+        f"<title>Printed p.{_html_escape(printed)}</title>"
+        "<style>html,body{margin:0;height:100%;background:#111}</style>"
+        f"<script>location.replace({json.dumps(viewer_href)});</script>"
+        "</head><body>"
+        f"<embed src='{safe_view}' type='application/pdf' style='width:100%;height:100vh'>"
+        "</body></html>"
+    ).encode("utf-8")
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/html; charset=utf-8")
+    handler.send_header("Content-Length", str(len(html)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(html)
+    return True
 
 
 def _collapse_duplicated_sidecar_path(path: object) -> str:
@@ -473,16 +796,27 @@ def _collapse_duplicated_sidecar_path(path: object) -> str:
         return ""
     try:
         parsed = urllib.parse.urlsplit(raw)
-        path_only = parsed.path if parsed.scheme in ("http", "https") else raw.split("?")[0].split("#")[0]
-        query = ("?" + parsed.query) if parsed.scheme in ("http", "https") and parsed.query else ""
-        if parsed.scheme not in ("http", "https") and "?" in raw:
-            query = "?" + raw.split("?", 1)[1].split("#")[0]
+        if parsed.scheme in ("http", "https"):
+            path_only = parsed.path
+            query = ("?" + parsed.query) if parsed.query else ""
+        else:
+            path_only = parsed.path or raw.split("?")[0].split("#")[0]
+            query = ("?" + parsed.query) if parsed.query else (
+                ("?" + raw.split("?", 1)[1].split("#")[0]) if "?" in raw else ""
+            )
     except Exception:
         path_only = raw.split("?")[0].split("#")[0]
         query = ""
     rel = library_relpath_from_source(path_only)
     if not rel:
         return ""
+    if "/sidecar/printed-page/" in path_only.lower():
+        printed = ""
+        if query.startswith("?"):
+            vals = urllib.parse.parse_qs(query[1:]).get("printed") or [""]
+            printed = str(vals[0] if vals else "").strip()
+        rebuilt = sidecar_printed_page_path(rel, printed)
+        return rebuilt or ""
     rebuilt = sidecar_preview_path(rel)
     if not rebuilt:
         return ""
@@ -496,7 +830,7 @@ def _is_sidecar_preview_or_doc_path(path: object) -> bool:
     # Doubled route still counts as a sidecar path for collapse.
     return bool(
         re.search(
-            r"(?i)/api/extensions/smedley-engineering/sidecar/(?:preview|doc)/",
+            r"(?i)/api/extensions/smedley-engineering/sidecar/(?:preview|doc|printed-page)/",
             raw,
         )
     )
@@ -505,7 +839,7 @@ def _is_sidecar_preview_or_doc_path(path: object) -> bool:
 def absolutize_sidecar_href(path_or_url: object, *, public_origin: object = "") -> str:
     """Canonical absolute sidecar URL when origin is known; else relative path.
 
-    Only preview|doc routes are accepted. Unsupported paths such as
+    Only preview|doc|printed-page routes are accepted. Unsupported paths such as
     ``/sidecar/search?q=`` are rejected (empty string) so callers fall back to
     a source-derived preview/doc link. Already-prefixed and doubled routes are
     collapsed before absolutizing (idempotent).
@@ -524,13 +858,13 @@ def absolutize_sidecar_href(path_or_url: object, *, public_origin: object = "") 
             if not collapsed:
                 return ""
             if origin:
-                # collapsed may already be absolute if origin was baked in — normalize to path
+                # collapsed may already be absolute if origin was baked in — keep path only
                 cparse = urllib.parse.urlsplit(collapsed)
                 path = cparse.path if cparse.scheme else collapsed
                 if not path.startswith("/"):
                     path = "/" + path
                 q = ("?" + cparse.query) if cparse.query else ""
-                return origin + path + q
+                return path + q
             cparse = urllib.parse.urlsplit(collapsed)
             if cparse.scheme:
                 return cparse.path + (("?" + cparse.query) if cparse.query else "")
@@ -550,8 +884,8 @@ def absolutize_sidecar_href(path_or_url: object, *, public_origin: object = "") 
         path = cparse.path + (("?" + cparse.query) if cparse.query else "")
     if not path.startswith("/"):
         path = "/" + path
-    if origin:
-        return origin + path
+    # Operator chat links must be same-origin relative so the current WebUI
+    # session cookie is sent. Never bake localhost, Tailscale, or any host.
     return path
 
 
@@ -643,7 +977,7 @@ def neutralize_lan_url_text(text: object, *, public_origin: object = "") -> str:
     # Promote relative sidecar markdown hrefs to absolute when origin known.
     if origin:
         value = re.sub(
-            r"\]\((/api/extensions/smedley-engineering/sidecar/(?:preview|doc)/[^)]+)\)",
+            r"\]\((/api/extensions/smedley-engineering/sidecar/(?:preview|doc|printed-page)/[^)]+)\)",
             lambda m: f"]({absolutize_sidecar_href(m.group(1), public_origin=origin)})",
             value,
         )
@@ -665,12 +999,12 @@ def neutralize_match(match: object, *, public_origin: object = "") -> dict[str, 
     else:
         # Ensure href is sidecar even when markdown lacked an explicit LAN URL.
         md = re.sub(
-            r"\]\((https?://[^)]+/api/extensions/smedley-engineering/sidecar/(?:preview|doc)/[^)]+)\)",
+            r"\]\((https?://[^)]+/api/extensions/smedley-engineering/sidecar/(?:preview|doc|printed-page)/[^)]+)\)",
             lambda m: f"]({normalize_corpus_url(m.group(1), source=source, public_origin=origin) or m.group(1)})",
             md,
         )
         md = re.sub(
-            r"\]\((/api/extensions/smedley-engineering/sidecar/(?:preview|doc)/[^)]+)\)",
+            r"\]\((/api/extensions/smedley-engineering/sidecar/(?:preview|doc|printed-page)/[^)]+)\)",
             lambda m: f"]({normalize_corpus_url(m.group(1), source=source, public_origin=origin) or m.group(1)})",
             md,
         )
@@ -773,6 +1107,68 @@ def extract_query_part_numbers(query: object) -> list[str]:
     return list(dict.fromkeys(found))
 
 
+def classify_retrieval_intent(query: object) -> str:
+    """Operator retrieval class. Wiring/FTA connection is never a generic-manual class."""
+    q = str(query or "").lower()
+    if re.search(r"\bfta\s+connection\b|\bconnection\s+diagram\b|\bfta\s+diagram\b", q):
+        return "fta_connection"
+    if re.search(r"\bwiring\s+schematic\b|\bwiring\s+diagram\b|\bschematic\b|\bwiring\b", q):
+        return "wiring_schematic"
+    if extract_query_part_numbers(q):
+        return "part_lookup"
+    return "document"
+
+
+def is_wiring_grade_intent(query: object) -> bool:
+    return classify_retrieval_intent(query) in {"wiring_schematic", "fta_connection"}
+
+
+def is_wiring_narrowing_followup(query: object) -> bool:
+    """True when this turn asks for the schematic/diagram without naming a new part.
+
+    Extract/pull/show against an already-bound document stay on review.
+    Declining a generic manual in favor of the schematic is a narrowing turn.
+    """
+    msg = str(query or "").strip()
+    if not msg or extract_query_part_numbers(msg):
+        return False
+    if re.search(
+        r"\b(?:extract|pull|show|open|find|get|locate|display|bring\s+up)\b",
+        msg,
+        re.I,
+    ) and not re.search(r"\b(?:do not|don't|dont)\s+need\b.{0,80}\bmanual", msg, re.I):
+        return False
+    return bool(
+        is_wiring_grade_intent(msg)
+        or re.search(
+            r"\b(?:the\s+)?(?:wiring\s+schematic|fta\s+(?:connection\s+)?diagram|connection\s+diagram)\b",
+            msg,
+            re.I,
+        )
+    )
+
+
+def resolve_validated_part(
+    query: object,
+    *,
+    prior_validated_part: object = None,
+    active_document: object = None,
+) -> tuple[str, str]:
+    """Return (part, source) where source is current_turn|prior_turn_validated|none.
+
+    Malformed/unvalidated tokens are never carried forward.
+    """
+    current = extract_query_part_numbers(query)
+    if current:
+        return str(current[0]).strip().upper(), "current_turn"
+    prior = str(prior_validated_part or "").strip().upper()
+    if not prior and isinstance(active_document, dict):
+        prior = str(active_document.get("part_number") or "").strip().upper()
+    if prior and extract_query_part_numbers(prior) and is_wiring_narrowing_followup(query):
+        return prior, "prior_turn_validated"
+    return "", "none"
+
+
 def _parts_compatible(query_part: object, candidate_part: object) -> bool:
     q = str(query_part or "").strip().upper()
     c = str(candidate_part or "").strip().upper()
@@ -814,6 +1210,99 @@ def _match_title(match: dict[str, Any]) -> str:
     return str((ident or {}).get("title") or match.get("source") or "").rsplit("/", 1)[-1]
 
 
+def _is_planning_manual(source: object = "", title: object = "") -> bool:
+    hay = f"{source} {title}".replace("\\", "/").lower()
+    return "hp02500" in hay or "hp02-500" in hay or (
+        "planning" in hay and "installation" not in hay
+    )
+
+
+def _is_installation_manual(source: object = "", title: object = "") -> bool:
+    hay = f"{source} {title}".replace("\\", "/").lower()
+    return "pm20520" in hay or "i/o installation" in hay or "io installation" in hay
+
+
+_PM_IO_INSTALLATION_REL = (
+    "Vendor Data/Honeywell/Experian PKS/TDC3000/Honeywell TDC/pm20520.pdf"
+)
+
+
+def pm_io_installation_source() -> str:
+    """Filesystem-relative path of the TDC3000 Process Manager I/O Installation manual."""
+    root = library_root()
+    if not root:
+        return ""
+    rel = _PM_IO_INSTALLATION_REL.replace("\\", "/")
+    full = os.path.join(root, rel)
+    if os.path.isfile(full):
+        return rel
+    return ""
+
+
+def retrieve_pm_io_installation_payload(
+    part: object, *, query: object = "", public_origin: object = ""
+) -> dict[str, Any]:
+    """Authoritative first resolver for Honeywell MU/MC Process Manager I/O and FTA.
+
+    Scans PM20-520 (pm20520.pdf) model tables, compatibility statements, and
+    Connection Diagram figures. Never returns HP02-500 / planning-manual hits.
+    """
+    part_s = str(part or "").strip().upper()
+    empty: dict[str, Any] = {
+        "matches": [],
+        "collection": "pm20520_io_installation",
+        "retrieval": "pm20520_io_installation",
+    }
+    source = pm_io_installation_source()
+    if not part_s or not source:
+        return empty
+    found, ftas, counterpart_ok = collect_fta_connection_diagrams_from_source(source, part_s)
+    root = library_root()
+    texts: list[str] = []
+    try:
+        texts = _pdf_page_texts(os.path.join(root, source))
+    except Exception:
+        texts = []
+    mentioned = any(_text_mentions_part(page, part_s) for page in texts)
+    wiring = is_wiring_grade_intent(query)
+    if wiring and not found:
+        return empty
+    if not wiring and not (mentioned or found):
+        return empty
+    origin = normalize_public_origin(public_origin)
+    href = normalize_corpus_url("", source=source, public_origin=origin) or absolutize_sidecar_href(
+        sidecar_preview_path(source), public_origin=origin
+    )
+    match: dict[str, Any] = {
+        "source": source,
+        "score": 1.0,
+        "match_kind": "exact",
+        "part_number": part_s,
+        "retrieval": "pm20520_io_installation",
+        "revision": "PM20-520",
+        "url": href,
+        "document_identity": {
+            "title": "Process Manager I/O Installation",
+            "doc_no": "PM20-520",
+            "filename": "pm20520.pdf",
+        },
+        "figures": found,
+        "compatible_ftas": ftas,
+        "counterpart_verified": counterpart_ok,
+    }
+    if found:
+        match["pdf_page"] = found[0].get("pdf_page")
+        match["figure"] = found[0].get("figure")
+        match["printed_page"] = found[0].get("printed_page")
+        match["page_hint"] = found[0].get("pdf_page")
+        match["snippet"] = str(found[0].get("excerpt") or "")[:900]
+    return {
+        "matches": [match],
+        "collection": "pm20520_io_installation",
+        "retrieval": "pm20520_io_installation",
+    }
+
+
 def select_operator_document_match(
     matches: object, *, query: object = ""
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -828,6 +1317,10 @@ def select_operator_document_match(
         "honeywell", "iota", "find", "pull", "link", "show", "want", "can",
         "you", "me", "next", "page", "extract",
     }
+    wants_wiring = any(
+        w in str(query or "").lower()
+        for w in ("wiring", "schematic", "connection", "pinout", "fta")
+    )
     manuals: list[dict[str, Any]] = []
     indexes: list[dict[str, Any]] = []
     for match in items:
@@ -840,11 +1333,13 @@ def select_operator_document_match(
         if kind == "manual":
             if not manual_relevant_to_query_parts(match, query_parts):
                 continue
+            if (wants_wiring or query_parts) and _is_planning_manual(source, title):
+                continue
             manuals.append(match)
         elif kind == "index":
             indexes.append(match)
 
-    def _rank_key(match: dict[str, Any]) -> tuple[int, int, int, float]:
+    def _rank_key(match: dict[str, Any]) -> tuple[int, int, int, int, int, float]:
         exact = 1 if str(match.get("match_kind") or "") == "exact" else 0
         tdc = 1 if str(match.get("retrieval") or "") == "tdc3000_custom_index" else 0
         title = _match_title(match)
@@ -855,7 +1350,9 @@ def select_operator_document_match(
             score = float(match.get("score") or 0.0)
         except Exception:
             score = 0.0
-        return (exact, tdc, overlap, score)
+        install = 1 if (wants_wiring or query_parts) and _is_installation_manual(source, title) else 0
+        planning = 1 if (wants_wiring or query_parts) and _is_planning_manual(source, title) else 0
+        return (exact, tdc, install, 0 if planning else 1, overlap, score)
 
     manuals.sort(key=_rank_key, reverse=True)
     indexes.sort(key=_rank_key, reverse=True)
@@ -889,9 +1386,24 @@ def build_operator_document_reply(
     origin = normalize_public_origin(public_origin)
     manual, index = select_operator_document_match(matches, query=query)
     q = str(query or "").lower()
-    wants_wiring = any(w in q for w in ("wiring", "schematic", "connection", "pinout"))
+    wants_wiring = is_wiring_grade_intent(query) or any(
+        w in q for w in ("wiring", "schematic", "connection", "pinout")
+    )
+    query_parts = extract_query_part_numbers(query)
+
+    def _wiring_unavailable(part_s: str) -> tuple[str, None]:
+        who = f" for **{part_s}**" if part_s else ""
+        unavailable = (
+            f"I cannot yet verify an authoritative wiring or FTA connection diagram"
+            f"{who}. I will not substitute a generic planning manual, a compatibility "
+            "table, or an unverified page/figure. Provide the exact part number if this "
+            "token is a transcription, or bind a verified installation manual."
+        )
+        return unavailable, None
 
     if not isinstance(manual, dict) and isinstance(index, dict):
+        if wants_wiring and _HW_PART.search(str(query or "")):
+            return _wiring_unavailable((query_parts[0] if query_parts else ""))
         item = neutralize_match(index, public_origin=origin)
         title = _match_title(item) or "lookup index"
         href = str(item.get("url") or "").strip()
@@ -914,6 +1426,8 @@ def build_operator_document_reply(
         return "\n".join(lines), None
 
     if not isinstance(manual, dict):
+        if wants_wiring or (query_parts and _HW_PART.search(str(query_parts[0]))):
+            return _wiring_unavailable((query_parts[0] if query_parts else ""))
         return (
             "I could not find a matching engineering-library manual for that request. "
             "Try a document number (for example 02-315) or a Honeywell part number.",
@@ -925,6 +1439,8 @@ def build_operator_document_reply(
     title = str((ident or {}).get("title") or "").strip() or str(item.get("source") or "manual").rsplit("/", 1)[-1]
     doc_no = str((ident or {}).get("doc_no") or item.get("revision") or "").strip()
     part = str(item.get("part_number") or "").strip()
+    if query_parts:
+        part = query_parts[0]
     kind = str(item.get("match_kind") or "").strip()
     href = str(item.get("url") or "").strip()
     page = item.get("page_hint")
@@ -946,34 +1462,35 @@ def build_operator_document_reply(
         return "\n".join(line for line in lines if line is not None).strip(), None
 
     who = f" for **{part}**" if part else ""
+    if kind == "publication_alias":
+        pub_id = str((ident or {}).get("publication_identifier") or doc_no).strip()
+        filename = str((ident or {}).get("filename") or "").strip()
+        lines = [
+            f"I found **{doc_no or title}** in the 1756 library:",
+            "",
+            identity,
+        ]
+        if pub_id and pub_id != doc_no:
+            lines.extend(["", f"Publication **{pub_id}**."])
+        if filename:
+            lines.extend(["", f"File: `{filename}`"])
+        if href:
+            lines.extend(["", f"[Open {doc_no or 'manual'}]({href})"])
+        return "\n".join(line for line in lines if line is not None).strip(), None
+    if wants_wiring:
+        schematic = try_first_reply_fta_schematic(
+            item, part=part, public_origin=origin
+        )
+        if schematic:
+            return schematic, None
+        return _wiring_unavailable(part)
     lines = [
         f"I found the engineering-library manual{who}:",
         "",
         identity,
     ]
-    if wants_wiring:
-        if page not in (None, ""):
-            lines.extend(["", f"Verified wiring-schematic location: page **{page}**."])
-        else:
-            lines.extend(
-                [
-                    "",
-                    "The part appears in this manual, but a specific wiring-schematic page "
-                    "is not verified yet — page extraction is still needed.",
-                ]
-            )
     if href:
         lines.extend(["", f"[Open manual]({href})"])
-    if wants_wiring and classify_document_kind(item.get("source"), title) == "manual":
-        lines.extend(["", "Want me to extract the wiring schematic page next?"])
-        pending = {
-            "action": _PENDING_EXTRACT_ACTION,
-            "source": str(item.get("source") or ""),
-            "title": title,
-            "part_number": part or None,
-            "doc_no": doc_no or None,
-            "offered_at": None,
-        }
     return "\n".join(lines), pending
 
 
@@ -1044,7 +1561,9 @@ def build_compact_spoken_document_reply(
         )
     who = f" for {part}" if part else ""
     bits = [f"I found {title}{who}."]
-    if doc_spoken:
+    if kind == "publication_alias" and doc_no:
+        bits = [f"I found {doc_no}, {title}."]
+    elif doc_spoken:
         bits = [f"I found {title}, document {doc_spoken}{who}."]
     q = str(query or "").lower()
     if any(w in q for w in ("wiring", "schematic", "connection", "pinout")):
@@ -1182,7 +1701,7 @@ def retrieve_documents(
     query: str,
     *,
     topk: int = 8,
-    timeout: float = 12.0,
+    timeout: float = 45.0,
     public_origin: object = "",
 ) -> dict[str, Any]:
     """POST to Smedley RAG retrieve; return neutralized matches payload."""
@@ -1282,6 +1801,63 @@ def is_negative_followup(query: object) -> bool:
     return bool(_NEGATIVE_FOLLOWUP_RE.match(str(query or "").strip()))
 
 
+def governing_source_guidance_topic(query: object) -> str:
+    """Return the stated engineering topic when the query is governing-source
+    guidance ("That is the manual to use when asked about X"), else ''.
+
+    This never returns a truthy value for an ordinary new document request --
+    the phrasing has no document number/name of its own to look up.
+    """
+    msg = str(query or "").strip()
+    if not msg:
+        return ""
+    m = _GOVERNING_SOURCE_GUIDANCE_RE.match(msg)
+    if not m:
+        return ""
+    topic = re.sub(r"\s+", " ", m.group("topic") or "").strip()
+    return topic
+
+
+def is_governing_source_guidance(query: object) -> bool:
+    return bool(governing_source_guidance_topic(query))
+
+
+def _governing_topic_key(topic: str) -> str:
+    """Loosely normalize a stated topic to a stable key for later matching."""
+    low = str(topic or "").lower()
+    if _CHASSIS_POWER_TOPIC_RE.search(low) or re.search(
+        r"\b(?:power\s+suppl(?:y|ies)|psu)\b.*\b(?:chassis|1756)\b|"
+        r"\b(?:1756)\b.*\bpower\s+suppl(?:y|ies)\b",
+        low,
+    ):
+        return "controllogix_chassis_power"
+    slug = re.sub(r"[^a-z0-9]+", "_", low).strip("_")
+    return slug or "general"
+
+
+def _slot_count_from_text(text: object) -> str:
+    """Return chassis slot count from a free-text ask or follow-up."""
+    msg = str(text or "").strip()
+    if not msg:
+        return ""
+    m = _SLOT_FOLLOWUP_RE.match(msg) or _SLOT_IN_TEXT_RE.search(msg)
+    return str(m.group(1)) if m else ""
+
+
+def _pending_retrieval_action(pending: object) -> str:
+    """Return pending retrieval action name, or '' if not a retrieval pending."""
+    if not isinstance(pending, dict):
+        return ""
+    action = str(pending.get("action") or "").strip()
+    if action in {
+        _PENDING_CHASSIS_SIZING_ACTION,
+        _PENDING_IFM_LOOKUP_ACTION,
+        "retrieve_part_manual",
+    }:
+        return action
+    return ""
+
+
 def is_wiring_extract_followup(query: object) -> bool:
     """True for offered follow-ups like 'extract the wiring diagram'.
 
@@ -1295,11 +1871,18 @@ def is_wiring_extract_followup(query: object) -> bool:
     # Fresh part/doc lookups belong to document_route, not extract-on-bound-doc.
     if _HW_PART.search(msg) or _AB_PART.search(msg) or _DOCNUM.search(msg):
         return False
-    if re.search(
-        r"\b(?:user\s+)?manuals?\b|\bdatasheets?\b|\bknowledgebase\b|\biota\b|\biom\b",
-        msg,
-        re.IGNORECASE,
-    ) and not re.search(r"\bextract\b", msg, re.IGNORECASE):
+    mentions_manual = bool(
+        re.search(
+            r"\b(?:user\s+)?manuals?\b|\bdatasheets?\b|\bknowledgebase\b|\biota\b|\biom\b",
+            msg,
+            re.IGNORECASE,
+        )
+    )
+    if mentions_manual and not re.search(r"\bextract\b", msg, re.IGNORECASE):
+        # Declining a generic manual in favor of the schematic is a wiring
+        # follow-up, not a new manual lookup.
+        if re.search(r"\b(?:do not|don't|dont)\s+need\b.{0,80}\bmanual", msg, re.I):
+            return True
         return False
     return True
 
@@ -1320,13 +1903,30 @@ def is_active_document_review_request(query: object, active_document: object) ->
     msg = str(query or "").strip()
     if not msg:
         return False
+    if is_library_path_operation(msg):
+        return False
     if is_wiring_extract_followup(msg):
+        if _pending_extract_bound(active_document):
+            return True
+        # Artifact-narrowing ("I need the wiring schematic") after a validated
+        # part must re-enter document retrieve for a figure packet, not extract
+        # from a possibly-wrong bound planning manual.
+        if is_wiring_narrowing_followup(msg):
+            return False
         return True
     if is_affirmative_followup(msg) and _pending_extract_bound(active_document):
         return True
     # A bare decline only means something when there is an actual pending
     # offer to decline -- otherwise leave it to fall through as ordinary chat.
     if is_negative_followup(msg) and _pending_extract_bound(active_document):
+        return True
+    # Narrow governing-source guidance ("That is the manual to use when asked
+    # about X") names no new document of its own -- it must bind the already
+    # active document to the stated topic, never fall through to a generic
+    # document-route lookup (which has nothing to find and would otherwise
+    # drop the binding entirely). Checked before the "do not steal" guard
+    # below since is_document_request() can false-positive on this phrasing.
+    if is_governing_source_guidance(msg):
         return True
     # Do not steal a new document-route lookup into review of a prior binding.
     if is_document_request(msg) and not is_affirmative_followup(msg):
@@ -1624,6 +2224,16 @@ def _caption_model_label(text: object, fig_no: object, fallback: object) -> str:
     return str(fallback or "").strip()
 
 
+def compact_fta_connection_spoken(part: object, figure: object, printed_page: object) -> str:
+    """Jarvis TTS for a verified FTA connection diagram — no audit/PDF/URL prose."""
+    part_s = str(part or "").strip()
+    fig_s = str(figure or "").strip()
+    printed_s = str(printed_page or "").strip()
+    if not (part_s and fig_s and printed_s):
+        return ""
+    return f"{part_s}. I found Figure {fig_s}, printed page {printed_s}. The diagram is open."
+
+
 def _printed_page_number(text: object) -> str:
     """Derive the document's own printed/footer page number from its own
     header/footer line, e.g. '152 Process Manager I/O Installation 3/98' ->
@@ -1663,8 +2273,19 @@ def _printed_page_number(text: object) -> str:
     return ""
 
 
+_PDF_TEXT_CACHE: dict[tuple[str, float], list[str]] = {}
+
+
 def _pdf_page_texts(pdf_path: str) -> list[str]:
     """Return 1:1 page texts via pypdf or pdftotext (WebUI runtime may lack pypdf)."""
+    try:
+        mtime = os.path.getmtime(pdf_path)
+    except OSError:
+        mtime = 0.0
+    cache_key = (os.path.realpath(pdf_path), mtime)
+    cached = _PDF_TEXT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
     try:
         from pypdf import PdfReader
 
@@ -1676,6 +2297,7 @@ def _pdf_page_texts(pdf_path: str) -> list[str]:
             except Exception:
                 out.append("")
         if out:
+            _PDF_TEXT_CACHE[cache_key] = out
             return out
     except Exception:
         pass
@@ -1703,6 +2325,7 @@ def _pdf_page_texts(pdf_path: str) -> list[str]:
         pages.pop()
     if not pages:
         raise RuntimeError("pdftotext returned no pages")
+    _PDF_TEXT_CACHE[cache_key] = pages
     return pages
 
 
@@ -1713,6 +2336,30 @@ _COMPATIBLE_FTA_SENTENCE_RE = re.compile(
 _FTA_MODEL_TOKEN_RE = re.compile(r"\b(?:MU|MC)-[A-Z]{2,8}\d{1,4}\b", re.IGNORECASE)
 
 
+def _document_supports_mc_mu_pair(page_texts: list[str], part: object) -> bool:
+    """True only when the bound document itself states the MC/MU relationship."""
+    part_norm = str(part or "").strip().upper()
+    counterpart = _conformal_coat_counterpart(part_norm)
+    if not part_norm or not counterpart:
+        return False
+    blob = "\n".join(str(t or "") for t in page_texts)
+    if not _text_mentions_part(blob, part_norm) or not _text_mentions_part(blob, counterpart):
+        return False
+    if re.search(
+        r"conformally coated models of the FTAs and IOPs are identified\s+by the prefix [\"“]?MC",
+        blob,
+        re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        rf"{re.escape(part_norm)}\s+DI IOP[^\n]{{0,40}}Conformally Coated",
+        blob,
+        re.IGNORECASE,
+    ):
+        return True
+    return bool(re.search(rf"{re.escape(part_norm)}[^\n]{{0,80}}conformally coated", blob, re.I))
+
+
 def _explicitly_compatible_fta_models(page_texts: list[str], part: object) -> list[str]:
     """FTA/module models the BOUND document's own text names as compatible
     with this exact part -- extracted from its compatibility sentence, never
@@ -1720,20 +2367,131 @@ def _explicitly_compatible_fta_models(page_texts: list[str], part: object) -> li
     part_norm = str(part or "").strip()
     if not part_norm:
         return []
+    needles = [part_norm]
+    counterpart = _conformal_coat_counterpart(part_norm)
+    if counterpart and _document_supports_mc_mu_pair(page_texts, part_norm):
+        needles.append(counterpart)
     out: list[str] = []
+    skip = {n.upper() for n in needles}
     for text in page_texts:
         for sent_m in _COMPATIBLE_FTA_SENTENCE_RE.finditer(str(text or "")):
             sentence = sent_m.group(0)
-            if not _text_mentions_part(sentence, part_norm):
+            if not any(_text_mentions_part(sentence, n) for n in needles):
                 continue
             for tok in _FTA_MODEL_TOKEN_RE.findall(sentence):
                 norm = tok.upper()
-                # Skip the requested part's own MU-/MC- conformal-coat variant --
-                # that is a self-reference, not a distinct compatible FTA.
-                if norm in out or _text_mentions_part(norm, part_norm):
+                if norm in out or any(_text_mentions_part(norm, n) for n in skip):
                     continue
                 out.append(norm)
     return out
+
+
+def collect_fta_connection_diagrams_from_source(
+    source: object, part: object
+) -> tuple[list[dict[str, Any]], list[str], bool]:
+    """Scan one bound PDF for verified FTA connection diagrams.
+
+    Returns (found_list, compatible_ftas, counterpart_verified).
+    """
+    src = str(source or "").replace("\\", "/").lstrip("/")
+    root = library_root()
+    if not src or not root:
+        return [], [], False
+    full = os.path.join(root, src)
+    if not os.path.isfile(full):
+        return [], [], False
+    try:
+        texts = _pdf_page_texts(full)
+    except Exception:
+        return [], [], False
+    counterpart_ok = _document_supports_mc_mu_pair(texts, part)
+    ftas = _explicitly_compatible_fta_models(texts, part)
+    ident = {
+        "source": src,
+        "title": "",
+        "doc_no": "",
+        "filename": os.path.basename(src),
+    }
+    targets: list[str] = []
+    part_s = str(part or "").strip()
+    if part_s:
+        targets.append(part_s)
+    counterpart = _conformal_coat_counterpart(part_s) if counterpart_ok else ""
+    if counterpart and counterpart.upper() not in {t.upper() for t in targets}:
+        targets.append(counterpart)
+    for fta in ftas:
+        if fta and fta.upper() not in {t.upper() for t in targets}:
+            targets.append(fta)
+    found: list[dict[str, Any]] = []
+    seen: set[tuple[int, str]] = set()
+    for target in targets:
+        for idx, text in enumerate(texts):
+            fig = _verified_figure_for_part(text, target)
+            if not fig:
+                continue
+            excerpt = _part_centered_excerpt(text, target)
+            if not _is_wiring_grade_figure_text(text, excerpt):
+                continue
+            key = (idx + 1, fig)
+            if key in seen:
+                continue
+            seen.add(key)
+            found.append(
+                {
+                    "source": src,
+                    "title": "Process Manager I/O Installation" if "pm20520" in src.lower() else ident["filename"],
+                    "doc_no": "PM20-520" if "pm20520" in src.lower() else "",
+                    "filename": ident["filename"],
+                    "pdf_page": idx + 1,
+                    "printed_page": _printed_page_number(text),
+                    "figure": fig,
+                    "matched_model": _caption_model_label(text, fig, target),
+                    "requested_part": part_s,
+                    "excerpt": excerpt,
+                }
+            )
+    return found, ftas, counterpart_ok
+
+
+def _is_wiring_grade_figure_text(text: object, excerpt: object = "") -> bool:
+    """True only for connection/field-wiring diagrams, never assembly layouts."""
+    hay = f"{excerpt or ''}\n{text or ''}".lower()
+    if "assembly layout" in hay and "connection diagram" not in hay:
+        return False
+    return any(
+        token in hay
+        for token in ("connection diagram", "fta connection", "field wiring", "customer wiring")
+    )
+
+
+def try_first_reply_fta_schematic(
+    item: dict[str, Any], *, part: str, public_origin: object = ""
+) -> str | None:
+    """Operator first-reply packet for a verified FTA connection diagram, or None."""
+    if not part:
+        return None
+    source = str(item.get("source") or "")
+    found, ftas, counterpart_ok = collect_fta_connection_diagrams_from_source(source, part)
+    if not found:
+        return None
+    ident = item.get("document_identity") if isinstance(item.get("document_identity"), dict) else {}
+    active = {
+        "source": source,
+        "title": str((ident or {}).get("title") or item.get("title") or ""),
+        "doc_no": str((ident or {}).get("doc_no") or item.get("revision") or ""),
+        "part_number": part,
+        "url": str(item.get("url") or ""),
+        "counterpart_verified": counterpart_ok,
+    }
+    reply, _spoken, _receipt = build_authoritative_schematic_reply(
+        active,
+        found,
+        [{"source": source, "filename": os.path.basename(source), "doc_no": active["doc_no"], "target": part}],
+        ftas,
+        public_origin=public_origin,
+        counterpart_verified=counterpart_ok,
+    )
+    return reply
 
 
 def authoritative_tdc3000_schematic_search(
@@ -1817,6 +2575,8 @@ def authoritative_tdc3000_schematic_search(
             for idx, text in enumerate(texts):
                 fig = _verified_figure_for_part(text, target)
                 if not fig:
+                    continue
+                if not _is_wiring_grade_figure_text(text):
                     continue
                 found_key = (source, idx + 1, fig)
                 if found_key in seen_found:
@@ -2018,19 +2778,16 @@ def build_wiring_extract_reply(
     top = pages[0]
     page_no = top.get("pdf_page")
     printed_no = str(top.get("printed_page") or "").strip()
-    # A page is only linkable as a page-specific "wiring page" when a real
-    # page fragment was actually appended -- never label a bare whole-manual
-    # link that way.
-    page_href = open_href
-    has_page_fragment = False
-    if open_href and page_no:
-        page_href = f"{open_href}#page={page_no}"
-        has_page_fragment = True
-    page_stmt = f"PDF viewer page **{page_no}**"
-    if printed_no:
-        page_stmt += f", printed manual page **{printed_no}**"
-    else:
-        page_stmt += " (printed manual page not determinable from this page's own header/footer)"
+    page_href = ""
+    has_printed_link = False
+    if printed_no.isdigit():
+        page_href = absolutize_sidecar_href(
+            sidecar_printed_page_path(source, printed_no), public_origin=origin
+        )
+        has_printed_link = bool(page_href)
+    page_stmt = f"printed manual page **{printed_no}**" if printed_no else "printed page not verified"
+    if page_no:
+        page_stmt += f" (PDF ordinal page {page_no}, audit only)"
     lines = [
         f"Using the bound manual **{identity}**"
         + (f" for **{part}**" if part else "")
@@ -2043,10 +2800,18 @@ def build_wiring_extract_reply(
         # from the front, or the part-number confirmation can be cut again.
         lines.extend(["", str(top["excerpt"])])
     if len(pages) > 1:
-        extras = ", ".join(f"p.{p.get('pdf_page')}" for p in pages[1:])
+        extras = ", ".join(
+            f"printed p.{p.get('printed_page') or '?'}" for p in pages[1:]
+        )
         lines.extend(["", f"Related pages also retained: {extras}."])
-    if has_page_fragment:
-        lines.extend(["", f"[Open wiring page]({page_href})"])
+    if has_printed_link:
+        fig = str(top.get("figure") or "").strip()
+        link_label = (
+            f"Open Figure {fig} — printed p.{printed_no}"
+            if fig
+            else f"Open wiring page — printed p.{printed_no}"
+        )
+        lines.extend(["", f"[{link_label}]({page_href})"])
     elif open_href:
         lines.extend(["", f"[Open manual]({open_href})"])
     lines.extend(["", "Want me to pull another figure or FTA connection diagram from this manual?"])
@@ -2057,7 +2822,7 @@ def build_wiring_extract_reply(
         f"I extracted wiring context from {title or 'the bound manual'}"
         + (f", document {doc_spoken}" if doc_spoken else "")
         + (f" for {part}" if part else "")
-        + f", PDF viewer page {page_no}{printed_spoken}. The page link is on screen."
+        + f"{printed_spoken}. The printed-page link is on screen."
     )
     return reply, spoken, receipt
 
@@ -2079,6 +2844,7 @@ def build_authoritative_schematic_reply(
     compatible_ftas: list[str],
     *,
     public_origin: object = "",
+    counterpart_verified: bool = False,
 ) -> tuple[str, str, dict[str, Any]]:
     """Outcome A/B reply when the bound manual has no verified figure itself.
 
@@ -2113,49 +2879,63 @@ def build_authoritative_schematic_reply(
         sidecar_preview_path(bound_source) if bound_source else "", public_origin=origin
     )
     counterpart = _conformal_coat_counterpart(part)
+    if counterpart and not counterpart_verified:
+        counterpart = ""
 
     checked_receipt = [
         {"target": c.get("target"), "filename": c.get("filename"), "doc_no": c.get("doc_no"), "source": c.get("source")}
         for c in checked
     ]
 
+    def _figure_is_requested_part(found: dict[str, Any]) -> bool:
+        requested = str(part or "").strip().upper()
+        matched = str(found.get("matched_model") or "").upper().replace(" ", "")
+        return bool(requested) and requested in matched.replace("/", "")
+
+    direct_fta = any(_figure_is_requested_part(f) for f in found_list)
+
     if found_list:
         entries: list[dict[str, Any]] = []
-        lines: list[str] = [
-            (
-                f"**{part}** is the conformally coated counterpart of **{counterpart}**; "
-                f"**{bound_identity}** documents both under the same IOP entry. "
-                if counterpart else f"**{bound_identity}** is the bound manual for **{part}**. "
+        if direct_fta:
+            identity_line = (
+                f"**{part}** is the requested FTA. **{bound_identity}** is the source document. "
+                "The verified figure below is the field-wiring/connection diagram for this FTA, "
+                "not a planning-manual mention and not an IOP-card diagram."
             )
-            + (
-                f"{part} has no wiring/schematic figure of its own — that lives on its FTA (field termination "
-                "assembly), not the IOP card. Its own compatibility text is supporting identity evidence only, "
-                "not a schematic."
-            ),
+            search_line = (
+                f"Verified {len(found_list)} FTA connection diagram"
+                f"{'s' if len(found_list) != 1 else ''} captioned for **{part}**:"
+            )
+        else:
+            identity_line = (
+                (
+                    f"**{part}** is the conformally coated counterpart of **{counterpart}**; "
+                    f"**{bound_identity}** documents both under the same IOP entry. "
+                    if counterpart else f"**{bound_identity}** is the bound manual for **{part}**. "
+                )
+                + (
+                    f"{part} has no wiring/schematic figure of its own — that lives on its FTA (field termination "
+                    "assembly), not the IOP card. Its own compatibility text is supporting identity evidence only, "
+                    "not a schematic."
+                )
+            )
+            search_line = (
+                f"Searching the authoritative TDC3000 index (all 4 formats) found "
+                f"{len(found_list)} verified FTA connection diagram"
+                f"{'s' if len(found_list) != 1 else ''} for {part}'s explicitly compatible FTA model"
+                f"{'s' if len(found_list) != 1 else ''} — select the one matching the FTA actually wired to your "
+                f"{part}:"
+            )
+        lines: list[str] = [
+            identity_line,
             "",
-            f"Searching the authoritative TDC3000 index (all 4 formats) found "
-            f"{len(found_list)} verified FTA connection diagram"
-            f"{'s' if len(found_list) != 1 else ''} for {part}'s explicitly compatible FTA model"
-            f"{'s' if len(found_list) != 1 else ''} — select the one matching the FTA actually wired to your "
-            f"{part}:",
+            search_line,
             "",
         ]
         for found in found_list:
-            found_href = absolutize_sidecar_href(
-                sidecar_preview_path(found.get("source") or ""), public_origin=origin
-            )
             page_no = found.get("pdf_page")
-            has_page_fragment = bool(found_href and page_no)
-            page_href = f"{found_href}#page={page_no}" if has_page_fragment else found_href
-            found_identity = str(found.get("title") or found.get("filename") or "the indexed manual")
-            if found.get("doc_no"):
-                found_identity = f"{found_identity} ({found['doc_no']})"
-            matched_model = str(found.get("matched_model") or part).strip()
-            # Derive the printed page independently from this specific page's
-            # own header/footer (never a re-used or assumed offset) --
-            # presentation only, does not alter what the search matched.
-            printed_no = ""
-            if page_no:
+            printed_no = str(found.get("printed_page") or "").strip()
+            if not printed_no and page_no:
                 found_root = library_root()
                 found_full = os.path.join(found_root, found.get("source") or "") if found_root else ""
                 if found_full and os.path.isfile(found_full):
@@ -2165,22 +2945,56 @@ def build_authoritative_schematic_reply(
                             printed_no = _printed_page_number(found_texts[int(page_no) - 1])
                     except Exception:
                         printed_no = ""
-            page_stmt = f"PDF viewer page **{page_no}**"
-            if printed_no:
-                page_stmt += f", printed manual page **{printed_no}**"
-            else:
-                page_stmt += " (printed manual page not determinable from this page's own header/footer)"
-            link_label = f"Open Figure {found['figure']} ({matched_model} FTA diagram)"
-            lines.append(
-                f"- Figure **{found['figure']}** — **{matched_model}** FTA connection diagram, in "
-                f"**{found_identity}**, {page_stmt}. [{link_label}]({page_href})"
+            found_href = ""
+            if printed_no.isdigit():
+                found_href = absolutize_sidecar_href(
+                    sidecar_printed_page_path(found.get("source") or "", printed_no),
+                    public_origin=origin,
+                )
+            found_identity = str(found.get("title") or found.get("filename") or "the indexed manual")
+            if found.get("doc_no"):
+                found_identity = f"{found_identity} ({found['doc_no']})"
+            matched_model = str(found.get("matched_model") or part).strip()
+            page_stmt = (
+                f"printed manual page **{printed_no}**"
+                if printed_no
+                else "printed page not verified"
             )
-            entries.append({**found, "printed_page": printed_no or None})
-        lines.extend([
-            "",
-            f"None of these is a direct {part} diagram — each is the connection diagram for the named FTA "
-            f"terminal assembly that {part} plugs into.",
-        ])
+            if page_no:
+                page_stmt += f" (PDF ordinal page {page_no}, audit only)"
+            link_label = (
+                f"Open Figure {found['figure']} — printed p.{printed_no}"
+                if printed_no
+                else f"Open Figure {found['figure']} ({matched_model} FTA diagram)"
+            )
+            if found_href:
+                lines.append(
+                    f"- Figure **{found['figure']}** — **{matched_model}** FTA connection diagram, in "
+                    f"**{found_identity}**, {page_stmt}. [{link_label}]({found_href})"
+                )
+            else:
+                lines.append(
+                    f"- Figure **{found['figure']}** — **{matched_model}** FTA connection diagram, in "
+                    f"**{found_identity}**, {page_stmt}."
+                )
+            entries.append({
+                **found,
+                "printed_page": printed_no or None,
+                "pdf_page": page_no,
+                "printed_page_href": found_href or None,
+            })
+        if not direct_fta:
+            lines.extend([
+                "",
+                f"None of these is a direct {part} diagram — each is the connection diagram for the named FTA "
+                f"terminal assembly that {part} plugs into.",
+            ])
+        else:
+            lines.extend([
+                "",
+                f"Requested part: **{part}**. Actual diagram target: the named FTA on each figure. "
+                "Do not treat a compatibility table or planning manual as this packet.",
+            ])
         reply = "\n".join(lines)
         receipt = {
             "schema": "smedley.authoritative_tdc3000_schematic.v1",
@@ -2193,11 +3007,24 @@ def build_authoritative_schematic_reply(
             "checked": checked_receipt,
         }
         spoken = (
-            f"{bound_title or 'The bound manual'} has no schematic of its own for {part}. "
-            f"The TDC3000 index found {len(found_list)} FTA connection diagram"
-            f"{'s' if len(found_list) != 1 else ''} for its compatible FTA models — pick the one matching your "
-            "hardware. Links are on screen."
+            compact_fta_connection_spoken(
+                part,
+                found_list[0].get("figure"),
+                found_list[0].get("printed_page"),
+            )
+            if direct_fta
+            else (
+                f"{bound_title or 'The bound manual'} has no schematic of its own for {part}. "
+                f"The TDC3000 index found {len(found_list)} FTA connection diagram"
+                f"{'s' if len(found_list) != 1 else ''} for its compatible FTA models — pick the one matching your "
+                "hardware. Links are on screen."
+            )
         )
+        if direct_fta and not spoken:
+            spoken = (
+                f"Verified FTA connection diagram for {part} is on screen, "
+                f"Figure {found_list[0].get('figure')}."
+            )
         return reply, spoken, receipt
 
     checked_lines = "; ".join(
@@ -2262,6 +3089,29 @@ def try_active_document_review(
             "error": None,
         }
 
+    # Governing-source guidance binds the already-active document to a stated
+    # engineering topic. It must never be treated as a new document lookup --
+    # keep the current binding, do not re-search, do not clear it.
+    governing_topic = governing_source_guidance_topic(query)
+    if governing_topic:
+        active_out = dict(active_document) if isinstance(active_document, dict) else {}
+        topic_key = _governing_topic_key(governing_topic)
+        active_out["governing_topic"] = governing_topic
+        active_out["governing_topic_key"] = topic_key
+        title = str(active_out.get("title") or active_out.get("doc_no") or "").strip() or "this document"
+        reply = (
+            f"Understood — **{title}** stays bound as the governing reference "
+            f"for {governing_topic}. I'll use it first for that topic going forward."
+        )
+        return {
+            "handled": True,
+            "reply": reply,
+            "spoken_reply": sanitize_for_spoken_output(reply),
+            "source": source,
+            "active_document": active_out,
+            "error": None,
+        }
+
     # Offered follow-up: explicit extract phrasing OR affirmative on pending extract.
     wants_extract = is_wiring_extract_followup(query) or (
         is_affirmative_followup(query) and _pending_extract_bound(active_document)
@@ -2278,6 +3128,53 @@ def try_active_document_review(
         elif os.path.splitext(pdf_path)[1].lower() != ".pdf":
             err = "bound document is not a PDF"
         else:
+            source = _active_document_source(active_document)
+            found_list, compatible_ftas, counterpart_ok = collect_fta_connection_diagrams_from_source(
+                source, part
+            )
+            if found_list:
+                reply, spoken, receipt = build_authoritative_schematic_reply(
+                    active_document,
+                    found_list,
+                    [
+                        {
+                            "source": source,
+                            "filename": os.path.basename(str(source or "")),
+                            "doc_no": str(
+                                (active_document or {}).get("doc_no")
+                                or (active_document or {}).get("revision")
+                                or ""
+                            )
+                            if isinstance(active_document, dict)
+                            else "",
+                            "target": part,
+                        }
+                    ],
+                    compatible_ftas,
+                    public_origin=origin,
+                    counterpart_verified=counterpart_ok,
+                )
+                active_out = dict(active_document) if isinstance(active_document, dict) else {}
+                active_out.pop("pending_action", None)
+                active_out["verified_schematics"] = [
+                    {
+                        "source": f.get("source"),
+                        "pdf_page": f.get("pdf_page"),
+                        "printed_page": f.get("printed_page"),
+                        "matched_model": f.get("matched_model"),
+                        "figure": f.get("figure"),
+                    }
+                    for f in found_list
+                ]
+                return {
+                    "handled": True,
+                    "reply": reply,
+                    "spoken_reply": spoken,
+                    "source": source,
+                    "active_document": active_out,
+                    "extraction": receipt,
+                    "error": None,
+                }
             try:
                 pages = extract_wiring_pages_from_pdf(pdf_path, part_number=part)
             except Exception as exc:  # noqa: BLE001
@@ -2298,8 +3195,18 @@ def try_active_document_review(
             except Exception:
                 compatible_ftas = []
             found_list, checked = authoritative_tdc3000_schematic_search(part, compatible_ftas)
+            counterpart_ok = False
+            try:
+                counterpart_ok = _document_supports_mc_mu_pair(bound_texts, part)
+            except Exception:
+                counterpart_ok = False
             reply, spoken, receipt = build_authoritative_schematic_reply(
-                active_document, found_list, checked, compatible_ftas, public_origin=origin
+                active_document,
+                found_list,
+                checked,
+                compatible_ftas,
+                public_origin=origin,
+                counterpart_verified=counterpart_ok,
             )
             active_out = dict(active_document) if isinstance(active_document, dict) else {}
             active_out.pop("pending_action", None)
@@ -2555,33 +3462,21 @@ def source_family_compatible_with_part(
 
 
 def _seed_authoritative_manuals_for_part(part: object, *, query: object = "") -> list[dict[str, Any]]:
-    """Inject on-disk authoritative pubs the vector ranker often misses."""
+    """Inject on-disk authoritative pubs the vector ranker often misses.
+
+    The filesystem-only 1756-UM001 chassis-power seed was removed: it cited
+    an on-disk file as answer evidence without any actual retrieval hit,
+    which could stand in for (or crowd out) a genuine retrieved source. Now
+    that publication-alias pre-validation falls through to real semantic
+    retrieval instead of forbidding it (see rag_retrieval._exact_publication_matches),
+    UM001/IN619 evidence must come from an actual retrieve() match or not be
+    cited at all.
+    """
     part_s = str(part or "").strip().upper().replace(" ", "-")
     q = str(query or "")
     q_low = q.lower()
     seeds: list[dict[str, Any]] = []
     root = library_root()
-    wants_chassis = bool(
-        _CHASSIS_POWER_TOPIC_RE.search(q)
-        or re.search(r"\b(?:power\s+suppl(?:y|ies)|psu|chassis|watt(?:age)?s?|redundan(?:t|cy)|slots?)\b", q_low)
-    )
-    if wants_chassis:
-        for rel in _AB_CHASSIS_POWER_MANUAL_SOURCES:
-            abs_path = os.path.join(root, rel) if root else ""
-            if abs_path and os.path.isfile(abs_path):
-                seeds.append(
-                    {
-                        "source": rel.replace("\\", "/"),
-                        "score": 0.99,
-                        "match_kind": "authoritative_seed",
-                        "retrieval": "smedley_authoritative_seed",
-                        "document_identity": {
-                            "title": "ControlLogix System User Manual",
-                            "doc_no": "1756-UM001",
-                        },
-                    }
-                )
-                break
     if not part_s.startswith("1756-"):
         return seeds
     wants_io_table = bool(
@@ -2615,7 +3510,12 @@ def _is_chassis_power_manual(source: object = "", title: object = "") -> bool:
         return False
     return bool(
         re.search(
-            r"um001|in619|in620|power\s+suppl|redundant\s+power|system\s+user\s+manual",
+            # 1756-td005 is the "ControlLogix Power Supplies Specifications
+            # Technical Data" publication -- confirmed by rendered PDF title
+            # and its "Power Load and Transformer Sizing" section -- and is
+            # therefore chassis-power evidence even though its filename alone
+            # carries no "power supply" wording.
+            r"um001|in619|in620|\btd0*05(?:[_\-]|\b)|power\s+suppl|redundant\s+power|system\s+user\s+manual",
             blob,
         )
     )
@@ -3011,6 +3911,7 @@ def _electrical_not_found_reply(
     query: object = "",
     next_family: str = "",
     public_origin: object = "",
+    chassis_slots: object = "",
 ) -> tuple[str, str, dict[str, Any] | None]:
     """Fail closed without dumping research onto the owner or citing a wrong hit.
 
@@ -3028,6 +3929,7 @@ def _electrical_not_found_reply(
             re.I,
         )
     )
+    slot_n = str(chassis_slots or "").strip() or _slot_count_from_text(query)
     if wants_ifm and not wants_chassis:
         return _electrical_ifm_index_fallback_reply(part, public_origin=public_origin)
     if wants_chassis:
@@ -3035,12 +3937,17 @@ def _electrical_not_found_reply(
             "ControlLogix power-supply sizing publications "
             "(1756-UM001 system manual + 1756-IN619 / redundant-supply instructions)"
         )
+        retrieval_query = (
+            "ControlLogix chassis power supply sizing 1756-UM001"
+            + (f" {slot_n}-slot" if slot_n else "")
+        )
         reply = (
             f"I cannot yet verify a ControlLogix chassis/power-supply recommendation{who} "
             "from a part-validated engineering-library excerpt. "
             "I will not substitute model memory, operational opinion, or an unsourced catalog pattern.\n\n"
             f"Next I will retrieve **{next_family}**"
             + (f" for this **{part}** context" if part else "")
+            + (f" (**{slot_n}-slot**)" if slot_n else "")
             + ".\n\n"
             "Want me to run that retrieval now?"
         )
@@ -3052,9 +3959,13 @@ def _electrical_not_found_reply(
         )
         pending = {
             "action": _PENDING_CHASSIS_SIZING_ACTION,
+            "kind": "retrieval",
+            "status": "pending",
             "part_number": part or None,
             "next_family": next_family,
             "topic": "controllogix_chassis_power",
+            "chassis_slots": slot_n or None,
+            "retrieval_query": retrieval_query,
         }
         return reply, spoken, pending
     if not next_family:
@@ -3078,10 +3989,68 @@ def _electrical_not_found_reply(
     if part:
         pending = {
             "action": "retrieve_part_manual",
+            "kind": "retrieval",
+            "status": "pending",
             "part_number": part,
             "next_family": next_family,
+            "retrieval_query": f"{part} engineering manual datasheet",
         }
     return reply, spoken, pending
+
+
+def _electrical_retrieval_exhausted_reply(
+    part: str,
+    *,
+    pending: object = None,
+    public_origin: object = "",
+    candidate_source: object = "",
+    candidate_title: object = "",
+) -> tuple[str, str, None]:
+    """Honest result after an offered retrieval already ran — never re-offer the same ask."""
+    pend = pending if isinstance(pending, dict) else {}
+    next_family = str(pend.get("next_family") or "the offered publications").strip()
+    slot_n = str(pend.get("chassis_slots") or "").strip()
+    who = f" for **{part}**" if part else ""
+    slot_bit = f" (**{slot_n}-slot**)" if slot_n else ""
+    source = library_relpath_from_source(candidate_source) or str(candidate_source or "").strip()
+    title = str(candidate_title or "").strip()
+    link = markdown_link_for_source(source, public_origin=public_origin) if source else ""
+    if source and _is_chassis_power_manual(source, title):
+        in619_note = ""
+        if "UM001" in (title + source).upper() or "um001" in source.lower():
+            # Availability language must reflect the live publication
+            # manifest, never a hardcoded assumption — 1756-IN619 may have
+            # been ingested since this offer was written.
+            in619_alias = resolve_ab_1756_publication_alias("1756-IN619")
+            if isinstance(in619_alias, dict) and in619_alias.get("status") == "absent":
+                in619_note = ", and **1756-IN619** is not available in this library"
+        reply = (
+            f"I ran the retrieval for **{next_family}**{who}{slot_bit}. "
+            "The library returned "
+            f"**{title or source}**, but it does not contain a verified power-supply sizing "
+            "excerpt I can cite for a catalog part number"
+            + in619_note
+            + ". I will not invent a 1756-PAxx / 1756-PBxx selection.\n\n"
+            f"Source: {link}"
+        )
+        spoken = (
+            "I ran that retrieval"
+            + (f" for the {slot_n}-slot chassis" if slot_n else "")
+            + ". The system manual is on screen, but it does not contain a verified sizing excerpt "
+            "I can cite for a power-supply part number, so I will not guess. Source link is on screen."
+        )
+    else:
+        reply = (
+            f"I ran the retrieval for **{next_family}**{who}{slot_bit}. "
+            "No part-validated sizing excerpt is available in the engineering library for this ask. "
+            "I will not invent a power-supply catalog number or repeat the retrieval offer."
+        )
+        spoken = (
+            "I ran that retrieval"
+            + (f" for the {slot_n}-slot chassis" if slot_n else "")
+            + ". No verified sizing excerpt is available in the library, so I will not guess a power-supply part number."
+        )
+    return reply, spoken, None
 
 
 def _best_engineering_excerpt(text: object, query: object) -> str:
@@ -3128,6 +4097,15 @@ def try_engineering_rag_answer(
     sources must themselves be part/family-validated — never an unrelated "closest hit".
     """
     msg = str(query or "").strip()
+    # Governing-source guidance ("That is the manual to use when asked about
+    # 1756 power supplies.") is an instruction, not an engineering question --
+    # it must not be independently answered here just because it happens to
+    # name an engineering topic. try_active_document_review already handles
+    # it when there is a document to bind; with none bound, it must reach
+    # ordinary chat, not get treated as if the user actually asked the topic
+    # question.
+    if is_governing_source_guidance(msg):
+        return None
     compatibility = is_active_part_compatibility_followup(msg, active_document)
     chassis_followup = is_active_chassis_power_followup(msg, active_document)
     chassis_topic = bool(
@@ -3145,10 +4123,13 @@ def try_engineering_rag_answer(
     pending_lookup = False
     pending_use_index = False
     pending_chassis = False
+    pending_payload: dict[str, Any] | None = None
     if isinstance(active_document, dict) and is_affirmative_followup(msg):
         pending = active_document.get("pending_action")
         if isinstance(pending, dict):
             action = str(pending.get("action") or "")
+            pending_payload = dict(pending)
+            pending_payload["status"] = "running"
             if action == _PENDING_USE_AB_INDEX_ACTION:
                 pending_use_index = True
             elif action == _PENDING_CHASSIS_SIZING_ACTION:
@@ -3170,7 +4151,11 @@ def try_engineering_rag_answer(
     if (pending_lookup or pending_use_index or pending_chassis) and not part and isinstance(
         active_document, dict
     ):
-        part = str(active_document.get("part_number") or "").strip()
+        part = str(
+            (pending_payload or {}).get("part_number")
+            or active_document.get("part_number")
+            or ""
+        ).strip()
 
     if pending_use_index and part:
         reply, spoken = _use_ab_wiring_index_for_part(part, public_origin=origin)
@@ -3203,20 +4188,24 @@ def try_engineering_rag_answer(
         or bool(part and re.search(r"\b(?:ifm|cable|1492|fuse|fusing|match)\b", msg, re.I))
     )
     retrieval_query = msg
-    slot_m = _SLOT_FOLLOWUP_RE.match(msg)
-    slot_n = ""
-    if slot_m:
-        slot_n = slot_m.group(1)
-    elif isinstance(active_document, dict) and active_document.get("chassis_slots"):
+    slot_n = _slot_count_from_text(msg)
+    if not slot_n and isinstance(active_document, dict):
         slot_n = str(active_document.get("chassis_slots") or "").strip()
+    if not slot_n and pending_payload:
+        slot_n = str(pending_payload.get("chassis_slots") or "").strip()
     if pending_chassis or chassis_topic:
-        retrieval_query = (
-            f"ControlLogix chassis power supply sizing 1756-UM001"
-            + (f" {slot_n}-slot" if slot_n else "")
-            + (f" {msg}" if msg and not slot_m else "")
-        )
+        stored_q = str((pending_payload or {}).get("retrieval_query") or "").strip()
+        if pending_chassis and stored_q:
+            retrieval_query = stored_q
+        else:
+            retrieval_query = (
+                f"ControlLogix chassis power supply sizing 1756-UM001"
+                + (f" {slot_n}-slot" if slot_n else "")
+                + (f" {msg}" if msg and not is_affirmative_followup(msg) and not _SLOT_FOLLOWUP_RE.match(msg) else "")
+            )
     elif pending_lookup and part:
-        retrieval_query = f"{part} 1492 IFM cable wiring system 1756-UM058"
+        stored_q = str((pending_payload or {}).get("retrieval_query") or "").strip()
+        retrieval_query = stored_q or f"{part} 1492 IFM cable wiring system 1756-UM058"
     elif compatibility and part:
         retrieval_query = f"{msg} {part}"
     elif part and part.lower() not in msg.lower():
@@ -3259,14 +4248,57 @@ def try_engineering_rag_answer(
                 matches.insert(0, seed)
                 seen_sources.add(src)
 
+    # Governing-source continuity: a document the operator explicitly bound as
+    # the authoritative reference for this same topic (via governing-source
+    # guidance) must be consulted first, ahead of fresh generic retrieval --
+    # not merely retained as inert metadata. It stays in effect only while the
+    # question remains in-topic; an explicit different source/topic or a
+    # cleared/replaced active_document ends it naturally (nothing here
+    # special-cases expiry -- it simply requires the still-current
+    # active_document to carry the matching governing_topic_key).
+    governing_key = ""
+    governing_source = ""
+    if isinstance(active_document, dict):
+        governing_key = str(active_document.get("governing_topic_key") or "").strip()
+        governing_source = str(active_document.get("source") or "").strip()
+    governing_in_topic = bool(
+        governing_key
+        and governing_source
+        and chassis_topic
+        and governing_key == "controllogix_chassis_power"
+    )
+
+    priority_match: dict[str, Any] | None = active_document if governing_in_topic else None
+    priority_source = governing_source.replace("\\", "/") if governing_in_topic else ""
+    if not priority_match and chassis_topic:
+        # 1756-TD005 ("ControlLogix Power Supplies Specifications Technical
+        # Data") is the authoritative SIZING/SELECTION document -- it has an
+        # actual Power Load and Transformer Sizing section, unlike
+        # installation-instructions manuals such as IN619 that merely rank
+        # higher on generic similarity. Prefer it when this chassis-power
+        # question actually retrieved it -- never fabricate/seed it if
+        # retrieval did not genuinely surface it.
+        for m in matches:
+            if not isinstance(m, dict):
+                continue
+            src = str(m.get("source") or "").replace("\\", "/")
+            if re.search(r"\btd0*05(?:[_\-]|\b)", src, re.I):
+                priority_match = m
+                priority_source = src
+                break
+
     candidates: list[dict[str, Any]] = []
+    if priority_match is not None:
+        candidates.append(priority_match)
     primary = select_engineering_evidence_match(matches, query=retrieval_query)
-    if isinstance(primary, dict):
+    if isinstance(primary, dict) and primary is not priority_match:
         candidates.append(primary)
     for match in matches:
-        if not isinstance(match, dict) or match is primary:
+        if not isinstance(match, dict) or match is primary or match is priority_match:
             continue
         source = str(match.get("source") or "").replace("\\", "/")
+        if priority_source and source == priority_source:
+            continue  # already the priority candidate above; do not re-add.
         title = _match_title(match)
         if classify_document_kind(source, title) != "manual":
             continue
@@ -3366,8 +4398,81 @@ def try_engineering_rag_answer(
             reply_query = f"{msg} {slot_n}-slot chassis"
         elif chassis_topic and not _CHASSIS_POWER_TOPIC_RE.search(msg):
             reply_query = f"ControlLogix chassis power supply {msg}"
+
+        # Affirmative pending retrieval already ran — never echo the original offer.
+        if pending_chassis or pending_lookup:
+            candidate_source = ""
+            candidate_title = ""
+            for match in candidates:
+                if not isinstance(match, dict):
+                    continue
+                trial = _evidence_record_from_match(match, public_origin=origin, part=part)
+                src = str(trial.get("source") or "")
+                title = str(trial.get("title") or "")
+                if pending_chassis and _is_chassis_power_manual(src, title):
+                    candidate_source, candidate_title = src, title
+                    break
+                if pending_lookup and src and (
+                    not part
+                    or source_family_compatible_with_part(src, title, part)
+                ):
+                    candidate_source, candidate_title = src, title
+                    break
+            if not candidate_source:
+                for match in matches:
+                    if not isinstance(match, dict):
+                        continue
+                    src = str(match.get("source") or "")
+                    title = _match_title(match)
+                    if pending_chassis and _is_chassis_power_manual(src, title):
+                        candidate_source, candidate_title = src, title
+                        break
+            reply, spoken, _pending_clear = _electrical_retrieval_exhausted_reply(
+                part,
+                pending=pending_payload,
+                public_origin=origin,
+                candidate_source=candidate_source,
+                candidate_title=candidate_title,
+            )
+            keep = dict(keep_part_ctx or {})
+            if part:
+                keep["part_number"] = part
+            if chassis_topic or pending_chassis:
+                keep["topic"] = "controllogix_chassis_power"
+                keep["chassis_power"] = True
+                if slot_n:
+                    keep["chassis_slots"] = slot_n
+            keep.pop("pending_action", None)
+            source_out = (
+                library_relpath_from_source(candidate_source)
+                or str(candidate_source or "").strip()
+                or None
+            )
+            if source_out:
+                keep["source"] = source_out
+                keep["title"] = candidate_title or keep.get("title")
+                keep["url"] = normalize_corpus_url(
+                    "", source=source_out, public_origin=origin
+                ) or keep.get("url")
+            return {
+                "handled": True,
+                "reply": reply,
+                "spoken_reply": spoken,
+                "source": source_out,
+                "active_document": keep or None,
+                "pending_action": None,
+                "error": None,
+                "engineering_rag_answer": True,
+                "verification": "retrieval_exhausted",
+                "part_number": part or None,
+                "document_kind": "manual" if source_out else None,
+            }
+
         reply, spoken, pending = _electrical_not_found_reply(
-            part, query=reply_query if chassis_topic else msg, public_origin=origin
+            part,
+            query=reply_query if chassis_topic else msg,
+            public_origin=origin,
+            chassis_slots=slot_n,
         )
         verification = (
             "lookup_index"
@@ -3441,6 +4546,67 @@ def try_engineering_rag_answer(
         selected["chassis_power"] = True
         if slot_n:
             selected["chassis_slots"] = slot_n
+    if governing_in_topic:
+        # Still in-topic for the bound governing source -- carry the binding
+        # forward so a later same-topic follow-up keeps consulting it too,
+        # even if this turn's cited passage came from a supplementing source.
+        selected["governing_topic"] = active_document.get("governing_topic")
+        selected["governing_topic_key"] = governing_key
+
+    # A generic chassis-power ask with no chassis slot count is missing the
+    # input that actually determines which catalog number applies. Dumping
+    # the raw catalog-table excerpt (or picking one number from it) would
+    # look like a sizing answer without being one. Disclose that real,
+    # cited evidence was found and ask for the minimum missing sizing facts
+    # instead -- unless a slot count is already known (query, active
+    # document, or pending payload), in which case the evidence unambiguously
+    # narrows the answer and the existing sizing-facts extraction proceeds.
+    generic_chassis_ask = chassis_topic and (not part or part == "1756-CHASSIS")
+    # A worksheet/backplane-current/chassis-load excerpt IS the sizing answer
+    # (the evidence unambiguously supplies it) -- only a bare catalog-number
+    # listing with no such sizing determination is unsafe to present as-is,
+    # regardless of whether the chassis slot count is already known (a slot
+    # count alone does not determine AC/DC or redundancy).
+    passage_is_unambiguous_sizing = bool(
+        re.search(r"sizing\s+worksheet|backplane\s+current|chassis\s+load", passage, re.I)
+    )
+    if generic_chassis_ask and not passage_is_unambiguous_sizing:
+        missing: list[str] = []
+        if not slot_n:
+            missing.append("Chassis slot count.")
+        missing.append(
+            "Supply input available (line 120/240 VAC, or 24 VDC for a redundant-supply "
+            "input), and whether redundant power is required."
+        )
+        found_bit = (
+            f"for a **{slot_n}-slot** ControlLogix chassis " if slot_n else ""
+        )
+        reply = (
+            f"I found grounded ControlLogix chassis-power evidence {found_bit}in "
+            f"**{title or 'the engineering library'}**, but I will not pick a specific power-supply "
+            "catalog number without the sizing inputs that determine it. To size/select the supply "
+            "I need:\n\n"
+            + "\n".join(f"{i}. {fact}" for i, fact in enumerate(missing, 1))
+            + f"\n\nSource: {link}"
+        )
+        spoken = (
+            "I found real chassis-power evidence"
+            + (f" for a {slot_n}-slot chassis" if slot_n else "")
+            + ", but I need the supply input you have"
+            + ("" if slot_n else " and the slot count")
+            + " before I can size or select a specific power supply. Source link is on screen."
+        )
+        return {
+            "handled": True,
+            "reply": reply,
+            "spoken_reply": spoken,
+            "source": source,
+            "active_document": selected,
+            "error": None,
+            "engineering_rag_answer": True,
+            "verification": "source_grounded",
+            "part_number": part or None,
+        }
 
     header = f"From the engineering library"
     if part:
@@ -3481,9 +4647,33 @@ def try_engineering_rag_answer(
     spoken = _strip_chain_of_thought(spoken)
     if _opinionated_electrical_leak(reply) or _opinionated_electrical_leak(spoken):
         # Hard fail-closed if any opinion slang leaked into the grounded path.
+        if pending_chassis or pending_lookup:
+            reply, spoken, _pending_clear = _electrical_retrieval_exhausted_reply(
+                part,
+                pending=pending_payload,
+                public_origin=origin,
+                candidate_source=source,
+                candidate_title=title,
+            )
+            keep = dict(selected)
+            keep.pop("pending_action", None)
+            return {
+                "handled": True,
+                "reply": reply,
+                "spoken_reply": spoken,
+                "source": source,
+                "active_document": keep,
+                "pending_action": None,
+                "error": None,
+                "engineering_rag_answer": True,
+                "verification": "retrieval_exhausted",
+                "part_number": part or None,
+            }
         reply, spoken, pending = _electrical_not_found_reply(
-            part, query=msg if not chassis_topic else f"ControlLogix chassis power {msg}",
+            part,
+            query=msg if not chassis_topic else f"ControlLogix chassis power {msg}",
             public_origin=origin,
+            chassis_slots=slot_n,
         )
         keep = dict(selected)
         if pending:
@@ -3693,8 +4883,35 @@ def try_jarvis_n8n_engineering_handoff(
     }
 
 
+def _has_explicit_document_identity_token(msg: str) -> bool:
+    """True when the query names a concrete document identity (doc number,
+    Honeywell part number, AB 1756 publication token, spec number) rather
+    than merely matching a generic verb/noun proximity heuristic.
+
+    A no-match reply for a query WITHOUT an explicit identity token is not a
+    deliberate request to move to a different document, so it must not clear
+    an existing active_document binding on its own.
+    """
+    if not msg:
+        return False
+    if extract_ab_1756_publication_tokens(msg):
+        return True
+    if _DOCNUM.search(msg):
+        return True
+    if _HW_PART.search(msg):
+        return True
+    if is_specification_number_request(msg):
+        return True
+    return False
+
+
 def try_document_route(
-    query: object, *, topk: int = 8, public_origin: object = ""
+    query: object,
+    *,
+    topk: int = 8,
+    public_origin: object = "",
+    prior_validated_part: object = None,
+    active_document: object = None,
 ) -> Optional[dict[str, Any]]:
     """If query is a document request, retrieve and return a deterministic reply.
 
@@ -3703,30 +4920,153 @@ def try_document_route(
     if not document_route_enabled():
         return None
     msg = str(query or "").strip()
-    if not is_document_request(msg):
+    if is_library_path_operation(msg):
+        return {
+            "handled": True,
+            "query": msg,
+            "reply": (
+                "That SMB/library path is not a chat extract. Use the right-rail "
+                "**INGEST TO RAG** folder picker and **Rescan selected library** "
+                "(or drop the file there). Watcher identity, phase, and reason "
+                "show in the ingest queue — not in this conversation."
+            ),
+            "spoken_reply": (
+                "Use the ingest sidebar to rescan the selected library. "
+                "Do not paste an SMB path into chat."
+            ),
+            "matches": [],
+            "collection": None,
+            "active_document": None,
+            "pending_action": None,
+            "retrieval": "library_path_rejected",
+            "error": None,
+        }
+    validated_part, part_identity_source = resolve_validated_part(
+        msg,
+        prior_validated_part=prior_validated_part,
+        active_document=active_document,
+    )
+    query_intent = classify_retrieval_intent(msg)
+    retrieval_msg = msg
+    carried_wiring = (
+        part_identity_source == "prior_turn_validated"
+        and is_wiring_narrowing_followup(msg)
+        and bool(validated_part)
+    )
+    if carried_wiring:
+        retrieval_msg = f"{validated_part} wiring schematic"
+        query_intent = "wiring_schematic"
+    if not is_document_request(msg) and not carried_wiring:
         return None
     origin = normalize_public_origin(public_origin)
-    try:
-        retrieval_query = project_spec_lookup_query(msg) if is_specification_number_request(msg) else msg
-        payload = retrieve_documents(retrieval_query, topk=topk, public_origin=origin)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("smedley document route retrieve failed: %s", type(exc).__name__)
-        reply = (
-            "Document request detected, but Smedley RAG retrieval is unavailable "
-            f"({type(exc).__name__}). Ordinary chat was not used for this turn."
-        )
+    alias = resolve_ab_1756_publication_alias(msg)
+    if alias:
+        if alias.get("status") == "present":
+            match = _match_from_ab_1756_alias(alias, public_origin=origin)
+            matches = [match]
+            reply, pending = build_operator_document_reply(
+                matches, query=msg, public_origin=origin
+            )
+            active_document = active_document_from_matches(
+                matches, query=msg, public_origin=origin
+            )
+            if isinstance(active_document, dict):
+                active_document = dict(active_document)
+                active_document["publication_alias"] = True
+                active_document["publication_identifier"] = (
+                    (match.get("document_identity") or {}).get("publication_identifier")
+                )
+                active_document["family"] = "1756 ControlLogix"
+                active_document["vendor"] = "Allen-Bradley / Rockwell Automation"
+            reply = neutralize_lan_url_text(reply, public_origin=origin)
+            spoken = build_compact_spoken_document_reply(matches, query=msg)
+            spoken = re.sub(r"\s+", " ", str(spoken or "")).strip()
+            receipt = build_retrieval_receipt(matches, query=msg)
+            return {
+                "handled": True,
+                "query": msg,
+                "reply": reply,
+                "spoken_reply": spoken,
+                "matches": matches,
+                "collection": "ab_1756_publication_alias",
+                "active_document": active_document if active_document else None,
+                "pending_action": pending,
+                "retrieval": "ab_1756_publication_alias",
+                "retrieval_receipt": receipt,
+                "verification": "publication_alias",
+                "error": None,
+            }
+        reply = _ab_1756_absent_reply(alias)
         return {
             "handled": True,
             "query": msg,
             "reply": reply,
             "spoken_reply": sanitize_for_spoken_output(reply),
             "matches": [],
-            "collection": "",
-            "error": type(exc).__name__,
+            "collection": "ab_1756_publication_alias",
+            "active_document": None,
+            "pending_action": None,
+            "retrieval": "ab_1756_publication_alias",
+            "verification": "publication_absent",
+            "error": None,
         }
+    payload: dict[str, Any] | None = None
+    rejected_planning: list[dict[str, Any]] = []
+    if validated_part and _HW_PART.search(validated_part):
+        # TDC3000 Process Manager I/O Installation (PM20-520) is the first and
+        # only authoritative resolver for MU/MC IOP/FTA identity and wiring.
+        # Do not consult semantic RAG or HP02-500 planning ranking.
+        rejected_planning.append(
+            {
+                "source": "hp02500.pdf",
+                "title": "High-Performance Process Manager Planning",
+                "reason": "planning_manual_never_authoritative_for_pm_io_fta",
+            }
+        )
+        payload = retrieve_pm_io_installation_payload(
+            validated_part, query=retrieval_msg, public_origin=origin
+        )
+    if payload is None:
+        try:
+            retrieval_query = (
+                project_spec_lookup_query(retrieval_msg)
+                if is_specification_number_request(retrieval_msg)
+                else retrieval_msg
+            )
+            payload = retrieve_documents(retrieval_query, topk=topk, public_origin=origin)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("smedley document route retrieve failed: %s", type(exc).__name__)
+            reply = (
+                "Document request detected, but Smedley RAG retrieval is unavailable "
+                f"({type(exc).__name__}). Ordinary chat was not used for this turn."
+            )
+            return {
+                "handled": True,
+                "query": msg,
+                "reply": reply,
+                "spoken_reply": sanitize_for_spoken_output(reply),
+                "matches": [],
+                "collection": "",
+                "error": type(exc).__name__,
+            }
     matches = payload.get("matches") or []
-    if is_specification_number_request(msg):
-        matches = prioritize_gp_brewton_spec_matches(matches, msg)
+    for raw in matches:
+        if not isinstance(raw, dict):
+            continue
+        src = str(raw.get("source") or "")
+        title = _match_title(raw)
+        if _is_planning_manual(src, title):
+            rejected_planning.append(
+                {
+                    "source": src,
+                    "title": title,
+                    "reason": "planning_manual_insufficient_for_wiring_intent"
+                    if query_intent in {"wiring_schematic", "fta_connection"}
+                    else "planning_manual_demoted_for_honeywell_part_lookup",
+                }
+            )
+    if is_specification_number_request(retrieval_msg):
+        matches = prioritize_gp_brewton_spec_matches(matches, retrieval_msg)
         # A spec-number request needs the governing identity, not a long list
         # of generic handbooks that happened to rank nearby.
         if matches:
@@ -3734,8 +5074,12 @@ def try_document_route(
     # Exact Honeywell part-number index hits: keep the canonical exact PDF only.
     # Apply vendor/kind gates before truncating so an unrelated corpus hit
     # (e.g. Allen-Bradley knowledgebase xlsx) cannot displace the Honeywell manual.
-    if _HW_PART.search(msg):
-        manual, index = select_operator_document_match(matches, query=msg)
+    if _HW_PART.search(retrieval_msg):
+        if validated_part:
+            for m in matches:
+                if isinstance(m, dict) and not m.get("part_number"):
+                    m["part_number"] = validated_part
+        manual, index = select_operator_document_match(matches, query=retrieval_msg)
         gated: list[dict[str, Any]] = []
         if isinstance(manual, dict):
             gated.append(manual)
@@ -3753,33 +5097,78 @@ def try_document_route(
         elif matches:
             matches = matches[:1]
     reply, pending = build_operator_document_reply(
-        matches, query=msg, public_origin=origin
+        matches, query=retrieval_msg, public_origin=origin
     )
-    active_document = active_document_from_matches(
-        matches, query=msg, public_origin=origin
+    active_out = active_document_from_matches(
+        matches, query=retrieval_msg, public_origin=origin
     )
-    if pending and isinstance(active_document, dict) and active_document.get("source"):
+    if validated_part and isinstance(active_out, dict) and active_out.get("source"):
+        active_out = dict(active_out)
+        active_out["part_number"] = validated_part
+        active_out["part_identity_source"] = part_identity_source
+    elif (
+        validated_part
+        and query_intent in {"wiring_schematic", "fta_connection"}
+        and _HW_PART.search(validated_part)
+    ):
+        existing = dict(active_out) if isinstance(active_out, dict) else {}
+        existing["part_number"] = validated_part
+        existing["part_identity_source"] = part_identity_source
+        active_out = existing
+    if pending and isinstance(active_out, dict) and active_out.get("source"):
         # Bind the offered follow-up to the exact active manual shown to the operator.
         pending = dict(pending)
-        pending["source"] = str(active_document.get("source") or pending.get("source") or "")
-        pending["title"] = str(active_document.get("title") or pending.get("title") or "")
-        if active_document.get("part_number"):
-            pending["part_number"] = active_document.get("part_number")
-        if active_document.get("doc_no") or active_document.get("revision"):
-            pending["doc_no"] = active_document.get("doc_no") or active_document.get("revision")
-        active_document = dict(active_document)
-        active_document["pending_action"] = pending
+        pending["source"] = str(active_out.get("source") or pending.get("source") or "")
+        pending["title"] = str(active_out.get("title") or pending.get("title") or "")
+        if active_out.get("part_number"):
+            pending["part_number"] = active_out.get("part_number")
+        if active_out.get("doc_no") or active_out.get("revision"):
+            pending["doc_no"] = active_out.get("doc_no") or active_out.get("revision")
+        active_out = dict(active_out)
+        active_out["pending_action"] = pending
     # Hard fail-closed: never leave LAN/loopback corpus URLs in the emitted reply.
     reply = neutralize_lan_url_text(reply, public_origin=origin)
     assert "192.168.0.15:8789" not in reply
     assert "127.0.0.1:8789" not in reply
     assert "localhost:8789" not in reply
     assert "lan_url" not in reply.lower()
-    spoken = build_compact_spoken_document_reply(matches, query=msg)
+    spoken = build_compact_spoken_document_reply(matches, query=retrieval_msg)
     # Compact spoken is already TTS-safe prose; do not re-run chrome strippers that
     # can mangle part numbers / document identities.
     spoken = re.sub(r"\s+", " ", str(spoken or "")).strip()
-    receipt = build_retrieval_receipt(matches, query=msg)
+    receipt = build_retrieval_receipt(matches, query=retrieval_msg)
+    receipt["query_intent"] = query_intent
+    receipt["part_identity_source"] = part_identity_source
+    receipt["validated_part"] = validated_part or None
+    receipt["rejected_planning"] = rejected_planning
+    terminal_status = "document_match" if matches else "no_match"
+    reply_l = (reply or "").lower()
+    if query_intent in {"wiring_schematic", "fta_connection"}:
+        if "cannot yet verify" in reply_l or "no authoritative schematic" in reply_l:
+            terminal_status = "evidence_unavailable"
+            spoken = (
+                "No verified wiring or FTA connection diagram was found. "
+                "I will not substitute a planning manual."
+            )
+        elif "figure" in reply_l and "connection diagram" in reply_l:
+            terminal_status = "wiring_packet"
+            figs = []
+            for m in matches:
+                if isinstance(m, dict) and isinstance(m.get("figures"), list):
+                    figs.extend(m.get("figures") or [])
+            if figs:
+                f0 = figs[0]
+                spoken = compact_fta_connection_spoken(
+                    validated_part or part_identity_source,
+                    f0.get("figure"),
+                    f0.get("printed_page"),
+                ) or (
+                    f"Verified FTA connection diagram for {validated_part or part_identity_source}, "
+                    f"figure {f0.get('figure')}."
+                )
+            else:
+                spoken = re.sub(r"\s+", " ", sanitize_for_spoken_output(reply)).strip()
+    receipt["terminal_status"] = terminal_status
     return {
         "handled": True,
         "query": msg,
@@ -3787,10 +5176,20 @@ def try_document_route(
         "spoken_reply": spoken,
         "matches": matches,
         "collection": payload.get("collection") or "",
-        "active_document": active_document if active_document else None,
+        "active_document": active_out if active_out else None,
         "pending_action": pending,
         "retrieval": payload.get("retrieval") or "",
         "retrieval_receipt": receipt,
+        "query_intent": query_intent,
+        "part_identity_source": part_identity_source,
+        "validated_part": validated_part or None,
+        "rejected_planning": rejected_planning,
+        "terminal_status": terminal_status,
+        # Distinguishes a deliberate new-document ask (safe to clear a stale
+        # binding on no match) from a heuristic-only is_document_request()
+        # false-positive that named no document at all (must not clobber a
+        # valid existing active_document just because this turn found nothing).
+        "has_explicit_identity": _has_explicit_document_identity_token(msg),
         "error": None,
     }
 

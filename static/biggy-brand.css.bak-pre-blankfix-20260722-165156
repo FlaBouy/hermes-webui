@@ -1,0 +1,65 @@
+/* Biggy presentation — visual language aligned with Smedley (zeus/dark + Iwo).
+   Loaded only by the Biggy isolated WebUI extension manifest. */
+body.biggy-brand > .app-titlebar{display:none!important}
+
+.biggy-brand-header{
+  height:72px;min-height:72px;display:flex;align-items:center;justify-content:center;gap:12px;
+  padding:0 16px;border-bottom:2px solid #8b0000;background:#0d1117;position:relative;z-index:6;color:#e6edf3
+}
+.biggy-brand-ega{
+  height:60px;width:auto;display:block;mix-blend-mode:screen;
+  filter:brightness(1.1) contrast(1.05);flex:0 0 auto
+}
+.biggy-brand-heading{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:0}
+.biggy-brand-title{
+  font-size:17px;font-weight:800;letter-spacing:.10em;text-transform:uppercase;color:#e6b800;
+  text-shadow:0 0 20px rgba(230,184,0,.5),0 1px 4px rgba(0,0,0,.95);white-space:nowrap
+}
+.biggy-brand-subtitle{
+  font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#7d8590;margin-top:3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:min(720px,70vw)
+}
+.biggy-brand-status{
+  position:absolute;right:12px;top:50%;transform:translateY(-50%);
+  display:flex;flex-direction:column;align-items:flex-end;gap:3px;max-width:42%;
+}
+.biggy-brand-meta{
+  font:700 9px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em;
+  color:#c9d1d9;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%
+}
+.biggy-brand-meta span{color:#e6b800}
+
+#mainChat.biggy-brand-iwo{
+  position:relative;
+  background-image:linear-gradient(rgba(13,17,23,.30),rgba(13,17,23,.46)),url('/static/iwo.jpg');
+  background-size:cover;background-position:center;background-repeat:no-repeat
+}
+#mainChat.biggy-brand-iwo .messages-shell,
+#mainChat.biggy-brand-iwo .messages{background:transparent!important}
+#mainChat.biggy-brand-iwo #emptyState{display:none!important}
+#mainChat.biggy-brand-iwo .empty-logo,
+#mainChat.biggy-brand-iwo .empty-logo svg{display:none!important}
+#mainChat.biggy-brand-iwo .composer-wrap{background:rgba(13,17,23,.82)}
+#mainChat.biggy-brand-iwo #profileChipWrap{display:none!important}
+
+/* Readable chat contrast over Iwo */
+#mainChat.biggy-brand-iwo .msg-row[data-role="assistant"] .msg-body,
+#mainChat.biggy-brand-iwo .msg-row[data-role="user"] .msg-body{
+  background:rgba(15,15,15,.78)!important;
+  border-color:rgba(255,215,0,.18)!important;
+  backdrop-filter:blur(2px)
+}
+
+@media(max-width:1100px){
+  .biggy-brand-title{font-size:14px}
+  .biggy-brand-status{max-width:36%}
+  .biggy-brand-subtitle{max-width:min(480px,55vw)}
+}
+@media(max-width:760px){
+  .biggy-brand-header{height:58px;min-height:58px;gap:8px;padding:0 10px}
+  .biggy-brand-ega{height:44px}
+  .biggy-brand-title{font-size:11px;letter-spacing:.08em}
+  .biggy-brand-subtitle{display:none}
+  .biggy-brand-status{position:static;transform:none;align-items:flex-start}
+  .biggy-brand-meta{font-size:8px}
+}

@@ -133,13 +133,15 @@ def test_try_document_route_reply_vs_spoken_reply(monkeypatch):
     # Visible: absolute clickable sidecar URL preserved.
     assert HREF in reply
     assert "📄" in reply or "02-315.pdf" in reply
-    # Spoken: answer prose only — no URL / filename / route chrome.
-    assert "Conductor ampacity table" in spoken
+    # Spoken: compact operator prose — no URL / filename / route chrome.
+    # Snippet text stays on-screen in the markdown reply; TTS must not narrate retrieval rows.
+    assert spoken
+    assert "I found" in spoken or "manual" in spoken.lower()
     assert "02-315.pdf" not in spoken
     assert HREF not in spoken
     assert "sidecar preview" not in spoken.lower()
     assert "score=" not in spoken.lower()
-    assert spoken == docroute.sanitize_for_spoken_output(reply)
+    assert "http" not in spoken.lower()
 
 
 def test_strip_for_tts_js_matches_voice_safe_contract():
@@ -202,6 +204,8 @@ def test_smedley_distributed_voice_uses_voice_safe_text_before_speak():
     body = extract_function(src, "installSmedleyVoiceOutput")
     assert "function voiceSafeText(raw)" in body
     assert "window._stripForTTS" in body
-    assert "const spoken=voiceSafeText(text);" in body
-    assert "JSON.stringify({text:spoken})" in body
+    assert "voiceSafeText(text)" in body
     assert "JSON.stringify({text})" not in body
+    assert "require_jarvis_voice" in body
+    assert "JARVIS_VOICE_CONFIGURATION_UNAVAILABLE" in body
+    assert "dzRy05hNK3bab9ViJ0oU" in body

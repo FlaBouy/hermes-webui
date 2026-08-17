@@ -5743,6 +5743,24 @@ def _handle_extension_sidecar_proxy(
     )
 
     extension_id, proxy_path = matched
+    if (
+        method.upper() == "GET"
+        and str(extension_id or "") == "smedley-engineering"
+        and str(proxy_path or "").lstrip("/").startswith("printed-page/")
+    ):
+        from api.smedley_document_route import handle_printed_page_sidecar_get
+
+        accept = ""
+        raw_headers = getattr(handler, "headers", None)
+        if raw_headers and hasattr(raw_headers, "get"):
+            accept = str(raw_headers.get("Accept") or "")
+        return handle_printed_page_sidecar_get(
+            handler,
+            proxy_path,
+            parsed.query,
+            public_origin=_request_base_url(handler),
+            accept=accept,
+        )
     try:
         target = resolve_extension_sidecar_proxy_target(
             extension_id,
@@ -22564,6 +22582,35 @@ def _handle_chat_start(handler, body, diag=None):
             return bad(handler, "message is required")
         diag.stage("normalize_attachments") if diag else None
         attachments = _normalize_chat_attachments(body.get("attachments") or [])[:20]
+        def _stamp_local_jarvis_voice(owner_msg, spoken, assistant_msg, payload):
+            """Jarvis-addressed local replies speak Jarvis voice; never Austin fallback."""
+            try:
+                from api.ask_jarvis_route import deliver_jarvis_voice_for_local_reply as _djv
+            except Exception:
+                logger.exception("local Jarvis voice helper import failed")
+                return
+            extra = _djv(message=owner_msg, spoken_text=spoken or "")
+            if not extra:
+                return
+            for key in (
+                "assistant_identity",
+                "tts_engine",
+                "tts_voice_profile",
+                "tts_provider",
+                "fallback_used",
+                "correlation_id",
+                "jarvis_voice_bind",
+                "tts_voice_id",
+                "tts_server_queued",
+                "_tts_final_server_queued",
+                "tts_error",
+                "terminal_status",
+            ):
+                if key in extra:
+                    assistant_msg[key] = extra[key]
+                    if not str(key).startswith("_"):
+                        payload[key] = extra[key]
+
         # Hard-bind: explicit leading "Ask Jarvis:" → Jarvis PA briefing webhook.
         # PTT-style two-stage: immediate Austin ack (once), then governed Jarvis
         # Agent path unchanged; James Michael speaks the final once. No Agent bypass.
@@ -22578,6 +22625,7 @@ def _handle_chat_start(handler, body, diag=None):
                     pending_visual_text,
                     queue_ask_jarvis_smedley_tts,
                     queue_biggy_austin_ack,
+                    resolve_ask_jarvis_objective,
                     timing_path_for,
                     try_ask_jarvis,
                     wait_ack_playback_complete,
@@ -22585,7 +22633,10 @@ def _handle_chat_start(handler, body, diag=None):
             except Exception:
                 logger.exception("ask_jarvis imports failed; falling through to ordinary chat")
             else:
-                if is_ask_jarvis_command(msg):
+                ask_objective = resolve_ask_jarvis_objective(
+                    msg, getattr(s, "messages", None)
+                )
+                if ask_objective:
                     _ask_jarvis_ingress_ts = time.time()
                     corr = mint_correlation_id()
                     tpath = timing_path_for(corr)
@@ -22688,7 +22739,7 @@ def _handle_chat_start(handler, body, diag=None):
 
                     def _ask_jarvis_finish_bg(
                         session_id=sid,
-                        objective=msg,
+                        objective=ask_objective,
                         correlation_id=corr,
                         ingress_ts=_ask_jarvis_ingress_ts,
                         timing_file=str(tpath),
@@ -22997,6 +23048,62 @@ def _handle_chat_start(handler, body, diag=None):
                             "error": None,
                         },
                     )
+        # Local Jarvis greeting — text + Jarvis TTS without n8n / document-route.
+        if not attachments:
+            try:
+                from api.ask_jarvis_route import (
+                    is_jarvis_greeting as _is_jg,
+                    jarvis_greeting_reply as _jg_reply,
+                )
+            except Exception:
+                _is_jg = None
+                _jg_reply = None
+            if _is_jg and _jg_reply and _is_jg(msg):
+                reply = _jg_reply(msg)
+                spoken = reply
+                now_ts = int(time.time())
+                if not isinstance(getattr(s, "messages", None), list):
+                    s.messages = []
+                asst = {
+                    "role": "assistant",
+                    "content": reply,
+                    "timestamp": now_ts + 1,
+                    "spoken_reply": spoken,
+                    "spoken_text": spoken,
+                }
+                payload = {
+                    "session_id": s.session_id,
+                    "stream_id": None,
+                    "jarvis_greeting": True,
+                    "reply": reply,
+                    "spoken_reply": spoken,
+                    "spoken_text": spoken,
+                    "title": getattr(s, "title", None),
+                    "error": None,
+                }
+                _stamp_local_jarvis_voice(msg, spoken, asst, payload)
+                s.messages.extend(
+                    [
+                        {"role": "user", "content": msg, "timestamp": now_ts},
+                        asst,
+                    ]
+                )
+                s.pending_user_message = None
+                s.active_stream_id = None
+                if hasattr(s, "pending_started_at"):
+                    s.pending_started_at = None
+                try:
+                    s.save()
+                except Exception:
+                    logger.exception("failed to persist Jarvis greeting for %s", s.session_id)
+                    return bad(handler, "failed to persist Jarvis greeting", 500)
+                try:
+                    with LOCK:
+                        SESSIONS[s.session_id] = s
+                        SESSIONS.move_to_end(s.session_id)
+                except Exception:
+                    pass
+                return j(handler, payload)
         # A selected Word/PDF document becomes session-scoped review context.
         # Handle a paragraph/section follow-up before ordinary chat so typed
         # WebUI and pedal PTT have the same evidence-bound behavior.
@@ -23036,7 +23143,7 @@ def _handle_chat_start(handler, body, diag=None):
                 except Exception:
                     logger.exception("failed to persist active document review for %s", s.session_id)
                     return bad(handler, "failed to persist active document review", 500)
-                return j(handler, {
+                payload = {
                     "session_id": s.session_id,
                     "stream_id": None,
                     "active_document_review": True,
@@ -23046,7 +23153,13 @@ def _handle_chat_start(handler, body, diag=None):
                     "active_document": getattr(s, "active_document", None),
                     "extraction": review.get("extraction"),
                     "error": review.get("error"),
-                })
+                }
+                _stamp_local_jarvis_voice(msg, spoken, s.messages[-1], payload)
+                try:
+                    s.save()
+                except Exception:
+                    logger.exception("failed to persist active document review voice stamp for %s", s.session_id)
+                return j(handler, payload)
         if not attachments:
             try:
                 from api.smedley_document_route import try_grounded_document_excerpt
@@ -23077,12 +23190,13 @@ def _handle_chat_start(handler, body, diag=None):
             try:
                 from api.smedley_document_route import try_engineering_rag_answer
                 from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj
+                from api.ask_jarvis_route import jarvis_handoff_rest as _jhr_eng
 
                 if _is_aj(msg):
                     engineering = None
                 else:
                     engineering = try_engineering_rag_answer(
-                        msg,
+                        _jhr_eng(msg) or msg,
                         public_origin=_request_base_url(handler),
                         active_document=getattr(s, "active_document", None),
                     )
@@ -23127,9 +23241,7 @@ def _handle_chat_start(handler, body, diag=None):
                 except Exception:
                     logger.exception("failed to persist engineering RAG answer for %s", s.session_id)
                     return bad(handler, "failed to persist engineering RAG answer", 500)
-                return j(
-                    handler,
-                    {
+                payload = {
                         "session_id": s.session_id,
                         "stream_id": None,
                         "engineering_rag_answer": True,
@@ -23142,20 +23254,34 @@ def _handle_chat_start(handler, body, diag=None):
                         "pending_action": engineering.get("pending_action"),
                         "document_kind": engineering.get("document_kind"),
                         "error": engineering.get("error"),
-                    },
-                )
+                }
+                _stamp_local_jarvis_voice(msg, spoken, s.messages[-1], payload)
+                try:
+                    s.save()
+                except Exception:
+                    logger.exception("failed to persist engineering RAG Jarvis voice stamp for %s", s.session_id)
+                return j(handler, payload)
         # Smedley document-link repair: NL pull/find/link requests go through RAG
         # retrieve and emit absolute sidecar URLs — never ordinary chat / LAN URLs.
         if not attachments:
             try:
                 from api.smedley_document_route import try_document_route
                 from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj2
+                from api.ask_jarvis_route import jarvis_handoff_rest as _jhr_doc
 
                 if _is_aj2(msg):
                     routed = None
                 else:
                     routed = try_document_route(
-                        msg, public_origin=_request_base_url(handler)
+                        _jhr_doc(msg) or msg,
+                        public_origin=_request_base_url(handler),
+                        prior_validated_part=getattr(s, "validated_engineering_part", None)
+                        or (
+                            (getattr(s, "active_document", None) or {}).get("part_number")
+                            if isinstance(getattr(s, "active_document", None), dict)
+                            else None
+                        ),
+                        active_document=getattr(s, "active_document", None),
                     )
             except Exception:
                 logger.exception("smedley document route failed closed to ordinary chat")
@@ -23163,12 +23289,36 @@ def _handle_chat_start(handler, body, diag=None):
             if isinstance(routed, dict) and routed.get("handled"):
                 reply = str(routed.get("reply") or "").strip()
                 active_document = routed.get("active_document")
-                # Always replace session binding on a document-route turn so a
-                # prior manual cannot contaminate index-only or no-match replies.
+                if routed.get("validated_part"):
+                    s.validated_engineering_part = routed.get("validated_part")
+                wiring_intent = routed.get("query_intent") in {
+                    "wiring_schematic",
+                    "fta_connection",
+                }
                 if isinstance(active_document, dict) and active_document.get("source"):
+                    # Replace session binding with the newly resolved document.
                     s.active_document = active_document
-                else:
+                elif wiring_intent and routed.get("validated_part"):
+                    existing = (
+                        dict(s.active_document)
+                        if isinstance(getattr(s, "active_document", None), dict)
+                        else {}
+                    )
+                    existing["part_number"] = routed.get("validated_part")
+                    existing["part_identity_source"] = routed.get("part_identity_source")
+                    s.active_document = existing
+                elif routed.get("has_explicit_identity", True) and not wiring_intent:
+                    # A deliberate new-document ask (doc number, part number,
+                    # publication token, spec number) that found nothing is a
+                    # genuine source change/expiry -- clear the stale binding
+                    # so a prior manual cannot contaminate this no-match reply.
+                    # Wiring-intent failures keep the validated part identity.
                     s.active_document = None
+                    s.validated_engineering_part = None
+                # else: this turn named no explicit document identity at all
+                # (a generic-phrase false match, e.g. governing-guidance-shaped
+                # text that slipped past upstream checks) -- preserve whatever
+                # active_document the session already had; do not clobber it.
                 now_ts = int(time.time())
                 if not isinstance(getattr(s, "messages", None), list):
                     s.messages = []
@@ -23189,32 +23339,7 @@ def _handle_chat_start(handler, body, diag=None):
                 s.active_stream_id = None
                 if hasattr(s, "pending_started_at"):
                     s.pending_started_at = None
-                try:
-                    if not getattr(s, "title", None) or str(s.title).strip() in (
-                        "",
-                        "Untitled",
-                        "New chat",
-                    ):
-                        s.title = (msg[:64] or "Document link").strip()
-                except Exception:
-                    pass
-                try:
-                    s.save()
-                except Exception:
-                    logger.exception(
-                        "failed to persist smedley document-route turn for %s",
-                        getattr(s, "session_id", None),
-                    )
-                    return bad(handler, "failed to persist document route turn", 500)
-                try:
-                    with LOCK:
-                        SESSIONS[s.session_id] = s
-                        SESSIONS.move_to_end(s.session_id)
-                except Exception:
-                    pass
-                return j(
-                    handler,
-                    {
+                payload = {
                         "session_id": s.session_id,
                         "stream_id": None,
                         "document_route": True,
@@ -23232,8 +23357,38 @@ def _handle_chat_start(handler, body, diag=None):
                         ),
                         "retrieval_receipt": routed.get("retrieval_receipt") or None,
                         "error": routed.get("error"),
-                    },
+                }
+                _stamp_local_jarvis_voice(
+                    msg,
+                    str(routed.get("spoken_reply") or "").strip(),
+                    s.messages[-1],
+                    payload,
                 )
+                try:
+                    if not getattr(s, "title", None) or str(s.title).strip() in (
+                        "",
+                        "Untitled",
+                        "New chat",
+                    ):
+                        s.title = (msg[:64] or "Document link").strip()
+                except Exception:
+                    pass
+                payload["title"] = getattr(s, "title", None)
+                try:
+                    s.save()
+                except Exception:
+                    logger.exception(
+                        "failed to persist smedley document-route turn for %s",
+                        getattr(s, "session_id", None),
+                    )
+                    return bad(handler, "failed to persist document route turn", 500)
+                try:
+                    with LOCK:
+                        SESSIONS[s.session_id] = s
+                        SESSIONS.move_to_end(s.session_id)
+                except Exception:
+                    pass
+                return j(handler, payload)
         recovery = compression_recovery_payload_for_session(s)
         if recovery and not attachments and is_generic_continuation_intent(msg):
             return j(
@@ -23747,12 +23902,17 @@ def _handle_chat_sync(handler, body):
     # PTT Ask Jarvis must hard-bind here (pedal uses /api/chat, not /api/chat/start).
     # Detect on display_message (raw utterance) first — wrapped message may bury the cue.
     try:
-        from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj_sync
+        from api.ask_jarvis_route import (
+            is_ask_jarvis_command as _is_aj_sync,
+            resolve_ask_jarvis_objective as _resolve_aj_sync,
+        )
     except Exception:
         logger.exception("ask_jarvis sync import failed; falling through to ordinary chat")
     else:
-        if _is_aj_sync(display_msg) or _is_aj_sync(msg):
-            ask_objective = display_msg if _is_aj_sync(display_msg) else msg
+        ask_objective = _resolve_aj_sync(
+            display_msg, getattr(s, "messages", None)
+        ) or _resolve_aj_sync(msg, getattr(s, "messages", None))
+        if ask_objective:
             return _handle_ask_jarvis_sync_hard_bind(handler, s, ask_objective)
     # PTT uses this synchronous endpoint.  Once a document was selected on the
     # same session, answer paragraph/section review asks from that document's

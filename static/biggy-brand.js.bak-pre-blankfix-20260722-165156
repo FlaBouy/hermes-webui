@@ -1,0 +1,376 @@
+(() => {
+  'use strict';
+  if (window.__biggyBrandLoaded) return;
+  window.__biggyBrandLoaded = true;
+
+  const DOC_TITLE = 'Biggy — Local Fleet Coordinator';
+  const ROLE = 'Local Fleet Coordinator';
+  const BRAND = 'Biggy';
+  const PLACEHOLDER = 'Message Biggy…';
+  const IWO_CLASS = 'biggy-brand-iwo';
+  const BODY_CLASS = 'biggy-brand';
+  const EXCLUDE_SEL = 'script,style,textarea,input,select,option,pre,code,[contenteditable="true"],.messages,.messages-shell,#msgInner,.message,.msg-content,.composer-wrap,#msg,.model-select,#modelSelect,.model-picker,.biggy-brand-header';
+  const ATTRS = ['title', 'aria-label', 'placeholder', 'alt'];
+  const SCAN_SEL = ['.sidebar', '.rightpanel', '.layout', '.session-list', '.composer-footer', 'header', 'nav', 'main', '#onboardingOverlay', '#onboardingTitle', '#onboardingLead'];
+
+  const state = {
+    profile: 'biggy',
+    model: '',
+    provider: '',
+    providerLabel: '',
+    ready: false,
+  };
+  let brandingLock = false;
+  let identityTimer = null;
+
+  function esc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+
+  function el(tag, className, html) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (html !== undefined) node.innerHTML = html;
+    return node;
+  }
+
+  function activeProfileName() {
+    try {
+      if (typeof S !== 'undefined' && S && typeof S.activeProfile === 'string' && S.activeProfile.trim()) {
+        return S.activeProfile.trim().toLowerCase();
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  function isBiggyScope() {
+    const profile = activeProfileName();
+    if (profile === 'biggy') return true;
+    if (state.ready && state.profile === 'biggy') return true;
+    // Isolated Biggy WebUI may boot with S.activeProfile still at the default
+    // placeholder for a tick; allow activation once profiles API confirms.
+    return false;
+  }
+
+  function brandVisibleText(value) {
+    if (typeof value !== 'string' || !value || !/hermes/i.test(value)) return value;
+    return value
+      .replace(/\bHERMES\b/g, 'BIGGY')
+      .replace(/\bHermes\b/g, 'Biggy')
+      .replace(/\bhermes\b/g, 'biggy');
+  }
+
+  function providerLabel(id) {
+    const raw = String(id || '').trim();
+    if (!raw) return '';
+    const key = raw.toLowerCase();
+    if (key === 'lmstudio' || key === 'lm-studio' || key === 'lm_studio') return 'LM Studio';
+    if (key === 'openai') return 'OpenAI';
+    if (key === 'anthropic') return 'Anthropic';
+    if (key === 'custom' || key.startsWith('custom:')) return 'Custom';
+    return raw;
+  }
+
+  function isExcluded(node) {
+    if (!node) return true;
+    if (node.nodeType === Node.TEXT_NODE) return isExcluded(node.parentElement);
+    if (node.nodeType !== Node.ELEMENT_NODE) return true;
+    return !!node.closest(EXCLUDE_SEL);
+  }
+
+  function withBrandingLock(fn) {
+    if (brandingLock) return;
+    brandingLock = true;
+    try { fn(); } finally { brandingLock = false; }
+  }
+
+  function brandAttributes(element) {
+    if (!element || element.nodeType !== Node.ELEMENT_NODE || isExcluded(element)) return;
+    ATTRS.forEach((attr) => {
+      if (!element.hasAttribute(attr)) return;
+      const raw = element.getAttribute(attr);
+      const next = brandVisibleText(raw);
+      if (next !== raw) element.setAttribute(attr, next);
+    });
+  }
+
+  function brandTextNodes(root) {
+    if (!root) return;
+    const hits = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        if (!node.nodeValue || !/hermes/i.test(node.nodeValue)) return NodeFilter.FILTER_REJECT;
+        if (isExcluded(node)) return NodeFilter.FILTER_REJECT;
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    while (walker.nextNode()) hits.push(walker.currentNode);
+    hits.forEach((node) => {
+      const next = brandVisibleText(node.nodeValue);
+      if (next !== node.nodeValue) node.nodeValue = next;
+    });
+  }
+
+  function brandSubtree(root) {
+    if (!root) return;
+    if (root.nodeType === Node.ELEMENT_NODE) {
+      brandAttributes(root);
+      brandTextNodes(root);
+      return;
+    }
+    if (root.nodeType === Node.TEXT_NODE) {
+      brandTextNodes(root.parentElement || document.body);
+    }
+  }
+
+  function brandingScanRoots() {
+    const roots = [];
+    SCAN_SEL.forEach((selector) => {
+      document.querySelectorAll(selector).forEach((node) => roots.push(node));
+    });
+    if (!roots.length && document.body) roots.push(document.body);
+    return roots;
+  }
+
+  function installDocumentTitle() {
+    document.title = DOC_TITLE;
+    const apple = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    if (apple) apple.setAttribute('content', BRAND);
+  }
+
+  function installComposerBranding() {
+    const composer = document.getElementById('msg');
+    if (!composer) return;
+    const apply = () => {
+      if (composer.getAttribute('placeholder') !== PLACEHOLDER) {
+        composer.setAttribute('placeholder', PLACEHOLDER);
+      }
+    };
+    apply();
+    new MutationObserver(apply).observe(composer, { attributes: true, attributeFilter: ['placeholder'] });
+  }
+
+  function forceChromeLabels() {
+    const title = document.getElementById('appTitlebarTitle');
+    if (title && title.textContent.trim() !== BRAND) title.textContent = BRAND;
+
+    const profileLabel = document.getElementById('profileChipLabel');
+    if (profileLabel && profileLabel.textContent.trim().toLowerCase() === 'default') {
+      profileLabel.textContent = 'biggy';
+    }
+    const titleProfile = document.getElementById('titlebarProfileLabel');
+    if (titleProfile && titleProfile.textContent.trim().toLowerCase() === 'default') {
+      titleProfile.textContent = 'biggy';
+    }
+
+    try {
+      if (typeof window !== 'undefined') {
+        window._botName = BRAND;
+      }
+      if (typeof S !== 'undefined' && S) {
+        if (!S.activeProfile || S.activeProfile === 'default') {
+          S.activeProfile = 'biggy';
+          S.activeProfileIsDefault = false;
+        }
+      }
+    } catch (_) {}
+
+    const onboardingTitle = document.getElementById('onboardingTitle');
+    if (onboardingTitle) onboardingTitle.textContent = 'Welcome to Biggy';
+    const onboardingLead = document.getElementById('onboardingLead');
+    if (onboardingLead) {
+      onboardingLead.textContent =
+        'A quick guided setup will check your Biggy install, choose a workspace and model, and optionally protect the app with a password.';
+    }
+  }
+
+  function removeCaduceus() {
+    document.querySelectorAll('#emptyState .empty-logo, #emptyState svg[aria-label*="caduceus" i]').forEach((node) => {
+      node.remove();
+    });
+  }
+
+  function updateIdentityChip() {
+    const meta = document.getElementById('biggyBrandMeta');
+    const sub = document.getElementById('biggyBrandSubtitle');
+    if (!meta && !sub) return;
+    const model = state.model || '—';
+    const provider = state.providerLabel || providerLabel(state.provider) || '—';
+    const profile = state.profile || 'biggy';
+    if (sub) {
+      sub.textContent = `${ROLE} · PROFILE ${profile} · ${provider} · ${model}`;
+    }
+    if (meta) {
+      meta.innerHTML =
+        `<span>PROFILE</span> ${esc(profile)} · <span>PROVIDER</span> ${esc(provider)} · <span>MODEL</span> ${esc(model)}`;
+    }
+  }
+
+  function syncModelFromDom() {
+    const sel = document.getElementById('modelSelect');
+    if (!sel || !sel.value) return;
+    if (!state.model || state.model === 'Unknown' || /claude|gpt-4|gpt-5|sonnet|opus/i.test(state.model)) {
+      // Prefer live picker when backend model is missing/stale cloud default.
+      if (sel.value && !/unknown/i.test(sel.value)) state.model = sel.value;
+    }
+    const opt = sel.selectedOptions && sel.selectedOptions[0];
+    const dataProvider = opt && (opt.getAttribute('data-provider') || opt.dataset.provider);
+    if (dataProvider && (!state.provider || state.provider === 'Unknown')) {
+      state.provider = dataProvider;
+      state.providerLabel = providerLabel(dataProvider);
+    }
+  }
+
+  async function refreshIdentity() {
+    try {
+      const profiles = typeof window.api === 'function'
+        ? await window.api('/api/profiles')
+        : await fetch('/api/profiles', { cache: 'no-store' }).then((r) => r.json());
+      if (profiles && profiles.active) {
+        state.profile = String(profiles.active).trim() || 'biggy';
+      }
+      const active = Array.isArray(profiles && profiles.profiles)
+        ? profiles.profiles.find((p) => p && p.is_active) || profiles.profiles[0]
+        : null;
+      if (active) {
+        if (active.model) state.model = String(active.model);
+        if (active.provider) {
+          state.provider = String(active.provider);
+          state.providerLabel = providerLabel(active.provider);
+        }
+      }
+      if (profiles && profiles.single_profile_mode) state.ready = true;
+    } catch (_) {}
+
+    try {
+      const onboard = typeof window.api === 'function'
+        ? await window.api('/api/onboarding/status')
+        : await fetch('/api/onboarding/status', { cache: 'no-store' }).then((r) => r.json());
+      const system = onboard && onboard.system ? onboard.system : {};
+      if (system.current_model) state.model = String(system.current_model);
+      if (system.current_provider) {
+        state.provider = String(system.current_provider);
+        state.providerLabel = providerLabel(system.current_provider);
+      }
+      state.ready = true;
+    } catch (_) {}
+
+    try {
+      const settings = typeof window.api === 'function'
+        ? await window.api('/api/settings')
+        : await fetch('/api/settings', { cache: 'no-store' }).then((r) => r.json());
+      if (settings && settings.default_model_provider && !state.provider) {
+        state.provider = String(settings.default_model_provider);
+        state.providerLabel = providerLabel(settings.default_model_provider);
+      }
+      if (settings && settings.bot_name && /hermes/i.test(String(settings.bot_name))) {
+        // Keep UI on Biggy even if settings still say Hermes until saved.
+        window._botName = BRAND;
+      } else if (settings && settings.bot_name) {
+        window._botName = String(settings.bot_name);
+      } else {
+        window._botName = BRAND;
+      }
+    } catch (_) {
+      window._botName = BRAND;
+    }
+
+    try {
+      if (window._defaultModel && state.model) window._defaultModel = state.model;
+      if (window._activeProvider && state.provider) window._activeProvider = state.provider;
+      if (typeof S !== 'undefined' && S && state.profile === 'biggy') {
+        S.activeProfile = 'biggy';
+        S.activeProfileIsDefault = false;
+      }
+    } catch (_) {}
+
+    syncModelFromDom();
+    updateIdentityChip();
+    forceChromeLabels();
+  }
+
+  function makeHeader() {
+    const header = el('div', 'biggy-brand-header');
+    header.innerHTML =
+      `<img class="biggy-brand-ega" src="/static/ega.jpg" alt="EGA">` +
+      `<div class="biggy-brand-heading">` +
+      `<div class="biggy-brand-title">BIGGY</div>` +
+      `<div class="biggy-brand-subtitle" id="biggyBrandSubtitle">${esc(ROLE)}</div>` +
+      `</div>` +
+      `<img class="biggy-brand-ega" src="/static/ega.jpg" alt="EGA">` +
+      `<div class="biggy-brand-status"><div class="biggy-brand-meta" id="biggyBrandMeta">PROFILE biggy</div></div>`;
+    return header;
+  }
+
+  function installBrandingObserver() {
+    installDocumentTitle();
+    withBrandingLock(() => brandingScanRoots().forEach(brandSubtree));
+    const observer = new MutationObserver((mutations) => {
+      withBrandingLock(() => {
+        mutations.forEach((mutation) => {
+          if (mutation.type === 'characterData') {
+            brandSubtree(mutation.target);
+            return;
+          }
+          if (mutation.type === 'attributes' && mutation.target) {
+            brandAttributes(mutation.target);
+            return;
+          }
+          mutation.addedNodes.forEach((node) => brandSubtree(node));
+        });
+        forceChromeLabels();
+        removeCaduceus();
+      });
+    });
+    observer.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      characterData: true,
+      attributes: true,
+      attributeFilter: ATTRS,
+    });
+  }
+
+  function applyShell() {
+    const mainChat = document.getElementById('mainChat');
+    if (!mainChat) return false;
+    document.body.classList.add(BODY_CLASS);
+    mainChat.classList.add(IWO_CLASS);
+    if (!document.querySelector('.biggy-brand-header')) {
+      mainChat.insertBefore(makeHeader(), mainChat.firstChild);
+    }
+    removeCaduceus();
+    installComposerBranding();
+    installBrandingObserver();
+    forceChromeLabels();
+    updateIdentityChip();
+    return true;
+  }
+
+  function start() {
+    // Defer until we know this instance is Biggy (or isolated biggy).
+    const tryStart = async () => {
+      await refreshIdentity();
+      if (!(isBiggyScope() || state.profile === 'biggy')) {
+        // Not Biggy — leave stock Hermes UI alone.
+        return;
+      }
+      if (!applyShell()) {
+        setTimeout(tryStart, 50);
+        return;
+      }
+      await refreshIdentity();
+      if (identityTimer) clearInterval(identityTimer);
+      identityTimer = setInterval(refreshIdentity, 15000);
+    };
+    tryStart();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();

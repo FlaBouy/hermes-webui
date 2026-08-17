@@ -1,0 +1,111 @@
+/* Biggy presentation — visual language aligned with Smedley (zeus/dark + Iwo).
+   Loaded only by the Biggy isolated WebUI extension manifest. */
+body.biggy-brand > .app-titlebar{display:none!important}
+
+.biggy-brand-header{
+  position:relative;z-index:6;
+  height:72px;min-height:72px;
+  border-bottom:2px solid #8b0000;background:#0d1117;
+  color:#e6edf3;box-sizing:border-box;
+}
+.biggy-brand-cluster{
+  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+  display:flex;align-items:center;justify-content:center;gap:14px;
+  max-width:calc(100% - 430px);
+}
+.biggy-brand-ega{
+  height:56px;width:auto;display:block;mix-blend-mode:screen;
+  filter:brightness(1.1) contrast(1.05);flex:0 0 auto
+}
+.biggy-brand-heading{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  min-width:0;text-align:center;
+}
+.biggy-brand-title{
+  font-size:17px;font-weight:800;letter-spacing:.10em;text-transform:uppercase;color:#e6b800;
+  text-shadow:0 0 20px rgba(230,184,0,.5),0 1px 4px rgba(0,0,0,.95);white-space:nowrap
+}
+.biggy-brand-subtitle{
+  font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#7d8590;margin-top:3px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:min(420px,46vw)
+}
+.biggy-brand-controls{
+  position:absolute;left:14px;top:50%;transform:translateY(-50%);
+  display:flex;align-items:center;gap:8px;z-index:2;
+}
+.biggy-brand-controls button{
+  flex:0 0 auto;cursor:pointer;
+  padding:5px 10px;border:1px solid #30363d;border-radius:4px;
+  background:#21262d;color:#7d8590;
+  font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+  letter-spacing:.07em;text-transform:uppercase;
+}
+.biggy-brand-controls button.ok{border-color:#2f7d42;color:#55c96b;background:#0d1a10}
+.biggy-brand-controls button.active{border-color:#b0882e;color:#f0c14b;background:#1a1200}
+.biggy-brand-controls button.down{border-color:#8b3030;color:#f06b64;background:#1a0d0d}
+.biggy-brand-controls #biggyOpenSmedley{
+  border-color:#6e3b1e;color:#e6b800;background:#1a1208;
+}
+.biggy-brand-controls #biggyOpenSmedley:hover{
+  border-color:#e6b800;color:#f0c14b;background:#24180a;
+}
+.biggy-brand-header-note{
+  position:absolute;left:0;top:calc(100% + 4px);
+  font:700 8px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
+  letter-spacing:.04em;color:#f0c14b;white-space:nowrap;
+  text-shadow:0 1px 2px rgba(0,0,0,.85);
+}
+.biggy-brand-status{
+  position:absolute;right:14px;top:50%;transform:translateY(-50%);
+  display:flex;flex-direction:column;align-items:flex-end;justify-content:center;
+  width:190px;max-width:calc(50% - 140px);
+  pointer-events:none;
+}
+.biggy-brand-meta{
+  font:700 8px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.04em;
+  color:#c9d1d9;text-transform:uppercase;text-align:right;
+  max-width:100%;
+}
+.biggy-brand-meta div{
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;
+}
+.biggy-brand-meta span{color:#e6b800}
+
+#mainChat.biggy-brand-iwo{
+  position:relative;
+  background-image:linear-gradient(rgba(13,17,23,.30),rgba(13,17,23,.46)),url('/static/iwo.jpg');
+  background-size:cover;background-position:center;background-repeat:no-repeat
+}
+#mainChat.biggy-brand-iwo .messages-shell,
+#mainChat.biggy-brand-iwo .messages{background:transparent!important}
+#mainChat.biggy-brand-iwo #emptyState{display:none!important}
+#mainChat.biggy-brand-iwo .empty-logo,
+#mainChat.biggy-brand-iwo .empty-logo svg{display:none!important}
+#mainChat.biggy-brand-iwo .composer-wrap{background:rgba(13,17,23,.82)}
+#mainChat.biggy-brand-iwo #profileChipWrap{display:none!important}
+
+/* Readable chat contrast over Iwo */
+#mainChat.biggy-brand-iwo .msg-row[data-role="assistant"] .msg-body,
+#mainChat.biggy-brand-iwo .msg-row[data-role="user"] .msg-body{
+  background:rgba(15,15,15,.78)!important;
+  border-color:rgba(255,215,0,.18)!important;
+  backdrop-filter:blur(2px)
+}
+
+@media(max-width:1100px){
+  .biggy-brand-title{font-size:14px}
+  .biggy-brand-cluster{max-width:calc(100% - 390px);gap:12px}
+  .biggy-brand-status{width:160px}
+}
+@media(max-width:760px){
+  .biggy-brand-header{height:58px;min-height:58px}
+  .biggy-brand-cluster{gap:8px;max-width:calc(100% - 200px)}
+  .biggy-brand-ega{height:40px}
+  .biggy-brand-title{font-size:11px;letter-spacing:.08em}
+  .biggy-brand-subtitle{display:none}
+  .biggy-brand-controls{left:8px;gap:6px}
+  .biggy-brand-controls button{padding:4px 7px;font-size:8px}
+  .biggy-brand-status{right:8px;width:100px}
+  .biggy-brand-meta{font-size:7px;line-height:1.25}
+  .biggy-brand-header-note{display:none}
+}

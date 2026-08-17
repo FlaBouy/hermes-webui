@@ -1,0 +1,458 @@
+(() => {
+  'use strict';
+  if (window.__biggyBrandLoaded) return;
+  window.__biggyBrandLoaded = true;
+
+  const DOC_TITLE = 'Biggy — Local Fleet Coordinator';
+  const ROLE = 'Local Fleet Coordinator';
+  const BRAND = 'Biggy';
+  const PLACEHOLDER = 'Message Biggy…';
+  const IWO_CLASS = 'biggy-brand-iwo';
+  const BODY_CLASS = 'biggy-brand';
+  const PTT_PROXY = '/api/extensions/biggy-brand/sidecar';
+
+  const state = {
+    profile: 'biggy',
+    model: '',
+    provider: '',
+    providerLabel: '',
+    ready: false,
+  };
+  let identityTimer = null;
+  let started = false;
+  let pttInstalled = false;
+
+  function esc(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+  }
+
+  function el(tag, className, html) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (html !== undefined) node.innerHTML = html;
+    return node;
+  }
+
+  function providerLabel(id) {
+    const raw = String(id || '').trim();
+    if (!raw) return '';
+    const key = raw.toLowerCase();
+    if (key === 'lmstudio' || key === 'lm-studio' || key === 'lm_studio') return 'LM Studio';
+    if (key === 'openai') return 'OpenAI';
+    if (key === 'anthropic') return 'Anthropic';
+    if (key === 'custom' || key.startsWith('custom:')) return 'Custom';
+    return raw;
+  }
+
+  function brandVisibleText(value) {
+    if (typeof value !== 'string' || !value || !/hermes/i.test(value)) return value;
+    return value
+      .replace(/\bHERMES\b/g, 'BIGGY')
+      .replace(/\bHermes\b/g, 'Biggy')
+      .replace(/\bhermes\b/g, 'biggy');
+  }
+
+  function isBiggyInstance() {
+    if (state.ready && state.profile === 'biggy') return true;
+    try {
+      if (typeof S !== 'undefined' && S && String(S.activeProfile || '').toLowerCase() === 'biggy') {
+        return true;
+      }
+    } catch (_) {}
+    return state.profile === 'biggy';
+  }
+
+  function installDocumentTitle() {
+    document.title = DOC_TITLE;
+    const apple = document.querySelector('meta[name="apple-mobile-web-app-title"]');
+    if (apple) apple.setAttribute('content', BRAND);
+  }
+
+  function installComposerBranding() {
+    const composer = document.getElementById('msg');
+    if (!composer) return;
+    if (composer.getAttribute('placeholder') !== PLACEHOLDER) {
+      composer.setAttribute('placeholder', PLACEHOLDER);
+    }
+  }
+
+  function forceChromeLabels() {
+    const title = document.getElementById('appTitlebarTitle');
+    if (title && title.textContent.trim() !== BRAND) title.textContent = BRAND;
+
+    const profileLabel = document.getElementById('profileChipLabel');
+    if (profileLabel && profileLabel.textContent.trim().toLowerCase() === 'default') {
+      profileLabel.textContent = 'biggy';
+    }
+    const titleProfile = document.getElementById('titlebarProfileLabel');
+    if (titleProfile && titleProfile.textContent.trim().toLowerCase() === 'default') {
+      titleProfile.textContent = 'biggy';
+    }
+
+    try {
+      window._botName = BRAND;
+      if (typeof S !== 'undefined' && S) {
+        if (!S.activeProfile || S.activeProfile === 'default') {
+          S.activeProfile = 'biggy';
+          S.activeProfileIsDefault = false;
+        }
+      }
+    } catch (_) {}
+
+    const onboardingTitle = document.getElementById('onboardingTitle');
+    if (onboardingTitle) {
+      const next = brandVisibleText(onboardingTitle.textContent || '');
+      if (next && next !== onboardingTitle.textContent) onboardingTitle.textContent = 'Welcome to Biggy';
+      else if (/hermes/i.test(onboardingTitle.textContent || '')) onboardingTitle.textContent = 'Welcome to Biggy';
+    }
+    const onboardingLead = document.getElementById('onboardingLead');
+    if (onboardingLead && /hermes/i.test(onboardingLead.textContent || '')) {
+      onboardingLead.textContent =
+        'A quick guided setup will check your Biggy install, choose a workspace and model, and optionally protect the app with a password.';
+    }
+
+    [
+      'appTitlebarTitle',
+      'offlineAutorefresh',
+      'agentHealthTitle',
+    ].forEach((id) => {
+      const node = document.getElementById(id);
+      if (!node || !node.firstChild || node.firstChild.nodeType !== Node.TEXT_NODE) {
+        if (node && typeof node.textContent === 'string' && /hermes/i.test(node.textContent)) {
+          node.textContent = brandVisibleText(node.textContent);
+        }
+        return;
+      }
+      const next = brandVisibleText(node.textContent);
+      if (next !== node.textContent) node.textContent = next;
+    });
+  }
+
+  function removeCaduceus() {
+    document.querySelectorAll('#emptyState .empty-logo').forEach((node) => node.remove());
+  }
+
+  function updateIdentityChip() {
+    const meta = document.getElementById('biggyBrandMeta');
+    const sub = document.getElementById('biggyBrandSubtitle');
+    if (!meta && !sub) return;
+    const model = state.model || '—';
+    const provider = state.providerLabel || providerLabel(state.provider) || '—';
+    const profile = state.profile || 'biggy';
+    if (sub) sub.textContent = ROLE;
+    if (meta) {
+      meta.innerHTML =
+        `<div><span>PROFILE</span> ${esc(profile)}</div>` +
+        `<div><span>PROVIDER</span> ${esc(provider)}</div>` +
+        `<div><span>MODEL</span> ${esc(model)}</div>`;
+    }
+  }
+
+  function syncModelFromDom() {
+    const sel = document.getElementById('modelSelect');
+    if (!sel || !sel.value) return;
+    if (!state.model || state.model === 'Unknown' || /claude|gpt-4|gpt-5|sonnet|opus/i.test(state.model)) {
+      if (sel.value && !/unknown/i.test(sel.value)) state.model = sel.value;
+    }
+    const opt = sel.selectedOptions && sel.selectedOptions[0];
+    const dataProvider = opt && (opt.getAttribute('data-provider') || opt.dataset.provider);
+    if (dataProvider && (!state.provider || state.provider === 'Unknown')) {
+      state.provider = dataProvider;
+      state.providerLabel = providerLabel(dataProvider);
+    }
+  }
+
+  async function jsonGet(path) {
+    if (typeof window.api === 'function') return window.api(path);
+    const response = await fetch(path, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    return response.json();
+  }
+
+  async function proxyJson(path, options = {}) {
+    const url = `${PTT_PROXY}${path}`;
+    if (typeof window.api === 'function' && url.startsWith('/api/')) {
+      return window.api(url, options);
+    }
+    const response = await fetch(url, { ...options, cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    }
+    return response.json();
+  }
+
+  function currentHermesSessionId() {
+    try {
+      const activeRow = document.querySelector('.session-item.active[data-sid]');
+      const activeSid = activeRow && activeRow.dataset && activeRow.dataset.sid;
+      if (activeSid && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(activeSid)) return activeSid;
+    } catch (_) {}
+    try {
+      if (typeof S !== 'undefined' && S && S.session && S.session.session_id) {
+        return String(S.session.session_id);
+      }
+    } catch (_) {}
+    try {
+      const stored = localStorage.getItem('hermes-webui-session');
+      if (stored && /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(stored)) return stored;
+    } catch (_) {}
+    return '';
+  }
+
+  function installPttBridge(header) {
+    if (pttInstalled || !header) return;
+    const ptt = header.querySelector('#biggyPtt');
+    const routeBtn = header.querySelector('#biggyAudioRoute');
+    const note = header.querySelector('#biggyHeaderNote');
+    if (!ptt || !routeBtn) return;
+    pttInstalled = true;
+
+    const SESSION_REPOST_INTERVAL_MS = 10000;
+    let postedSession = '';
+    let lastSessionPostAt = 0;
+    let lastCompletionTimestamp = 0;
+    let completionBaselineEstablished = false;
+    let routePending = false;
+
+    function applyAudioRouteStatus(status) {
+      const active = String(status.active_route || 'room').toLowerCase();
+      const desired = String(status.desired_route || active).toLowerCase();
+      const switching = !!status.route_switching || routePending;
+      const headsetAvailable = !!status.headset_available;
+      routeBtn.textContent = active === 'headset' ? 'HEADSET' : 'ROOM';
+      routeBtn.classList.remove('ok', 'active', 'down');
+      if (!status.pedal_alive) {
+        routeBtn.classList.add('down');
+      } else if (switching) {
+        routeBtn.classList.add('active');
+        if (note) note.textContent = `Switching to ${desired === 'headset' ? 'Headset' : 'Room'}…`;
+      } else if (desired === 'headset' && !headsetAvailable) {
+        routeBtn.classList.add('down');
+        if (note) note.textContent = 'Headset is not connected to Smedley.';
+      } else {
+        routeBtn.classList.add('ok');
+        if (note && /^Switching to (?:Headset|Room)…$/.test(note.textContent || '')) {
+          note.textContent = '';
+        }
+      }
+    }
+
+    routeBtn.addEventListener('click', async () => {
+      if (routePending) return;
+      let status;
+      try {
+        status = await proxyJson('/ptt/status');
+      } catch (_) {
+        if (note) note.textContent = 'PTT sidecar offline.';
+        return;
+      }
+      const active = String(status.active_route || 'room').toLowerCase();
+      const target = active === 'headset' ? 'room' : 'headset';
+      if (target === 'headset' && !status.headset_available) {
+        if (note) note.textContent = 'Headset is not connected to Smedley.';
+        applyAudioRouteStatus(status);
+        return;
+      }
+      routePending = true;
+      applyAudioRouteStatus({ ...status, route_switching: true });
+      try {
+        await proxyJson('/ptt/audio-route', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ route: target }),
+        });
+      } catch (_) {
+        if (note) note.textContent = 'Audio route request failed.';
+      } finally {
+        routePending = false;
+      }
+    });
+
+    function applyPttStatus(status) {
+      const pedalAlive = !!status.pedal_alive;
+      const phase = String(status.phase || 'idle');
+      const busy = pedalAlive && ['listening', 'processing', 'speaking'].includes(phase);
+      ptt.classList.remove('ok', 'active', 'down');
+      if (!pedalAlive) ptt.classList.add('down');
+      else if (busy) ptt.classList.add('active');
+      else ptt.classList.add('ok');
+      applyAudioRouteStatus(status);
+    }
+
+    async function syncActiveSession() {
+      const sid = currentHermesSessionId();
+      if (!sid) return;
+      const now = Date.now();
+      const sessionChanged = sid !== postedSession;
+      const heartbeatStale = (now - lastSessionPostAt) >= SESSION_REPOST_INTERVAL_MS;
+      if (!sessionChanged && !heartbeatStale) return;
+      try {
+        await proxyJson('/ptt/active-session', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sid }),
+        });
+        postedSession = sid;
+        lastSessionPostAt = now;
+      } catch (_) {}
+    }
+
+    async function pollPttStatus() {
+      await syncActiveSession();
+      try {
+        const status = await proxyJson('/ptt/status');
+        applyPttStatus(status);
+        const completionTs = Number(status.completion_timestamp || 0);
+        const completionSid = String(status.completion_session_id || '');
+        if (!completionBaselineEstablished) {
+          lastCompletionTimestamp = completionTs;
+          completionBaselineEstablished = true;
+          return;
+        }
+        if (completionTs > lastCompletionTimestamp) {
+          lastCompletionTimestamp = completionTs;
+          const sid = currentHermesSessionId() || completionSid;
+          if (sid && typeof window.loadSession === 'function') {
+            try {
+              await window.loadSession(sid, {
+                force: true,
+                externalRefreshReason: 'ptt-completion',
+              });
+            } catch (_) {}
+          }
+        }
+      } catch (_) {
+        ptt.classList.remove('ok', 'active');
+        ptt.classList.add('down');
+        routeBtn.classList.remove('ok', 'active');
+        routeBtn.classList.add('down');
+      }
+    }
+
+    pollPttStatus();
+    setInterval(() => { pollPttStatus().catch(() => {}); }, 1500);
+  }
+
+  async function refreshIdentity() {
+    try {
+      const profiles = await jsonGet('/api/profiles');
+      if (profiles && profiles.active) state.profile = String(profiles.active).trim() || 'biggy';
+      const active = Array.isArray(profiles && profiles.profiles)
+        ? profiles.profiles.find((p) => p && p.is_active) || profiles.profiles[0]
+        : null;
+      if (active) {
+        if (active.model) state.model = String(active.model);
+        if (active.provider) {
+          state.provider = String(active.provider);
+          state.providerLabel = providerLabel(active.provider);
+        }
+      }
+      if (profiles && profiles.single_profile_mode) state.ready = true;
+    } catch (_) {}
+
+    try {
+      const onboard = await jsonGet('/api/onboarding/status');
+      const system = onboard && onboard.system ? onboard.system : {};
+      if (system.current_model) state.model = String(system.current_model);
+      if (system.current_provider) {
+        state.provider = String(system.current_provider);
+        state.providerLabel = providerLabel(system.current_provider);
+      }
+      state.ready = true;
+    } catch (_) {}
+
+    try {
+      const settings = await jsonGet('/api/settings');
+      if (settings && settings.default_model_provider && !state.provider) {
+        state.provider = String(settings.default_model_provider);
+        state.providerLabel = providerLabel(settings.default_model_provider);
+      }
+      window._botName = BRAND;
+    } catch (_) {
+      window._botName = BRAND;
+    }
+
+    try {
+      if (state.model) window._defaultModel = state.model;
+      if (state.provider) window._activeProvider = state.provider;
+      if (typeof S !== 'undefined' && S && state.profile === 'biggy') {
+        S.activeProfile = 'biggy';
+        S.activeProfileIsDefault = false;
+      }
+    } catch (_) {}
+
+    syncModelFromDom();
+    updateIdentityChip();
+    forceChromeLabels();
+    installComposerBranding();
+    removeCaduceus();
+  }
+
+  function makeHeader() {
+    const header = el('div', 'biggy-brand-header');
+    header.innerHTML =
+      `<div class="biggy-brand-cluster">` +
+      `<img class="biggy-brand-ega" src="/static/ega.jpg" alt="EGA">` +
+      `<div class="biggy-brand-heading">` +
+      `<div class="biggy-brand-title">BIGGY</div>` +
+      `<div class="biggy-brand-subtitle" id="biggyBrandSubtitle">${esc(ROLE)}</div>` +
+      `</div>` +
+      `<img class="biggy-brand-ega" src="/static/ega.jpg" alt="EGA">` +
+      `</div>` +
+      `<div class="biggy-brand-controls">` +
+      `<button id="biggyPtt" type="button" data-testid="biggy-ptt" title="Foot-pedal PTT status">● PTT</button>` +
+      `<button id="biggyAudioRoute" type="button" data-testid="biggy-audio-route" title="Toggle headset / room audio">ROOM</button>` +
+      `<div id="biggyHeaderNote" class="biggy-brand-header-note"></div>` +
+      `</div>` +
+      `<div class="biggy-brand-status" aria-label="Biggy identity">` +
+      `<div class="biggy-brand-meta" id="biggyBrandMeta">PROFILE biggy</div>` +
+      `</div>`;
+    return header;
+  }
+
+  function applyShell() {
+    const mainChat = document.getElementById('mainChat');
+    if (!mainChat) return false;
+    document.body.classList.add(BODY_CLASS);
+    mainChat.classList.add(IWO_CLASS);
+    document.querySelectorAll('.biggy-brand-header').forEach((node) => node.remove());
+    pttInstalled = false;
+    const header = makeHeader();
+    mainChat.insertBefore(header, mainChat.firstChild);
+    installPttBridge(header);
+    installDocumentTitle();
+    installComposerBranding();
+    forceChromeLabels();
+    removeCaduceus();
+    updateIdentityChip();
+    return true;
+  }
+
+  async function tryStart() {
+    if (started) return;
+    await refreshIdentity();
+    if (!isBiggyInstance()) return;
+    if (!applyShell()) {
+      setTimeout(() => { tryStart().catch(() => {}); }, 100);
+      return;
+    }
+    started = true;
+    await refreshIdentity();
+    if (identityTimer) clearInterval(identityTimer);
+    identityTimer = setInterval(() => {
+      refreshIdentity().catch(() => {});
+    }, 15000);
+  }
+
+  function start() {
+    tryStart().catch(() => {});
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start, { once: true });
+  } else {
+    start();
+  }
+})();

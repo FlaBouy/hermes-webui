@@ -31,6 +31,25 @@ _ASK_JARVIS_LEADING = re.compile(r"^\s*ask\s+jarvis\s*:\s*", re.IGNORECASE)
 _ASK_JARVIS_EMBEDDED = re.compile(
     r"(?i)(?:^|[\s,;])(?:ask(?:ed|ing)?|tell|have)\s+jarvis\b(?:\s*:|\s+to\b|\s+for\b)"
 )
+# Broader owner-to-Jarvis address for *voice identity only* (does not hard-bind n8n).
+_JARVIS_ADDRESSED = re.compile(
+    r"(?i)(?:^|[\s,;])(?:ask(?:ed|ing)?|tell|have)\s+jarvis\b"
+)
+_JARVIS_GREETING = re.compile(
+    r"(?i)^\s*(?:hey\s+smedley\s*[,:.!]?\s+)?good\s+(morning|afternoon|evening)\s*,?\s*jarvis\b"
+)
+# Production handoff grammar. Optional "Hey Smedley" prefix. Remaining request is group rest.
+_JARVIS_HANDOFF = re.compile(
+    r"(?is)^\s*(?:hey\s+smedley\s*[,:.!]?\s+)?"
+    r"(?:"
+    r"let\s+jarvis\s+know(?:\s+that)?\s+"
+    r"|tell\s+jarvis(?:\s+that)?\s+"
+    r"|ask\s+jarvis(?:\s+to|\s+for|:)\s*"
+    r"|ask\s+jarvis\s+"
+    r"|jarvis\s*[,:]\s+"
+    r")"
+    r"(?P<rest>\S.*?)\s*$"
+)
 # Role/meta talk about Ask Jarvis without a concrete travel/task handoff.
 _ASK_JARVIS_META_ROLE = re.compile(
     r"(?i)\b(?:you will|you'll|biggy(?:'s)? role|point\s*3|number\s*3|conduit|hand(?:ing)?\s+(?:the\s+)?prompt)\b.*\bask(?:ed|ing)?\s+jarvis\b"
@@ -66,6 +85,8 @@ _ASK_JARVIS_SCRIPT = Path(
 # Credential remains ELEVENLABS_API_KEY in env — never embedded here.
 _JARVIS_ELEVENLABS_VOICE_ID = "dzRy05hNK3bab9ViJ0oU"
 _JARVIS_TTS_ENGINE = "elevenlabs"
+_JARVIS_VOICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,64}$")
+JARVIS_VOICE_CONFIGURATION_UNAVAILABLE = "JARVIS_VOICE_CONFIGURATION_UNAVAILABLE"
 _SMEDLEY_SPEAK_URL = "http://127.0.0.1:5004/speak"
 _TIMING_DIR = Path("/Users/rick/jarvis-n8n/validation/ask-jarvis-timing")
 
@@ -83,6 +104,26 @@ _ACK_DONE: dict[str, _threading.Event] = {}
 _ACK_DONE_AT: dict[str, float] = {}
 _FINAL_DONE: dict[str, _threading.Event] = {}
 _FINAL_DONE_AT: dict[str, float] = {}
+
+
+def configured_jarvis_voice_id() -> str:
+    """Established Jarvis ElevenLabs voice ID, or empty if the constant is invalid."""
+    vid = str(_JARVIS_ELEVENLABS_VOICE_ID or "").strip()
+    if _JARVIS_VOICE_ID_RE.fullmatch(vid):
+        return vid
+    return ""
+
+
+def require_jarvis_voice_id(voice_id: object) -> tuple[str | None, str | None]:
+    """Jarvis TTS must explicitly select the Jarvis voice. No silent default.
+
+    Returns (voice_id, None) or (None, JARVIS_VOICE_CONFIGURATION_UNAVAILABLE).
+    """
+    configured = configured_jarvis_voice_id()
+    incoming = str(voice_id or "").strip()
+    if not configured or incoming != configured:
+        return None, JARVIS_VOICE_CONFIGURATION_UNAVAILABLE
+    return incoming, None
 
 
 def mint_correlation_id() -> str:
@@ -260,9 +301,41 @@ def _queue_smedley_speak(
             once_set.add(corr)
 
     vid = str(voice_id or "").strip()
+    assistant_identity = "jarvis" if role == "final" else ("biggy" if role == "ack" else str(role or "unknown"))
+    if role == "final":
+        ok_vid, voice_err = require_jarvis_voice_id(vid)
+        if voice_err:
+            logger.error(
+                "ask_jarvis TTS fail-closed corr=%s assistant_identity=jarvis "
+                "tts_provider=elevenlabs selected_voice_id=%s fallback_used=false "
+                "terminal_status=%s",
+                corr,
+                vid or None,
+                voice_err,
+            )
+            return {
+                "queued": False,
+                "reason": voice_err,
+                "error": voice_err,
+                "role": role,
+                "correlation_id": corr,
+                "assistant_identity": "jarvis",
+                "tts_provider": "elevenlabs",
+                "selected_voice_id": vid or None,
+                "fallback_used": False,
+                "terminal_status": voice_err,
+            }
+        vid = str(ok_vid)
     # Hard cap avoids truncation mid-sentence in compact travel TTS (short by design).
     spoken_dispatch = spoken[:800]
-    body_obj: dict[str, Any] = {"text": spoken_dispatch, "voice_id": vid}
+    body_obj: dict[str, Any] = {
+        "text": spoken_dispatch,
+        "voice_id": vid,
+        "assistant_identity": assistant_identity,
+        "fallback_used": False,
+    }
+    if role == "final":
+        body_obj["require_jarvis_voice"] = True
     if wait_complete:
         body_obj["wait"] = True
     payload = json.dumps(body_obj).encode("utf-8")
@@ -303,12 +376,15 @@ def _queue_smedley_speak(
             if wait_complete:
                 playback_complete_at = t_http_end
             logger.info(
-                "ask_jarvis Smedley TTS role=%s voice=%s wait=%s status=%s body=%s",
-                role,
+                "ask_jarvis TTS identity corr=%s assistant_identity=%s "
+                "tts_provider=elevenlabs selected_voice_id=%s fallback_used=false "
+                "terminal_status=queued role=%s wait=%s http_status=%s",
+                corr,
+                assistant_identity,
                 vid,
+                role,
                 wait_complete,
                 getattr(resp, "status", None) or 200,
-                body[:120],
             )
         except Exception as exc:  # noqa: BLE001
             speak_err = f"{type(exc).__name__}: {exc}"
@@ -335,6 +411,10 @@ def _queue_smedley_speak(
                 "voice_id": vid,
                 "voice_name": voice_name,
                 "role": role,
+                "assistant_identity": assistant_identity,
+                "tts_provider": "elevenlabs",
+                "fallback_used": False,
+                "terminal_status": "error" if speak_err else "queued",
                 "wait_complete": wait_complete,
                 "wait_final_before_speak": bool(wait_final_before_speak),
                 "error": speak_err,
@@ -423,9 +503,31 @@ def queue_ask_jarvis_smedley_tts(
     Prose must already be sanitized by caller. No Agent/tool changes here.
     wait_complete=True so compact final finishes before post-ack visual line.
     """
+    ok_vid, voice_err = require_jarvis_voice_id(voice_id)
+    if voice_err:
+        logger.error(
+            "ask_jarvis TTS fail-closed corr=%s assistant_identity=jarvis "
+            "tts_provider=elevenlabs selected_voice_id=%s fallback_used=false "
+            "terminal_status=%s",
+            correlation_id,
+            str(voice_id or "").strip() or None,
+            voice_err,
+        )
+        return {
+            "queued": False,
+            "reason": voice_err,
+            "error": voice_err,
+            "role": "final",
+            "correlation_id": correlation_id,
+            "assistant_identity": "jarvis",
+            "tts_provider": "elevenlabs",
+            "selected_voice_id": str(voice_id or "").strip() or None,
+            "fallback_used": False,
+            "terminal_status": voice_err,
+        }
     return _queue_smedley_speak(
         spoken_text,
-        voice_id=str(voice_id or _JARVIS_ELEVENLABS_VOICE_ID),
+        voice_id=ok_vid,
         voice_name="James Michael",
         role="final",
         correlation_id=correlation_id,
@@ -447,6 +549,171 @@ def is_ask_jarvis_command(message: str) -> bool:
     ):
         return False
     return True
+
+
+def is_jarvis_greeting(message: str) -> bool:
+    return bool(_JARVIS_GREETING.match(str(message or "")))
+
+
+def jarvis_handoff_rest(message: str) -> str | None:
+    """Return the remaining owner request after a Jarvis handoff formula, or None."""
+    msg = str(message or "").strip().strip("\"'")
+    if not msg:
+        return None
+    match = _JARVIS_HANDOFF.match(msg)
+    if not match:
+        return None
+    rest = str(match.group("rest") or "").strip()
+    return rest or None
+
+
+def is_jarvis_addressed(message: str) -> bool:
+    """Owner presented this turn as Jarvis. Voice must be Jarvis; n8n bind is separate."""
+    msg = str(message or "")
+    if is_jarvis_greeting(msg) or jarvis_handoff_rest(msg) or is_ask_jarvis_command(msg):
+        return True
+    return bool(_JARVIS_ADDRESSED.search(msg))
+
+
+def jarvis_greeting_reply(message: str) -> str:
+    match = _JARVIS_GREETING.match(str(message or ""))
+    if not match:
+        return ""
+    return f"Good {match.group(1).lower()}, Rick."
+
+
+def deliver_jarvis_voice_for_local_reply(
+    *,
+    message: str,
+    spoken_text: str,
+) -> dict[str, Any]:
+    """Queue explicit Jarvis TTS for local (non-n8n) replies when the owner addressed Jarvis.
+
+    Never silently falls back to Austin/default. Missing voice config is visible
+    JARVIS_VOICE_CONFIGURATION_UNAVAILABLE with tts_server_queued=False.
+    """
+    if not is_jarvis_addressed(message):
+        return {}
+    spoken = str(spoken_text or "").strip()
+    corr = mint_correlation_id()
+    vid = configured_jarvis_voice_id()
+    ok_vid, voice_err = require_jarvis_voice_id(vid)
+    fields: dict[str, Any] = {
+        "assistant_identity": "jarvis",
+        "tts_engine": _JARVIS_TTS_ENGINE,
+        "tts_voice_profile": "jarvis",
+        "tts_provider": "elevenlabs",
+        "fallback_used": False,
+        "correlation_id": corr,
+        "jarvis_voice_bind": True,
+        "tts_voice_id": ok_vid,
+        "tts_server_queued": False,
+        "_tts_final_server_queued": False,
+    }
+    if voice_err or not ok_vid:
+        logger.error(
+            "local Jarvis TTS fail-closed corr=%s assistant_identity=jarvis "
+            "tts_provider=elevenlabs selected_voice_id=%s fallback_used=false "
+            "terminal_status=%s",
+            corr,
+            vid or None,
+            voice_err or JARVIS_VOICE_CONFIGURATION_UNAVAILABLE,
+        )
+        fields["tts_error"] = voice_err or JARVIS_VOICE_CONFIGURATION_UNAVAILABLE
+        fields["terminal_status"] = JARVIS_VOICE_CONFIGURATION_UNAVAILABLE
+        return fields
+    if not spoken:
+        fields["tts_error"] = "empty_spoken_text"
+        fields["terminal_status"] = "empty_spoken_text"
+        return fields
+    tts = queue_ask_jarvis_smedley_tts(
+        spoken,
+        voice_id=ok_vid,
+        correlation_id=corr,
+        delay_s=0.0,
+    )
+    queued = bool(tts.get("queued"))
+    fields["tts_server_queued"] = queued
+    fields["_tts_final_server_queued"] = queued
+    fields["terminal_status"] = str(tts.get("terminal_status") or ("queued" if queued else "not_queued"))
+    if tts.get("error"):
+        fields["tts_error"] = tts.get("error")
+    return fields
+
+
+_JARVIS_CLARIFY = re.compile(
+    r"(?i)\b("
+    r"i already told you|already told you|"
+    r"brewton|brunswick|stevenson|alabama|\bal\b|"
+    r"georgia[\s-]?pacific|\bgp\b|"
+    r"the plant|the mill|the site|days inn|quality inn|"
+    r"in brewton|plant city|company site"
+    r")\b"
+)
+_NOT_CLARIFY = re.compile(
+    r"(?i)\b(never mind|nevermind|forget it|new topic|something else)\b"
+)
+
+
+def _prior_ask_jarvis_user_text(messages: list[Any] | None) -> str | None:
+    """Most recent owner Ask Jarvis utterance on this session."""
+    if not isinstance(messages, list):
+        return None
+    for m in reversed(messages):
+        if not isinstance(m, dict):
+            continue
+        if m.get("role") != "user":
+            continue
+        text = str(m.get("content") or "").strip()
+        if not text:
+            continue
+        if m.get("_ask_jarvis") or is_ask_jarvis_command(text):
+            return text
+    return None
+
+
+def _session_has_jarvis_hard_bind(messages: list[Any] | None) -> bool:
+    if not isinstance(messages, list):
+        return False
+    for m in reversed(messages):
+        if not isinstance(m, dict):
+            continue
+        if m.get("role") != "assistant":
+            continue
+        if m.get("ask_jarvis_hard_bind"):
+            return True
+        # Skip pending/working rows and keep scanning.
+        if m.get("ask_jarvis_pending"):
+            continue
+        return False
+    return False
+
+
+def resolve_ask_jarvis_objective(
+    message: str, session_messages: list[Any] | None = None
+) -> str | None:
+    """Return the Jarvis-bound objective, or None if this turn must not hard-bind.
+
+    Explicit Ask Jarvis language binds immediately. Destination/facility
+    clarifications after a Jarvis hard-bind turn are concatenated onto the
+    prior Ask Jarvis utterance so the local Biggy agent cannot emit a fake
+    dispatch promise.
+    """
+    msg = str(message or "").strip()
+    if not msg:
+        return None
+    if is_ask_jarvis_command(msg):
+        return msg
+    prior = _prior_ask_jarvis_user_text(session_messages)
+    if not prior:
+        return None
+    if not _session_has_jarvis_hard_bind(session_messages):
+        return None
+    if _NOT_CLARIFY.search(msg):
+        return None
+    if not _JARVIS_CLARIFY.search(msg):
+        return None
+    return prior.rstrip() + "\n\nOwner clarification: " + msg
 
 
 def _sanitize_spoken_prose(text: str) -> str:
@@ -1210,8 +1477,11 @@ def try_ask_jarvis(message: str, *, biggy_ingress_ts: float | None = None, corre
         "spoken_reply": tts_spoken,  # TTS/PTT only (no citations/receipt)
         "evidence_footer": evidence_footer,  # chat visual + audit only
         "tts_engine": _JARVIS_TTS_ENGINE,
-        "tts_voice_id": _JARVIS_ELEVENLABS_VOICE_ID,
+        "tts_voice_id": configured_jarvis_voice_id() or None,
         "tts_voice_profile": "jarvis",
+        "assistant_identity": "jarvis",
+        "tts_provider": "elevenlabs",
+        "fallback_used": False,
         "correlation_id": correlation_id,
         "receipt": receipt,
         "citations": citations,

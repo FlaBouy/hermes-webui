@@ -443,18 +443,46 @@
   function makeRightRail(){
     const rail=el('aside','smedley-engineering-rail smedley-engineering-rail--right');rail.id='smedleyEngineeringRight';
     rail.innerHTML=`
-      <section class="smedley-engineering-section"><h3>INGEST TO RAG</h3><p class="smedley-engineering-kicker">DROP TO LIBRARY FOLDER — WATCHER INDEXES</p><div class="smedley-engineering-inline"><span>FOLDER</span><button id="smedleyRefreshFolders" type="button">↺</button></div><select id="smedleyLibraryFolder"><option value="">LOADING…</option></select><label class="smedley-engineering-drop">DROP FILE TO INGEST<input id="smedleyIngestFile" type="file" hidden></label><div id="smedleyIngestUploadStatus" class="smedley-engineering-note"></div></section>
-      <section class="smedley-engineering-section"><h3 class="smedley-engineering-heading-row">INGEST STATUS <span id="smedleyWatcherDot">●</span></h3><div id="smedleyIngestJobs" class="smedley-engineering-ingest-job">⏸ <span>Watcher idle</span></div><div class="smedley-engineering-heartbeat"><i></i></div><div id="smedleyQuarantine" class="smedley-engineering-note"></div></section>
+      <section class="smedley-engineering-section"><h3>INGEST TO RAG</h3><p class="smedley-engineering-kicker">DROP TO LIBRARY FOLDER — WATCHER INDEXES</p><div class="smedley-engineering-inline"><span>FOLDER</span><button id="smedleyRefreshFolders" type="button">↺</button></div><select id="smedleyLibraryFolder"><option value="">LOADING…</option></select><div class="smedley-engineering-inline"><span>SUBFOLDER</span></div><select id="smedleyLibrarySubfolder" disabled><option value="">SELECT FOLDER FIRST</option></select><label class="smedley-engineering-drop">DROP FILE TO INGEST<input id="smedleyIngestFile" type="file" hidden></label><div id="smedleyIngestUploadStatus" class="smedley-engineering-note"></div></section>
+      <section class="smedley-engineering-section"><h3 class="smedley-engineering-heading-row">INGEST STATUS <span id="smedleyWatcherDot">●</span></h3><div id="smedleyIngestJobs" class="smedley-engineering-ingest-job">⏸ <span>Waiting for watcher event…</span></div><div id="smedleyIngestIdentity" class="smedley-engineering-note"></div><div class="smedley-engineering-heartbeat"><i></i></div><div id="smedleyIngestQueue" class="smedley-ingest-queue"></div><div id="smedleyQuarantine" class="smedley-engineering-note"></div></section>
       <section class="smedley-engineering-section"><h3>NEW LIBRARY FOLDER</h3><div class="smedley-engineering-new-folder"><input id="smedleyNewFolderName" type="text" placeholder="FOLDER NAME"><button id="smedleyCreateFolder" type="button">+</button></div><div id="smedleyFolderStatus" class="smedley-engineering-note"></div></section>
       <section class="smedley-engineering-section"><h3>CORPUS STATUS</h3><div id="smedleyCorpusVectors" class="smedley-engineering-corpus">—</div><div id="smedleyCorpusCollection" class="smedley-engineering-note"></div></section>
       <section class="smedley-engineering-section"><h3>LOW-LATENCY PATH</h3><div class="smedley-engineering-flow">EMBED → QDRANT → SMEDLEY</div><p class="smedley-engineering-help">One Smedley response with memory and continuity.</p></section>`;
-    const folder=rail.querySelector('#smedleyLibraryFolder'),upload=rail.querySelector('#smedleyIngestFile'),uploadStatus=rail.querySelector('#smedleyIngestUploadStatus');
-    async function refreshFolders(){try{const data=await proxyJson('/library-folders');folder.innerHTML='';(data.folders||[]).forEach((name)=>{const option=el('option');option.value=name;option.textContent=String(name).toUpperCase();folder.appendChild(option);});if(!folder.options.length)folder.innerHTML='<option value="">NO FOLDERS FOUND</option>';}catch(error){folder.innerHTML='<option value="">FOLDER API OFFLINE</option>';}}
-    async function refreshStatus(){try{const health=await proxyJson('/health');const status=await proxyJson('/ingest-status').catch(()=>null);const count=health.vector_count??health.vectors??health.qdrant_vectors??'—';rail.querySelector('#smedleyCorpusVectors').textContent=`${count} VECTORS`;rail.querySelector('#smedleyCorpusCollection').textContent=health.collection||health.qdrant_collection||'jarvis_kb';const jobs=rail.querySelector('#smedleyIngestJobs');const stale=!status||!status.heartbeat||((Date.now()/1000)-Number(status.heartbeat)>90);if(status&&!stale&&status.status==='active'){jobs.className='smedley-engineering-ingest-job active';jobs.innerHTML=`⚙ <span>${esc(status.last_file||'Indexing…')}</span>`;}else if(status&&!stale){jobs.className='smedley-engineering-ingest-job';jobs.innerHTML='⏸ <span>Watcher idle</span>';}else{jobs.className='smedley-engineering-ingest-job error';jobs.innerHTML=`⚠ <span>${status&&status.heartbeat?'Watcher stale':'Watcher unreachable'}</span>`;}rail.querySelector('#smedleyWatcherDot').classList.toggle('ok',!stale);const quarantined=status&&(status.quarantine_count??status.quarantined);rail.querySelector('#smedleyQuarantine').textContent=quarantined?`${quarantined} quarantined file(s)`:'';}catch(error){rail.querySelector('#smedleyCorpusVectors').textContent='CORPUS OFFLINE';}}
+    const folder=rail.querySelector('#smedleyLibraryFolder'),subfolder=rail.querySelector('#smedleyLibrarySubfolder'),upload=rail.querySelector('#smedleyIngestFile'),uploadStatus=rail.querySelector('#smedleyIngestUploadStatus');
+    function selectedLibraryFolder(){return subfolder.value?`${folder.value}/${subfolder.value}`:folder.value;}
+    async function refreshSubfolders(){const parent=folder.value;subfolder.innerHTML='';subfolder.disabled=true;if(!parent){subfolder.innerHTML='<option value="">SELECT FOLDER FIRST</option>';return;}try{const data=await proxyJson(`/library-folders?parent=${encodeURIComponent(parent)}`);const names=data.folders||[];const root=el('option');root.value='';root.textContent=`${parent.toUpperCase()} (ROOT)`;subfolder.appendChild(root);names.forEach((name)=>{const option=el('option');option.value=name;option.textContent=String(name).toUpperCase();subfolder.appendChild(option);});subfolder.disabled=false;}catch(error){subfolder.innerHTML='<option value="">SUBFOLDER API OFFLINE</option>';}}
+    async function refreshFolders(){try{const data=await proxyJson('/library-folders');folder.innerHTML='';(data.folders||[]).forEach((name)=>{const option=el('option');option.value=name;option.textContent=String(name).toUpperCase();folder.appendChild(option);});if(!folder.options.length)folder.innerHTML='<option value="">NO FOLDERS FOUND</option>';await refreshSubfolders();}catch(error){folder.innerHTML='<option value="">FOLDER API OFFLINE</option>';subfolder.innerHTML='<option value="">SUBFOLDER API OFFLINE</option>';subfolder.disabled=true;}}
+    let __ingestPoll=null;
+    function ingestPollMs(status){const red=status&&(status.indicator==='red'||status.status==='active'||status.indicator_state==='ACTIVE');return red?1000:4000;}
+    function renderQueue(status){
+      const box=rail.querySelector('#smedleyIngestQueue');
+      const rows=status&&(status.queue||status.focus)||[];
+      if(!box) return;
+      if(!rows.length){box.innerHTML='<div class="smedley-ingest-empty">No ingest events yet</div>';return;}
+      box.innerHTML=rows.slice(0,12).map((row)=>{
+        const phase=esc(row.phase||'—');
+        const name=esc(row.pub_id||row.basename||'—');
+        const folderName=esc(row.folder||row.source||'');
+        const when=esc((row.updated_at||'').replace('T',' ').replace('Z',''));
+        const chunks=(row.chunks!=null||row.vectors!=null)?esc(String(row.chunks??'—')+' ch / '+(row.vectors??'—')+' vec'):'';
+        const reason=row.reason?`<div class="smedley-ingest-reason">${esc(row.reason)}</div>`:'';
+        const retry=(row.phase==='quarantined'||row.phase==='failed')?`<button type="button" class="smedley-ingest-retry" data-path="${esc(row.path||'')}">RETRY</button>`:'';
+        return `<div class="smedley-ingest-row phase-${phase}"><div class="smedley-ingest-name">${name}</div><div class="smedley-ingest-meta">${phase} · ${folderName}</div><div class="smedley-ingest-meta">${when}${chunks?' · '+chunks:''}</div>${reason}${retry}</div>`;
+      }).join('');
+      box.querySelectorAll('.smedley-ingest-retry').forEach((btn)=>btn.addEventListener('click',async()=>{
+        const path=btn.getAttribute('data-path'); if(!path) return;
+        btn.disabled=true; btn.textContent='QUEUED';
+        try{await proxyJson('/ingest-retry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({path})});}
+        catch(error){btn.textContent='FAIL';}
+        refreshStatus();
+      }));
+    }
+    async function refreshStatus(){try{const health=await proxyJson('/health');const status=await proxyJson('/ingest-status').catch(()=>null);const count=health.vector_count??health.vectors??health.qdrant_vectors??'—';rail.querySelector('#smedleyCorpusVectors').textContent=`${count} VECTORS`;rail.querySelector('#smedleyCorpusCollection').textContent=health.collection||health.qdrant_collection||'jarvis_kb';const jobs=rail.querySelector('#smedleyIngestJobs');const dot=rail.querySelector('#smedleyWatcherDot');const ident=rail.querySelector('#smedleyIngestIdentity');const stale=!status||!status.heartbeat||((Date.now()/1000)-Number(status.heartbeat)>90);const red=!!(status&&(status.indicator==='red'||status.status==='active'||status.indicator_state==='ACTIVE'||status.indicator_state==='ALARM'||stale));const file=status&&(status.last_file||'');const phase=status&&(status.current_phase||status.indicator_state||'');const reason=status&&status.last_error;jobs.className='smedley-engineering-ingest-job'+(red?' live-red':' live-green');jobs.innerHTML=red?`● <span>${esc(status&&status.indicator_state||'ACTIVE')} · ${esc(file||phase||'processing')}</span>`:`● <span>${esc(phase==='indexed'?'INDEXED':(status&&status.indicator_state)||'RUNNING')}</span>`;dot.className=red?'live-red':'ok';ident.textContent=file?`${file}${phase?' · '+phase:''}${reason?' · '+reason:''}`:'';renderQueue(status);const q=status&&(status.quarantine_count??status.quarantined);rail.querySelector('#smedleyQuarantine').textContent=q?`${q} quarantined — listed in queue, not hidden by idle`:'';if(__ingestPoll) clearInterval(__ingestPoll);__ingestPoll=setInterval(refreshStatus,ingestPollMs(status));}catch(error){rail.querySelector('#smedleyCorpusVectors').textContent='CORPUS OFFLINE';}}
     rail.querySelector('#smedleyRefreshFolders').addEventListener('click',refreshFolders);
-    upload.addEventListener('change',async()=>{const file=upload.files[0];if(!file||!folder.value)return;const body=new FormData();body.append('file',file);uploadStatus.textContent=`Uploading ${file.name}…`;try{const response=await fetch(`${RAG_PROXY}/ingest-upload?folder=${encodeURIComponent(folder.value)}`,{method:'POST',body});if(!response.ok)throw new Error(`HTTP ${response.status}`);uploadStatus.textContent=`Queued ${file.name}`;}catch(error){uploadStatus.textContent=`Ingest upload failed: ${error.message||error}`;}upload.value='';refreshStatus();});
+    folder.addEventListener('change',refreshSubfolders);
+    upload.addEventListener('change',async()=>{const file=upload.files[0];if(!file)return;const dest=selectedLibraryFolder();if(!dest){uploadStatus.textContent='Select a RAG Pool library folder first.';upload.value='';return;}const body=new FormData();body.append('file',file);uploadStatus.textContent=`Uploading ${file.name} → ${dest}…`;try{const response=await fetch(`${RAG_PROXY}/ingest-upload?folder=${encodeURIComponent(dest)}`,{method:'POST',body});if(!response.ok)throw new Error(`HTTP ${response.status}`);const payload=await response.json().catch(()=>({}));uploadStatus.textContent=`Queued ${payload.filename||file.name} in ${payload.destination||('Library/'+dest)}`;}catch(error){uploadStatus.textContent=`Ingest upload failed: ${error.message||error}`;}upload.value='';refreshStatus();});
     rail.querySelector('#smedleyCreateFolder').addEventListener('click',async()=>{const input=rail.querySelector('#smedleyNewFolderName'),name=input.value.trim();if(!name)return;try{await proxyJson('/library-folders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name})});rail.querySelector('#smedleyFolderStatus').textContent=`Created ${name}`;input.value='';refreshFolders();}catch(error){rail.querySelector('#smedleyFolderStatus').textContent=`Create failed: ${error.message||error}`;}});
-    refreshFolders();refreshStatus();setInterval(refreshStatus,15000);return rail;
+    refreshFolders();refreshStatus();return rail;
   }
 
   let __docRouteBusy=false;
@@ -470,13 +498,16 @@
     const docnum=/\b\d{2}-?\d{3}\b/;
     const hwPart=/\b(?:MU\s*\/\s*MC|MC\s*\/\s*MU|MU|MC)[- ]?[A-Z]{2,6}\d{2,}[A-Z]?\b/i;
     const abPart=/\b(?:1756|1769|1794|5094)[- ]?[A-Z0-9]{2,}\b/i;
+    const abPub=/\b(?:1756[-_ ]+)?(?:TD|UM|IN)[-_ ]*0*\d{1,4}\b/i;
     const fileExt=/\b[\w./\\ -]+\.(?:pdf|docx?|xlsx?|pptx?|txt|md)\b/i;
     if(verb.test(msg) && noun.test(msg)) return true;
     if(/\b(?:need|want)\b/i.test(msg) && noun.test(msg)) return true;
     if(linkAsk.test(msg) && (noun.test(msg) || docnum.test(msg))) return true;
-    if(verb.test(msg) && (docnum.test(msg) || fileExt.test(msg))) return true;
+    if(verb.test(msg) && (docnum.test(msg) || fileExt.test(msg) || abPub.test(msg) || abPart.test(msg))) return true;
     if(docnum.test(msg) && /\b(?:document|doc|spec|pdf|link|url|preview|pull|find|open)\b/i.test(msg)) return true;
     if(hwPart.test(msg)) return true;
+    if(abPart.test(msg)) return true;
+    if(abPub.test(msg)) return true;
     if(linkAsk.test(msg)) return true;
     return false;
   }
@@ -491,6 +522,9 @@
     const fact=/\b(?:fuse|fusing|fused|amp(?:ere)?s?|rating|rated|voltage|volts?|current|channel|compatible|compatibility|match(?:es|ing)?|ifm|interface\s+modules?|pre-?wired|cables?|terminals?|catalog|internal\s+fus|power\s+suppl(?:y|ies)|psu|chassis|watt(?:age)?s?|redundan(?:t|cy)|slots?)\w*\b/i;
     const ask=/\b(?:what|which|where|how|is|are|need)\b|\?/i;
     return part.test(msg) && fact.test(msg) && ask.test(msg);
+  }
+  function isAffirmativeFollowup(text){
+    return /^\s*(?:yes|yep|yeah|yup|sure|ok|okay|please|do\s+it|go\s+ahead|proceed|affirmative|sounds\s+good|that\s+works|do\s+that|yes\s+please|please\s+do)\s*[.!]?\s*$/i.test(String(text||''));
   }
   let __smedleyAckUntil=0;
   function speakSmedleyNow(text, opts){
@@ -513,7 +547,8 @@
     const q=(composer&&composer.value||'').trim();
     if(!q) return false;
     if(/\bask\s+jarvis\b/i.test(q)) return false;
-    if(!(isDocumentLinkRequest(q) || isEngineeringFactRequest(q))) return false;
+    // Affirmatives accept a pending retrieval/extract offer — still need immediate spoken ack.
+    if(!(isDocumentLinkRequest(q) || isEngineeringFactRequest(q) || isAffirmativeFollowup(q))) return false;
     const now=Date.now();
     if(now < __smedleyAckArmedUntil) return true; // already acked this submit
     __smedleyAckArmedUntil=now+1500;

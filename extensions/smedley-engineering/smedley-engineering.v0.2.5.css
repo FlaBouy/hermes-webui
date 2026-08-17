@@ -30,8 +30,18 @@ body > .app-titlebar{display:none!important}
 .smedley-engineering-note,.smedley-engineering-help{margin:6px 0 0;color:#7d8590;font-size:9px;line-height:1.4}.smedley-engineering-flow{padding:7px;border:1px solid #30363d;background:#0d1117;color:#c9d1d9;font:9px ui-monospace,monospace;text-align:center}
 .smedley-engineering-file-list{padding:4px 12px 12px;color:#7d8590;font-size:10px}.smedley-engineering-file-list div{padding:5px 0;border-bottom:1px solid #21262d;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.smedley-engineering-file-list em{color:#484f58}
 .smedley-engineering-inline,.smedley-engineering-new-folder{display:flex;align-items:center;gap:6px;margin:5px 0}.smedley-engineering-inline span{font-size:9px;font-weight:700;color:#7d8590}.smedley-engineering-inline button,.smedley-engineering-new-folder button{margin-left:auto;border:1px solid #30363d;border-radius:5px;background:#21262d;color:#e6edf3;padding:4px 8px;cursor:pointer}
-.smedley-engineering-heading-row{display:flex;justify-content:space-between}.smedley-engineering-heading-row span{color:#484f58}.smedley-engineering-heading-row span.ok{color:#3fb950}
-.smedley-engineering-ingest-job{display:flex;gap:6px;padding:6px 7px;border:1px solid #30363d;border-radius:5px;background:#0d1117;color:#e6edf3;font-size:10px}.smedley-engineering-ingest-job.active{border-color:#f0b429;background:#1a1200}.smedley-engineering-ingest-job.error{border-color:#f85149;background:#1a0d0d}
+.smedley-engineering-heading-row{display:flex;justify-content:space-between}.smedley-engineering-heading-row span{color:#484f58}.smedley-engineering-heading-row span.ok{color:#3fb950}.smedley-engineering-heading-row span.live-red{color:#f85149}
+.smedley-engineering-ingest-job{display:flex;gap:6px;padding:6px 7px;border:1px solid #30363d;border-radius:5px;background:#0d1117;color:#e6edf3;font-size:10px}.smedley-engineering-ingest-job.active,.smedley-engineering-ingest-job.live-red{border-color:#f85149;background:#1a0d0d;color:#f85149}.smedley-engineering-ingest-job.live-green{border-color:#2f7d42;color:#3fb950}.smedley-engineering-ingest-job.error{border-color:#f85149;background:#1a0d0d}
+.smedley-ingest-queue{margin-top:8px;display:flex;flex-direction:column;gap:6px;max-height:280px;overflow:auto}
+.smedley-ingest-row{padding:6px 7px;border:1px solid #30363d;border-radius:5px;background:#0d1117;font-size:9px;line-height:1.35}
+.smedley-ingest-row.phase-detected,.smedley-ingest-row.phase-queued,.smedley-ingest-row.phase-extracting,.smedley-ingest-row.phase-indexing{border-color:#f85149}
+.smedley-ingest-row.phase-indexed{border-color:#2f7d42}
+.smedley-ingest-row.phase-quarantined,.smedley-ingest-row.phase-failed{border-color:#f85149;background:#1a0d0d}
+.smedley-ingest-name{font-weight:800;letter-spacing:.04em;color:#e6edf3}
+.smedley-ingest-meta{color:#7d8590}
+.smedley-ingest-reason{color:#f85149;margin-top:3px}
+.smedley-ingest-retry{margin-top:4px;border:1px solid #8b3030;border-radius:4px;background:#21262d;color:#f06b64;padding:3px 6px;font-size:9px;cursor:pointer}
+.smedley-ingest-empty{color:#484f58;font-size:9px}
 .smedley-engineering-heartbeat{height:2px;margin-top:6px;background:#21262d;overflow:hidden}.smedley-engineering-heartbeat i{display:block;width:100%;height:100%;background:#3fb950}.smedley-engineering-corpus{font-size:12px;color:#7d8590}
 #mainChat.smedley-engineering-iwo{position:relative;background-image:linear-gradient(rgba(13,17,23,.30),rgba(13,17,23,.46)),url('/extensions/smedley-engineering/iwo.jpg');background-size:cover;background-position:center;background-repeat:no-repeat}
 #mainChat.smedley-engineering-iwo .messages-shell,#mainChat.smedley-engineering-iwo .messages{background:transparent!important}
