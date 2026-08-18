@@ -1,0 +1,3941 @@
+{
+  "source_document": "pm20520.pdf",
+  "doc_no": "PM20-520",
+  "title": "Process Manager I/O Installation",
+  "source_path": "Vendor Data/Honeywell/Experian PKS/TDC3000/Honeywell TDC/pm20520.pdf",
+  "pdf_page_count": 472,
+  "identity_rules": {
+    "mu_mc_are_distinct": true,
+    "mc_is_conformally_coated": true,
+    "manual_generally_references_mu": true,
+    "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+  },
+  "connection_diagram_count": 81,
+  "identifiers": {
+    "MU-TAOX01": {
+      "part_number": "MU-TAOX01",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "3-1",
+          "printed_page": 117,
+          "pdf_page": 137,
+          "caption_evidence": "Model MU-TAOX01/MU-TAOX02 Analog Output FTA Connection Diagram Customer Wiring AO FTA AO IOP",
+          "diagram_target": "MU-TAOX01 FTA"
+        }
+      ],
+      "document_supported_identity_relation": null
+    },
+    "MU-TAOX02": {
+      "part_number": "MU-TAOX02",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "3-1",
+          "printed_page": 117,
+          "pdf_page": 137,
+          "caption_evidence": "Model MU-TAOX01/MU-TAOX02 Analog Output FTA Connection Diagram Customer Wiring AO FTA AO IOP",
+          "diagram_target": "MU-TAOX02 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAOX02",
+        "counterpart": "MC-TAOX02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAOY22": {
+      "part_number": "MU-TAOY22",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "3-7",
+          "printed_page": 125,
+          "pdf_page": 145,
+          "caption_evidence": "Model MU-TAOY22 Analog Output FTA Connection Diagram\u2014Non-CE Compliant Redundant Field Wiring AO FTA AO IOPs Channel # 1 TB1",
+          "diagram_target": "MU-TAOY22 FTA"
+        },
+        {
+          "figure": "3-8",
+          "printed_page": 126,
+          "pdf_page": 146,
+          "caption_evidence": "Model MU-TAOY22 Analog Output FTA Connection Diagram\u2014CE Compliant Redundant Field Wiring AO FTA AO IOPs Channel #",
+          "diagram_target": "MU-TAOY22 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAOY22",
+        "counterpart": "MC-TAOY22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAOY23": {
+      "part_number": "MU-TAOY23",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "3-9",
+          "printed_page": 127,
+          "pdf_page": 147,
+          "caption_evidence": "Model MU-TAOY23 Analog Output FTA Connection Diagram\u2014Non-CE Compliant Redundant Field Wiring AO FTA AO IOPs Channel # 1 TB1",
+          "diagram_target": "MU-TAOY23 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAOY23",
+        "counterpart": "MC-TAOY23",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDID11": {
+      "part_number": "MU-TDID11",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "4-6",
+          "printed_page": 145,
+          "pdf_page": 165,
+          "caption_evidence": "Model MU-TDID11 24 Vdc Digital Input FTA Connection Diagram DI FTA Customer Wiring",
+          "diagram_target": "MU-TDID11 FTA"
+        }
+      ],
+      "document_supported_identity_relation": null
+    },
+    "MU-TDID12": {
+      "part_number": "MU-TDID12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "4-7",
+          "printed_page": 146,
+          "pdf_page": 166,
+          "caption_evidence": "Model MU-TDID12 24 Vdc Digital Input FTA Connection Diagram Customer Wiring DI FTA",
+          "diagram_target": "MU-TDID12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDID12",
+        "counterpart": "MC-TDID12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDIY22": {
+      "part_number": "MU-TDIY22",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "4-12",
+          "printed_page": 152,
+          "pdf_page": 172,
+          "caption_evidence": "Model MU-TDIY22 24 Vdc Digital Input FTA Connection Diagram Field Wiring DI FTA DI IOP TB1 F1 0.5 A 1 External 24 Vdc In 2 F3 0.5 A",
+          "diagram_target": "MU-TDIY22 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDIY22",
+        "counterpart": "MC-TDIY22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDIY62": {
+      "part_number": "MU-TDIY62",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "4-13",
+          "printed_page": 153,
+          "pdf_page": 173,
+          "caption_evidence": "Model MU-TDIY62 24 Vdc Digital Input FTA Connection Diagram Field Wiring DI FTA DI IOP 1 TB1 F1 0.5 A 24V VCC External 24 Vdc In 2 F3 0.5 A",
+          "diagram_target": "MU-TDIY62 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDIY62",
+        "counterpart": "MC-TDIY62",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOR22": {
+      "part_number": "MU-TDOR22",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-45",
+          "printed_page": 243,
+          "pdf_page": 263,
+          "caption_evidence": "Model MU-TDOR21/MU-TDOR22 240 Vac/125 Vdc Relay Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOR22 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOR22",
+        "counterpart": "MC-TDOR22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOR62": {
+      "part_number": "MU-TDOR62",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-46",
+          "printed_page": 244,
+          "pdf_page": 264,
+          "caption_evidence": "Model MU-TDOR62 240 Vac/125 Vdc Relay Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOR62 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOR62",
+        "counterpart": "MC-TDOR62",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOY23": {
+      "part_number": "MU-TDOY23",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-52",
+          "printed_page": 252,
+          "pdf_page": 272,
+          "caption_evidence": "Model MU-TDOY23 240 Vac/125 Vdc Relay Digital Output FTA Connection Diagram Field Wiring FTA DO IOP GL C Stepdown",
+          "diagram_target": "MU-TDOY23 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOY23",
+        "counterpart": "MC-TDOY23",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOY63": {
+      "part_number": "MU-TDOY63",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-53",
+          "printed_page": 253,
+          "pdf_page": 273,
+          "caption_evidence": "Model MU-TDOY63 240 Vac/125 Vdc Relay Digital Output FTA Connection Diagram Field Wiring FTA DO IOP",
+          "diagram_target": "MU-TDOY63 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOY63",
+        "counterpart": "MC-TDOY63",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GAOX02": {
+      "part_number": "MU-GAOX02",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-16",
+          "printed_page": 349,
+          "pdf_page": 369,
+          "caption_evidence": "Model MU-GAOX02/72 Analog Output FTA Connection Diagram Field Wiring Nonredundant Galvanically Isolated Analog Output FTA AO IOP (Hazardous Area) (Models MU-GAOX02 and MU-GAOX72) (Safe Area)",
+          "diagram_target": "MU-GAOX02 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GAOX02",
+        "counterpart": "MC-GAOX02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GAOX72": {
+      "part_number": "MU-GAOX72",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-16",
+          "printed_page": 349,
+          "pdf_page": 369,
+          "caption_evidence": "Model MU-GAOX02/72 Analog Output FTA Connection Diagram Field Wiring Nonredundant Galvanically Isolated Analog Output FTA AO IOP (Hazardous Area) (Models MU-GAOX02 and MU-GAOX72) (Safe Area)",
+          "diagram_target": "MU-GAOX72 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GAOX72",
+        "counterpart": "MC-GAOX72",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GAOX12": {
+      "part_number": "MU-GAOX12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-17",
+          "printed_page": 350,
+          "pdf_page": 370,
+          "caption_evidence": "Model MU-GAOX12/82 Analog Output FTA Connection Diagram Field Wiring Redundant Galvanically Isolated Analog Output FTA AO IOP A (Hazardous Area) (Models MU-GAOX12 and MU-GAOX82) (Safe Area)",
+          "diagram_target": "MU-GAOX12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GAOX12",
+        "counterpart": "MC-GAOX12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GAOX82": {
+      "part_number": "MU-GAOX82",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-17",
+          "printed_page": 350,
+          "pdf_page": 370,
+          "caption_evidence": "Model MU-GAOX12/82 Analog Output FTA Connection Diagram Field Wiring Redundant Galvanically Isolated Analog Output FTA AO IOP A (Hazardous Area) (Models MU-GAOX12 and MU-GAOX82) (Safe Area)",
+          "diagram_target": "MU-GAOX82 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GAOX82",
+        "counterpart": "MC-GAOX82",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAMT02": {
+      "part_number": "MC-TAMT02",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAMT02",
+        "counterpart": "MU-TAMT02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAMT12": {
+      "part_number": "MC-TAMT12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAMT12",
+        "counterpart": "MU-TAMT12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAMT03": {
+      "part_number": "MC-TAMT03",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAMT03",
+        "counterpart": "MU-TAMT03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAMT13": {
+      "part_number": "MC-TAMT13",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAMT13",
+        "counterpart": "MU-TAMT13",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAIH22": {
+      "part_number": "MU-TAIH22",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-45",
+          "printed_page": 76,
+          "pdf_page": 96,
+          "caption_evidence": "Model MU-TAIH22 Enhanced Power HLAI FTA Connection Diagram Field Wiring HLAI FTA HLAI IOP TB1 1 +",
+          "diagram_target": "MU-TAIH22 FTA"
+        },
+        {
+          "figure": "2-64",
+          "printed_page": 100,
+          "pdf_page": 120,
+          "caption_evidence": "Model MU-TAIH22 HLAI FTA\u2014Smart Transmitter Interface Applications Connection Diagram Field Wiring HLAI/STI FTA STI IOP TB1",
+          "diagram_target": "MU-TAIH22 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAIH22",
+        "counterpart": "MC-TAIH22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAIH23": {
+      "part_number": "MU-TAIH23",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-46",
+          "printed_page": 77,
+          "pdf_page": 97,
+          "caption_evidence": "Model MU-TAIH23 Enhanced Power HLAI FTA Connection Diagram Field Wiring HLAI FTA HLAI IOP TB1 1 +",
+          "diagram_target": "MU-TAIH23 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAIH23",
+        "counterpart": "MC-TAIH23",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDID52": {
+      "part_number": "MU-TDID52",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "4-8",
+          "printed_page": 147,
+          "pdf_page": 167,
+          "caption_evidence": "Model MU-TDID52/72 24 Vdc Digital Input FTA Connection Diagram DI FTA Customer Wiring",
+          "diagram_target": "MU-TDID52 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDID52",
+        "counterpart": "MC-TDID52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDID72": {
+      "part_number": "MU-TDID72",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "4-8",
+          "printed_page": 147,
+          "pdf_page": 167,
+          "caption_evidence": "Model MU-TDID52/72 24 Vdc Digital Input FTA Connection Diagram DI FTA Customer Wiring",
+          "diagram_target": "MU-TDID72 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDID72",
+        "counterpart": "MC-TDID72",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GAIH12": {
+      "part_number": "MU-GAIH12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-7",
+          "printed_page": 325,
+          "pdf_page": 345,
+          "caption_evidence": "Model MU-GAIH12/82 HLAI FTA Connection Diagram Field Wiring Galvanically Isolated High Level Analog Input FTA HLAI IOP (Hazardous Area) (MU-GAIH12 and MU-GAIH82) (Safe Area)",
+          "diagram_target": "MU-GAIH12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GAIH12",
+        "counterpart": "MC-GAIH12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GAIH82": {
+      "part_number": "MU-GAIH82",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-7",
+          "printed_page": 325,
+          "pdf_page": 345,
+          "caption_evidence": "Model MU-GAIH12/82 HLAI FTA Connection Diagram Field Wiring Galvanically Isolated High Level Analog Input FTA HLAI IOP (Hazardous Area) (MU-GAIH12 and MU-GAIH82) (Safe Area)",
+          "diagram_target": "MU-GAIH82 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GAIH82",
+        "counterpart": "MC-GAIH82",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GAIH13": {
+      "part_number": "MU-GAIH13",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-10",
+          "printed_page": 331,
+          "pdf_page": 351,
+          "caption_evidence": "Model MU-GAIH13/83 HLAI/STI FTA Connection Diagram Field Wiring Galvanically Isolated High Level Analog Input/Smart Transmitter Interface FTA HLAI/STI IOP (Hazardous Area) (MU-GAIH13 and MU-GAIH83) (Safe Area) J1",
+          "diagram_target": "MU-GAIH13 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GAIH13",
+        "counterpart": "MC-GAIH13",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GAIH83": {
+      "part_number": "MU-GAIH83",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-10",
+          "printed_page": 331,
+          "pdf_page": 351,
+          "caption_evidence": "Model MU-GAIH13/83 HLAI/STI FTA Connection Diagram Field Wiring Galvanically Isolated High Level Analog Input/Smart Transmitter Interface FTA HLAI/STI IOP (Hazardous Area) (MU-GAIH13 and MU-GAIH83) (Safe Area) J1",
+          "diagram_target": "MU-GAIH83 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GAIH83",
+        "counterpart": "MC-GAIH83",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GAIH14": {
+      "part_number": "MU-GAIH14",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-12",
+          "printed_page": 337,
+          "pdf_page": 357,
+          "caption_evidence": "Model MU-GAIH14/84 HLAI/STI FTA Connection Diagram Field Wiring Galvanically Isolated High Level Analog Input/Smart Transmitter Interface FTA HLAI/STI IOP (Hazardous Area) (MU-GAIH14 and MU-GAIH84) (Safe Area) J1",
+          "diagram_target": "MU-GAIH14 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GAIH14",
+        "counterpart": "MC-GAIH14",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GAIH84": {
+      "part_number": "MU-GAIH84",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-12",
+          "printed_page": 337,
+          "pdf_page": 357,
+          "caption_evidence": "Model MU-GAIH14/84 HLAI/STI FTA Connection Diagram Field Wiring Galvanically Isolated High Level Analog Input/Smart Transmitter Interface FTA HLAI/STI IOP (Hazardous Area) (MU-GAIH14 and MU-GAIH84) (Safe Area) J1",
+          "diagram_target": "MU-GAIH84 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GAIH84",
+        "counterpart": "MC-GAIH84",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GAIH22": {
+      "part_number": "MU-GAIH22",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-14",
+          "printed_page": 343,
+          "pdf_page": 363,
+          "caption_evidence": "Model MU-GAIH22/92 HLAI FTA Connection Diagram Field Wiring Galvanically Isolated High Level Analog Input FTA HLAI/STI IOP (Hazardous Area) (MU-GAIH22 and MU-GAIH92) (Safe Area) J1 24 Vdc",
+          "diagram_target": "MU-GAIH22 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GAIH22",
+        "counterpart": "MC-GAIH22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GAIH92": {
+      "part_number": "MU-GAIH92",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-14",
+          "printed_page": 343,
+          "pdf_page": 363,
+          "caption_evidence": "Model MU-GAIH22/92 HLAI FTA Connection Diagram Field Wiring Galvanically Isolated High Level Analog Input FTA HLAI/STI IOP (Hazardous Area) (MU-GAIH22 and MU-GAIH92) (Safe Area) J1 24 Vdc",
+          "diagram_target": "MU-GAIH92 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GAIH92",
+        "counterpart": "MC-GAIH92",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GDID12": {
+      "part_number": "MU-GDID12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-19",
+          "printed_page": 356,
+          "pdf_page": 376,
+          "caption_evidence": "Model MU-GDID12/82 24 Vdc Digital Input FTA Connection Diagram Field Wiring Galvanically Isolated 24 Vdc Digital Input FTA DI IOP (Hazardous Area) (MU-GDID12 and MU-GDID82) (Safe Area) J1",
+          "diagram_target": "MU-GDID12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GDID12",
+        "counterpart": "MC-GDID12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GDID82": {
+      "part_number": "MU-GDID82",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-19",
+          "printed_page": 356,
+          "pdf_page": 376,
+          "caption_evidence": "Model MU-GDID12/82 24 Vdc Digital Input FTA Connection Diagram Field Wiring Galvanically Isolated 24 Vdc Digital Input FTA DI IOP (Hazardous Area) (MU-GDID12 and MU-GDID82) (Safe Area) J1",
+          "diagram_target": "MU-GDID82 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GDID82",
+        "counterpart": "MC-GDID82",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GDID13": {
+      "part_number": "MU-GDID13",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-21",
+          "printed_page": 362,
+          "pdf_page": 382,
+          "caption_evidence": "Model MU-GDID13/83 24 Vdc Digital Input FTA Connection Diagram Field Wiring Galvanically Isolated 24 Vdc Digital Input FTA DI IOP (Hazardous Area) (MU-GDID13 and MU-GDID83) (Safe Area)",
+          "diagram_target": "MU-GDID13 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GDID13",
+        "counterpart": "MC-GDID13",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GDID83": {
+      "part_number": "MU-GDID83",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-21",
+          "printed_page": 362,
+          "pdf_page": 382,
+          "caption_evidence": "Model MU-GDID13/83 24 Vdc Digital Input FTA Connection Diagram Field Wiring Galvanically Isolated 24 Vdc Digital Input FTA DI IOP (Hazardous Area) (MU-GDID13 and MU-GDID83) (Safe Area)",
+          "diagram_target": "MU-GDID83 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GDID83",
+        "counterpart": "MC-GDID83",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GDOD12": {
+      "part_number": "MU-GDOD12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-23",
+          "printed_page": 367,
+          "pdf_page": 387,
+          "caption_evidence": "Model MU-GDOD12/MU-GDOD82 24 Vdc Digital Output FTA Connection Diagram Field Wiring Galvanically Isolated 24 Vdc Digital Output FTA with LFD DO IOP (Hazardous Area) (Models MU-GDOL12 and MU-GDOL82) (Safe Area) J1",
+          "diagram_target": "MU-GDOD12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GDOD12",
+        "counterpart": "MC-GDOD12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GDOD82": {
+      "part_number": "MU-GDOD82",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-23",
+          "printed_page": 367,
+          "pdf_page": 387,
+          "caption_evidence": "Model MU-GDOD12/MU-GDOD82 24 Vdc Digital Output FTA Connection Diagram Field Wiring Galvanically Isolated 24 Vdc Digital Output FTA with LFD DO IOP (Hazardous Area) (Models MU-GDOL12 and MU-GDOL82) (Safe Area) J1",
+          "diagram_target": "MU-GDOD82 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GDOD82",
+        "counterpart": "MC-GDOD82",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GDOL12": {
+      "part_number": "MU-GDOL12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-23",
+          "printed_page": 367,
+          "pdf_page": 387,
+          "caption_evidence": "Model MU-GDOD12/MU-GDOD82 24 Vdc Digital Output FTA Connection Diagram Field Wiring Galvanically Isolated 24 Vdc Digital Output FTA with LFD DO IOP (Hazardous Area) (Models MU-GDOL12 and MU-GDOL82) (Safe Area) J1",
+          "diagram_target": "MU-GDOL12 FTA"
+        },
+        {
+          "figure": "7-25",
+          "printed_page": 372,
+          "pdf_page": 392,
+          "caption_evidence": "Model MU-GDOL12/MU-GDOL82 24 Vdc Digital Output FTA Connection Diagram Field Wiring Galvanically Isolated 24 Vdc Digital Output FTA with LFD DO IOP (Hazardous Area) (Models MU-GDOL12 and MU-GDOL82) (Safe Area) J1",
+          "diagram_target": "MU-GDOL12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GDOL12",
+        "counterpart": "MC-GDOL12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GDOL82": {
+      "part_number": "MU-GDOL82",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "7-23",
+          "printed_page": 367,
+          "pdf_page": 387,
+          "caption_evidence": "Model MU-GDOD12/MU-GDOD82 24 Vdc Digital Output FTA Connection Diagram Field Wiring Galvanically Isolated 24 Vdc Digital Output FTA with LFD DO IOP (Hazardous Area) (Models MU-GDOL12 and MU-GDOL82) (Safe Area) J1",
+          "diagram_target": "MU-GDOL82 FTA"
+        },
+        {
+          "figure": "7-25",
+          "printed_page": 372,
+          "pdf_page": 392,
+          "caption_evidence": "Model MU-GDOL12/MU-GDOL82 24 Vdc Digital Output FTA Connection Diagram Field Wiring Galvanically Isolated 24 Vdc Digital Output FTA with LFD DO IOP (Hazardous Area) (Models MU-GDOL12 and MU-GDOL82) (Safe Area) J1",
+          "diagram_target": "MU-GDOL82 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-GDOL82",
+        "counterpart": "MC-GDOL82",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GDID72": {
+      "part_number": "MU-GDID72",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-GDOL72": {
+      "part_number": "MU-GDOL72",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-TAMT02": {
+      "part_number": "MU-TAMT02",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-16",
+          "printed_page": 34,
+          "pdf_page": 54,
+          "caption_evidence": "Model MU-TAMT02 Thermocouple LLMux FTA with Local CJR Connection Diagram Field Wiring FTA",
+          "diagram_target": "MU-TAMT02 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAMT02",
+        "counterpart": "MC-TAMT02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAMT12": {
+      "part_number": "MU-TAMT12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-18",
+          "printed_page": 36,
+          "pdf_page": 56,
+          "caption_evidence": "Model MU-TAMT12 Thermocouple LLMux FTA with Remote CJR Connection Diagram Field Wiring FTA",
+          "diagram_target": "MU-TAMT12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAMT12",
+        "counterpart": "MC-TAMT12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAMT03": {
+      "part_number": "MU-TAMT03",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-17",
+          "printed_page": 35,
+          "pdf_page": 55,
+          "caption_evidence": "Model MU-TAMT03 Thermocouple LLMux FTA with Local CJR Connection Diagram Field Wiring FTA",
+          "diagram_target": "MU-TAMT03 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAMT03",
+        "counterpart": "MC-TAMT03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAMT13": {
+      "part_number": "MU-TAMT13",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-19",
+          "printed_page": 37,
+          "pdf_page": 57,
+          "caption_evidence": "Model MU-TAMT13 Thermocouple LLMux FTA with Remote CJR Connection Diagram Field Wiring FTA",
+          "diagram_target": "MU-TAMT13 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAMT13",
+        "counterpart": "MC-TAMT13",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDON11": {
+      "part_number": "MU-TDON11",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-1",
+          "printed_page": 179,
+          "pdf_page": 199,
+          "caption_evidence": "Model MU-TDON11/MU-TDON12 24 Vdc Nonisolated Digital Output FTA Connection Diagram Customer Wiring DO FTA DO IOP",
+          "diagram_target": "MU-TDON11 FTA"
+        }
+      ],
+      "document_supported_identity_relation": null
+    },
+    "MU-TDON12": {
+      "part_number": "MU-TDON12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-1",
+          "printed_page": 179,
+          "pdf_page": 199,
+          "caption_evidence": "Model MU-TDON11/MU-TDON12 24 Vdc Nonisolated Digital Output FTA Connection Diagram Customer Wiring DO FTA DO IOP",
+          "diagram_target": "MU-TDON12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDON12",
+        "counterpart": "MC-TDON12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOR12": {
+      "part_number": "MU-TDOR12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-37",
+          "printed_page": 229,
+          "pdf_page": 249,
+          "caption_evidence": "Model MU-TDOR11/MU-TDOR12 120 Vac/125 Vdc Relay Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOR12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOR12",
+        "counterpart": "MC-TDOR12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOR52": {
+      "part_number": "MU-TDOR52",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-38",
+          "printed_page": 230,
+          "pdf_page": 250,
+          "caption_evidence": "Model MU-TDOR52 120 Vac/125 Vdc Relay Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOR52 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOR52",
+        "counterpart": "MC-TDOR52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TSDT02": {
+      "part_number": "MU-TSDT02",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-TSDT02",
+        "counterpart": "MC-TSDT02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TSDM02": {
+      "part_number": "MU-TSDM02",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-TSDM02",
+        "counterpart": "MC-TSDM02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-MASX02": {
+      "part_number": "MU-MASX02",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-TSDU02": {
+      "part_number": "MU-TSDU02",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-TSDU02",
+        "counterpart": "MC-TSDU02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TSIA12": {
+      "part_number": "MU-TSIA12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-TSIA12",
+        "counterpart": "MC-TSIA12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TSIM12": {
+      "part_number": "MU-TSIM12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-TSIM12",
+        "counterpart": "MC-TSIM12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAIL01": {
+      "part_number": "MU-TAIL01",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-TAIL02": {
+      "part_number": "MU-TAIL02",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAIL02",
+        "counterpart": "MC-TAIL02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAIL03": {
+      "part_number": "MU-TAIL03",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAIL03",
+        "counterpart": "MC-TAIL03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TLPA02": {
+      "part_number": "MU-TLPA02",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-TLPA02",
+        "counterpart": "MC-TLPA02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAMR02": {
+      "part_number": "MC-TAMR02",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAMR02",
+        "counterpart": "MU-TAMR02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAMR02": {
+      "part_number": "MU-TAMR02",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-25",
+          "printed_page": 44,
+          "pdf_page": 64,
+          "caption_evidence": "Model MU-TAMR02 RTD LLMux FTA Connection Diagram Field Wiring LLMux FTA",
+          "diagram_target": "MU-TAMR02 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAMR02",
+        "counterpart": "MC-TAMR02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAMR03": {
+      "part_number": "MU-TAMR03",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-26",
+          "printed_page": 45,
+          "pdf_page": 65,
+          "caption_evidence": "Model MU-TAMR03 RTD LLMux FTA Connection Diagram Field Wiring LLMux FTA",
+          "diagram_target": "MU-TAMR03 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAMR03",
+        "counterpart": "MC-TAMR03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-CMSC03": {
+      "part_number": "MU-CMSC03",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-CMSS03": {
+      "part_number": "MU-CMSS03",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MC-TRPA01": {
+      "part_number": "MC-TRPA01",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TRPA01",
+        "counterpart": "MU-TRPA01",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GRPA01": {
+      "part_number": "MC-GRPA01",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GRPA01",
+        "counterpart": "MU-GRPA01",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GRMT01": {
+      "part_number": "MC-GRMT01",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-39",
+          "printed_page": 65,
+          "pdf_page": 85,
+          "caption_evidence": "Model MC-GRMT01 RHMUX Thermocouple FTA Connection Diagram MV",
+          "diagram_target": "MC-GRMT01 FTA"
+        }
+      ],
+      "document_supported_identity_relation": null
+    },
+    "MU-KLO305": {
+      "part_number": "MU-KLO305",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-TAIH01": {
+      "part_number": "MU-TAIH01",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-40",
+          "printed_page": 71,
+          "pdf_page": 91,
+          "caption_evidence": "Model MU-TAIH01 High Level Analog Input FTA Connection Diagram Field Wiring HLAI FTA HLAI IOP",
+          "diagram_target": "MU-TAIH01 FTA"
+        }
+      ],
+      "document_supported_identity_relation": null
+    },
+    "MU-TAIH02": {
+      "part_number": "MU-TAIH02",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-41",
+          "printed_page": 72,
+          "pdf_page": 92,
+          "caption_evidence": "Model MU-TAIH02 High Level Analog Input FTA Connection Diagram Field Wiring HLAI FTA HLAI IOP",
+          "diagram_target": "MU-TAIH02 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAIH02",
+        "counterpart": "MC-TAIH02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAIH03": {
+      "part_number": "MU-TAIH03",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-42",
+          "printed_page": 73,
+          "pdf_page": 93,
+          "caption_evidence": "Model MU-TAIH03 High Level Analog Input FTA Connection Diagram Field Wiring HLAI FTA HLAI IOP",
+          "diagram_target": "MU-TAIH03 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAIH03",
+        "counterpart": "MC-TAIH03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAIH12": {
+      "part_number": "MU-TAIH12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-43",
+          "printed_page": 74,
+          "pdf_page": 94,
+          "caption_evidence": "Model MU-TAIH12 High Level Analog Input FTA Connection Diagram Field Wiring HLAI/STI FTA HLAI IOP * + 1",
+          "diagram_target": "MU-TAIH12 FTA"
+        },
+        {
+          "figure": "2-63",
+          "printed_page": 99,
+          "pdf_page": 119,
+          "caption_evidence": "Model MU-TAIH12 HLAI FTA\u2014Smart Transmitter Interface Applications Connection Diagram Field Wiring HLAI/STI FTA STI IOP *",
+          "diagram_target": "MU-TAIH12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAIH12",
+        "counterpart": "MC-TAIH12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAIH13": {
+      "part_number": "MU-TAIH13",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-44",
+          "printed_page": 75,
+          "pdf_page": 95,
+          "caption_evidence": "Model MU-TAIH13 High Level Analog Input FTA Connection Diagram Field Wiring HLAI/STI FTA HLAI IOP *",
+          "diagram_target": "MU-TAIH13 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAIH13",
+        "counterpart": "MC-TAIH13",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAIH52": {
+      "part_number": "MU-TAIH52",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-47",
+          "printed_page": 78,
+          "pdf_page": 98,
+          "caption_evidence": "Model MU-TAIH52 High Level Analog Input FTA Connection Diagram Field Wiring HLAI/STI FTA HLAI IOP *",
+          "diagram_target": "MU-TAIH52 FTA"
+        },
+        {
+          "figure": "2-65",
+          "printed_page": 101,
+          "pdf_page": 121,
+          "caption_evidence": "Model MU-TAIH52 HLAI FTA\u2014Smart Transmitter Interface Applications Connection Diagram Field Wiring HLAI/STI FTA STI IOP *",
+          "diagram_target": "MU-TAIH52 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAIH52",
+        "counterpart": "MC-TAIH52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAIH53": {
+      "part_number": "MU-TAIH53",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-48",
+          "printed_page": 79,
+          "pdf_page": 99,
+          "caption_evidence": "Model MU-TAIH53 High Level Analog Input FTA Connection Diagram Field Wiring HLAI/STI FTA HLAI IOP *",
+          "diagram_target": "MU-TAIH53 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAIH53",
+        "counterpart": "MC-TAIH53",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAIH62": {
+      "part_number": "MU-TAIH62",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-49",
+          "printed_page": 80,
+          "pdf_page": 100,
+          "caption_evidence": "Model MU-TAIH62 Enhanced Power HLAI FTA Connection Diagram Field Wiring HLAI/STI FTA HLAI/STI IOP TB1 External 1 + Internal",
+          "diagram_target": "MU-TAIH62 FTA"
+        },
+        {
+          "figure": "2-66",
+          "printed_page": 102,
+          "pdf_page": 122,
+          "caption_evidence": "Model MU-TAIH62 HLAI FTA\u2014Smart Transmitter Interface Applications Connection Diagram Field Wiring HLAI/STI FTA STI IOP TB1",
+          "diagram_target": "MU-TAIH62 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAIH62",
+        "counterpart": "MC-TAIH62",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TSTX03": {
+      "part_number": "MU-TSTX03",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-68",
+          "printed_page": 106,
+          "pdf_page": 126,
+          "caption_evidence": "Model MU-TSTX03 Smart Transmitter Interface FTA Connection Diagram Field Wiring STI FTA STI IOP",
+          "diagram_target": "MU-TSTX03 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TSTX03",
+        "counterpart": "MC-TSTX03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TSTX13": {
+      "part_number": "MU-TSTX13",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-69",
+          "printed_page": 107,
+          "pdf_page": 127,
+          "caption_evidence": "Model MU-TSTX13 Smart Transmitter Interface FTA Connection Diagram Field Wiring STI FTA STI IOP * TB1 145 \u2126 250 \u2126",
+          "diagram_target": "MU-TSTX13 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TSTX13",
+        "counterpart": "MC-TSTX13",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TSTX53": {
+      "part_number": "MU-TSTX53",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "2-70",
+          "printed_page": 108,
+          "pdf_page": 128,
+          "caption_evidence": "Model MU-TSTX53 Smart Transmitter Interface FTA Connection Diagram Field Wiring STI FTA STI IOP *",
+          "diagram_target": "MU-TSTX53 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TSTX53",
+        "counterpart": "MC-TSTX53",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAOX12": {
+      "part_number": "MU-TAOX12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "3-2",
+          "printed_page": 118,
+          "pdf_page": 138,
+          "caption_evidence": "Model MU-TAOX12 Analog Output FTA Connection Diagram Customer Wiring AO FTA Redundant AO IOPs",
+          "diagram_target": "MU-TAOX12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAOX12",
+        "counterpart": "MC-TAOX12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAOX52": {
+      "part_number": "MU-TAOX52",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "3-3",
+          "printed_page": 119,
+          "pdf_page": 139,
+          "caption_evidence": "Model MU-TAOX52 Analog Output FTA Connection Diagram Customer Wiring AO FTA Redundant AO IOPs",
+          "diagram_target": "MU-TAOX52 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAOX52",
+        "counterpart": "MC-TAOX52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAOY52": {
+      "part_number": "MU-TAOY52",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "3-10",
+          "printed_page": 128,
+          "pdf_page": 148,
+          "caption_evidence": "Model MU-TAOY52 Analog Output FTA Connection Diagram\u2014Non-CE Compliant Redundant Field Wiring AO FTA AO IOPs Channel # TB2",
+          "diagram_target": "MU-TAOY52 FTA"
+        },
+        {
+          "figure": "3-11",
+          "printed_page": 129,
+          "pdf_page": 149,
+          "caption_evidence": "Model MU-TAOY52 Analog Output FTA Connection Diagram\u2014CE Compliant Redundant Field Wiring AO FTA AO IOPs Channel # TB1",
+          "diagram_target": "MU-TAOY52 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAOY52",
+        "counterpart": "MC-TAOY52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAOY53": {
+      "part_number": "MU-TAOY53",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "3-12",
+          "printed_page": 130,
+          "pdf_page": 150,
+          "caption_evidence": "Model MU-TAOY53 Analog Output FTA Connection Diagram\u2014Non-CE Compliant Redundant Field Wiring AO FTA AO IOPs Channel # TB1",
+          "diagram_target": "MU-TAOY53 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TAOY53",
+        "counterpart": "MC-TAOY53",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDPR01": {
+      "part_number": "MU-TDPR01",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-TDPR02": {
+      "part_number": "MU-TDPR02",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDPR02",
+        "counterpart": "MC-TDPR02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDIA11": {
+      "part_number": "MU-TDIA11",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "4-16",
+          "printed_page": 158,
+          "pdf_page": 178,
+          "caption_evidence": "Model MU-TDIA11 120 Vac Digital Input FTA Connection Diagram CUSTOMER WIRING FTA Group 1 G HN Contact #",
+          "diagram_target": "MU-TDIA11 FTA"
+        }
+      ],
+      "document_supported_identity_relation": null
+    },
+    "MU-TDIA12": {
+      "part_number": "MU-TDIA12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "4-17",
+          "printed_page": 159,
+          "pdf_page": 179,
+          "caption_evidence": "Model MU-TDIA12 120 Vac Digital Input FTA Connection Diagram CUSTOMER WIRING 120 Vac DI FTA",
+          "diagram_target": "MU-TDIA12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDIA12",
+        "counterpart": "MC-TDIA12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDIA52": {
+      "part_number": "MU-TDIA52",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "4-18",
+          "printed_page": 160,
+          "pdf_page": 180,
+          "caption_evidence": "Model MU-TDIA52 120 Vac Digital Input FTA Connection Diagram CUSTOMER WIRING 120 Vac DI FTA",
+          "diagram_target": "MU-TDIA52 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDIA52",
+        "counterpart": "MC-TDIA52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDIA72": {
+      "part_number": "MU-TDIA72",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "4-19",
+          "printed_page": 161,
+          "pdf_page": 181,
+          "caption_evidence": "Model MU-TDIA72 120 Vac Digital Input FTA Connection Diagram Field Wiring DI FTA",
+          "diagram_target": "MU-TDIA72 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDIA72",
+        "counterpart": "MC-TDIA72",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDIA21": {
+      "part_number": "MU-TDIA21",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "4-23",
+          "printed_page": 168,
+          "pdf_page": 188,
+          "caption_evidence": "Model MU-TDIA21 240 Vac Digital Input FTA Connection Diagram CUSTOMER WIRING FTA 240 Vac G L1 L2 Group 1",
+          "diagram_target": "MU-TDIA21 FTA"
+        }
+      ],
+      "document_supported_identity_relation": null
+    },
+    "MU-TDIA22": {
+      "part_number": "MU-TDIA22",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "4-24",
+          "printed_page": 169,
+          "pdf_page": 189,
+          "caption_evidence": "Model MU-TDIA22 240 Vac Digital Input FTA Connection Diagram CUSTOMER WIRING DI FTA 240 Vac",
+          "diagram_target": "MU-TDIA22 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDIA22",
+        "counterpart": "MC-TDIA22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDIA62": {
+      "part_number": "MU-TDIA62",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "4-25",
+          "printed_page": 170,
+          "pdf_page": 190,
+          "caption_evidence": "Model MU-TDIA62 240 Vac Digital Input FTA Connection Diagram CUSTOMER WIRING DI FTA 240 Vac",
+          "diagram_target": "MU-TDIA62 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDIA62",
+        "counterpart": "MC-TDIA62",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDON52": {
+      "part_number": "MU-TDON52",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-2",
+          "printed_page": 180,
+          "pdf_page": 200,
+          "caption_evidence": "Model MU-TDON52 24 Vdc Nonisolated Digital Output FTA Connection Diagram Customer Wiring DO FTA DO IOP Channel # Clamp Diode A",
+          "diagram_target": "MU-TDON52 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDON52",
+        "counterpart": "MC-TDON52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOY22": {
+      "part_number": "MU-TDOY22",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-5",
+          "printed_page": 185,
+          "pdf_page": 205,
+          "caption_evidence": "Model MU-TDOY22 24 Vdc Isolated Digital Output FTA Connection Diagram Field Wiring DO FTA DO IOP 1 TB1 External",
+          "diagram_target": "MU-TDOY22 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOY22",
+        "counterpart": "MC-TDOY22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOY62": {
+      "part_number": "MU-TDOY62",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-6",
+          "printed_page": 186,
+          "pdf_page": 206,
+          "caption_evidence": "Model MU-TDOY62 24 Vdc Isolated Digital Output FTA Connection Diagram Field Wiring DO FTA DO IOP F1 F2 F3 F4 1.6 A1.6 A 1.6 A 1.6 A",
+          "diagram_target": "MU-TDOY62 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOY62",
+        "counterpart": "MC-TDOY62",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOD11": {
+      "part_number": "MU-TDOD11",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-9",
+          "printed_page": 192,
+          "pdf_page": 212,
+          "caption_evidence": "Model MU-TDOD11/MU-TDOD12 3-30 Vdc Solid-State Digital Output FTA Connection Diagram Customer Wiring DO FTA",
+          "diagram_target": "MU-TDOD11 FTA"
+        }
+      ],
+      "document_supported_identity_relation": null
+    },
+    "MU-TDOD12": {
+      "part_number": "MU-TDOD12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-9",
+          "printed_page": 192,
+          "pdf_page": 212,
+          "caption_evidence": "Model MU-TDOD11/MU-TDOD12 3-30 Vdc Solid-State Digital Output FTA Connection Diagram Customer Wiring DO FTA",
+          "diagram_target": "MU-TDOD12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOD12",
+        "counterpart": "MC-TDOD12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOD13": {
+      "part_number": "MU-TDOD13",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-10",
+          "printed_page": 193,
+          "pdf_page": 213,
+          "caption_evidence": "Model MU-TDOD13 3-30 Vdc Solid-State Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOD13 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOD13",
+        "counterpart": "MC-TDOD13",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOD14": {
+      "part_number": "MU-TDOD14",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-11",
+          "printed_page": 194,
+          "pdf_page": 214,
+          "caption_evidence": "Model MU-TDOD14 3-30 Vdc Solid-State Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOD14 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOD14",
+        "counterpart": "MC-TDOD14",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOD52": {
+      "part_number": "MU-TDOD52",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-12",
+          "printed_page": 195,
+          "pdf_page": 215,
+          "caption_evidence": "Model MU-TDOD52 3-30 Vdc Solid-State Digital Output FTA Connection Diagram Customer Wiring DO FTA",
+          "diagram_target": "MU-TDOD52 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOD52",
+        "counterpart": "MC-TDOD52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOD53": {
+      "part_number": "MU-TDOD53",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-13",
+          "printed_page": 196,
+          "pdf_page": 216,
+          "caption_evidence": "Model MU-TDOD53 3-30 Vdc Solid-State Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOD53 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOD53",
+        "counterpart": "MC-TDOD53",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOD54": {
+      "part_number": "MU-TDOD54",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-14",
+          "printed_page": 197,
+          "pdf_page": 217,
+          "caption_evidence": "Model MU-TDOD54 3-30 Vdc Solid-State Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOD54 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOD54",
+        "counterpart": "MC-TDOD54",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOD21": {
+      "part_number": "MU-TDOD21",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-21",
+          "printed_page": 207,
+          "pdf_page": 227,
+          "caption_evidence": "Model MU-TDOD21/MU-TDOD22 31-200 Vdc Solid-State Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOD21 FTA"
+        }
+      ],
+      "document_supported_identity_relation": null
+    },
+    "MU-TDOD22": {
+      "part_number": "MU-TDOD22",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-21",
+          "printed_page": 207,
+          "pdf_page": 227,
+          "caption_evidence": "Model MU-TDOD21/MU-TDOD22 31-200 Vdc Solid-State Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOD22 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOD22",
+        "counterpart": "MC-TDOD22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOD23": {
+      "part_number": "MU-TDOD23",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-22",
+          "printed_page": 208,
+          "pdf_page": 228,
+          "caption_evidence": "Model MU-TDOD23 31-200 Vdc Solid-State Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOD23 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOD23",
+        "counterpart": "MC-TDOD23",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOD62": {
+      "part_number": "MU-TDOD62",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-23",
+          "printed_page": 209,
+          "pdf_page": 229,
+          "caption_evidence": "Model MU-TDOD62 31-200 Vdc Solid-State Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOD62 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOD62",
+        "counterpart": "MC-TDOD62",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOD63": {
+      "part_number": "MU-TDOD63",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-24",
+          "printed_page": 210,
+          "pdf_page": 230,
+          "caption_evidence": "Model MU-TDOD63 31-200 Vdc Solid-State Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOD63 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOD63",
+        "counterpart": "MC-TDOD63",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOA11": {
+      "part_number": "MU-TDOA11",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-29",
+          "printed_page": 218,
+          "pdf_page": 238,
+          "caption_evidence": "Model MU-TDOA11/MU-TDOA12 120/240 Vac Solid-State Digital Output FTA Connection Diagram Customer Wiring DO FTA Step-down",
+          "diagram_target": "MU-TDOA11 FTA"
+        }
+      ],
+      "document_supported_identity_relation": null
+    },
+    "MU-TDOA12": {
+      "part_number": "MU-TDOA12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-29",
+          "printed_page": 218,
+          "pdf_page": 238,
+          "caption_evidence": "Model MU-TDOA11/MU-TDOA12 120/240 Vac Solid-State Digital Output FTA Connection Diagram Customer Wiring DO FTA Step-down",
+          "diagram_target": "MU-TDOA12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOA12",
+        "counterpart": "MC-TDOA12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOA13": {
+      "part_number": "MU-TDOA13",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-30",
+          "printed_page": 219,
+          "pdf_page": 239,
+          "caption_evidence": "Model MU-TDOA13 120/240 Vac Solid-State Digital Output FTA Connection Diagram Field Wiring DO FTA Step-down",
+          "diagram_target": "MU-TDOA13 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOA13",
+        "counterpart": "MC-TDOA13",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOA52": {
+      "part_number": "MU-TDOA52",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-31",
+          "printed_page": 220,
+          "pdf_page": 240,
+          "caption_evidence": "Model MU-TDOA52 120/240 Vac Solid-State Digital Output FTA Connection Diagram Customer Wiring DO FTA Step-Down",
+          "diagram_target": "MU-TDOA52 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOA52",
+        "counterpart": "MC-TDOA52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOA53": {
+      "part_number": "MU-TDOA53",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-32",
+          "printed_page": 221,
+          "pdf_page": 241,
+          "caption_evidence": "Model MU-TDOA53 120/240 Vac Solid-State Digital Output FTA Connection Diagram Field Wiring DO FTA Step-Down",
+          "diagram_target": "MU-TDOA53 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TDOA53",
+        "counterpart": "MC-TDOA53",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TDOR11": {
+      "part_number": "MU-TDOR11",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-37",
+          "printed_page": 229,
+          "pdf_page": 249,
+          "caption_evidence": "Model MU-TDOR11/MU-TDOR12 120 Vac/125 Vdc Relay Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOR11 FTA"
+        }
+      ],
+      "document_supported_identity_relation": null
+    },
+    "MU-TDOR21": {
+      "part_number": "MU-TDOR21",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "5-45",
+          "printed_page": 243,
+          "pdf_page": 263,
+          "caption_evidence": "Model MU-TDOR21/MU-TDOR22 240 Vac/125 Vdc Relay Digital Output FTA Connection Diagram Field Wiring DO FTA",
+          "diagram_target": "MU-TDOR21 FTA"
+        }
+      ],
+      "document_supported_identity_relation": null
+    },
+    "MU-TPIX12": {
+      "part_number": "MU-TPIX12",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "6-1",
+          "printed_page": 261,
+          "pdf_page": 281,
+          "caption_evidence": "Model MU-TPIX12 Pulse Input FTA Connection Diagram Field Wiring PI FTA PI IOP",
+          "diagram_target": "MU-TPIX12 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TPIX12",
+        "counterpart": "MC-TPIX12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TPIX52": {
+      "part_number": "MU-TPIX52",
+      "kind": "fta",
+      "connection_figures": [
+        {
+          "figure": "6-2",
+          "printed_page": 262,
+          "pdf_page": 282,
+          "caption_evidence": "Model MU-TPIX52 Pulse Input FTA Connection Diagram Field Wiring PI FTA PI IOP",
+          "diagram_target": "MU-TPIX52 FTA"
+        }
+      ],
+      "document_supported_identity_relation": {
+        "requested": "MU-TPIX52",
+        "counterpart": "MC-TPIX52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PPIX02": {
+      "part_number": "MU-PPIX02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PPIX02",
+        "counterpart": "MC-PPIX02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GLFD02": {
+      "part_number": "MU-GLFD02",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-GLFD02",
+        "counterpart": "MC-GLFD02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GMAR52": {
+      "part_number": "MU-GMAR52",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-GMAR52",
+        "counterpart": "MC-GMAR52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAIL02": {
+      "part_number": "MC-TAIL02",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAIL02",
+        "counterpart": "MU-TAIL02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAIL03": {
+      "part_number": "MC-TAIL03",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAIL03",
+        "counterpart": "MU-TAIL03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PAIL01": {
+      "part_number": "MU-PAIL01",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-PAIL02": {
+      "part_number": "MU-PAIL02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PAIL02",
+        "counterpart": "MC-PAIL02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-PAIL02": {
+      "part_number": "MC-PAIL02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PAIL02",
+        "counterpart": "MU-PAIL02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PLAM02": {
+      "part_number": "MU-PLAM02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PLAM02",
+        "counterpart": "MC-PLAM02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAMR03": {
+      "part_number": "MC-TAMR03",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAMR03",
+        "counterpart": "MU-TAMR03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TLPA02": {
+      "part_number": "MC-TLPA02",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TLPA02",
+        "counterpart": "MU-TLPA02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-PLAM02": {
+      "part_number": "MC-PLAM02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PLAM02",
+        "counterpart": "MU-PLAM02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TLP02": {
+      "part_number": "MU-TLP02",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KRCJ00": {
+      "part_number": "MU-KRCJ00",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MC-PRHM01": {
+      "part_number": "MC-PRHM01",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PRHM01",
+        "counterpart": "MU-PRHM01",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GRPA01": {
+      "part_number": "MU-GRPA01",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-GRPA01",
+        "counterpart": "MC-GRPA01",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TRPA01": {
+      "part_number": "MU-TRPA01",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-TRPA01",
+        "counterpart": "MC-TRPA01",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PRHM01": {
+      "part_number": "MU-PRHM01",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PRHM01",
+        "counterpart": "MC-PRHM01",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAIH02": {
+      "part_number": "MC-TAIH02",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAIH02",
+        "counterpart": "MU-TAIH02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAIH03": {
+      "part_number": "MC-TAIH03",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAIH03",
+        "counterpart": "MU-TAIH03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAIH12": {
+      "part_number": "MC-TAIH12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAIH12",
+        "counterpart": "MU-TAIH12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAIH13": {
+      "part_number": "MC-TAIH13",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAIH13",
+        "counterpart": "MU-TAIH13",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAIH22": {
+      "part_number": "MC-TAIH22",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAIH22",
+        "counterpart": "MU-TAIH22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAIH23": {
+      "part_number": "MC-TAIH23",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAIH23",
+        "counterpart": "MU-TAIH23",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAIH52": {
+      "part_number": "MC-TAIH52",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAIH52",
+        "counterpart": "MU-TAIH52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAIH53": {
+      "part_number": "MC-TAIH53",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAIH53",
+        "counterpart": "MU-TAIH53",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAIH62": {
+      "part_number": "MC-TAIH62",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAIH62",
+        "counterpart": "MU-TAIH62",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PAIH01": {
+      "part_number": "MU-PAIH01",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-PAIH02": {
+      "part_number": "MU-PAIH02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PAIH02",
+        "counterpart": "MC-PAIH02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-PAIH02": {
+      "part_number": "MC-PAIH02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PAIH02",
+        "counterpart": "MU-PAIH02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PAIH03": {
+      "part_number": "MU-PAIH03",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PAIH03",
+        "counterpart": "MC-PAIH03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-PAIH03": {
+      "part_number": "MC-PAIH03",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PAIH03",
+        "counterpart": "MU-PAIH03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PSTX01": {
+      "part_number": "MU-PSTX01",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-PSTX02": {
+      "part_number": "MU-PSTX02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PSTX02",
+        "counterpart": "MC-PSTX02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-PSTX02": {
+      "part_number": "MC-PSTX02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PSTX02",
+        "counterpart": "MU-PSTX02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PSTX03": {
+      "part_number": "MU-PSTX03",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PSTX03",
+        "counterpart": "MC-PSTX03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-PSTX03": {
+      "part_number": "MC-PSTX03",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PSTX03",
+        "counterpart": "MU-PSTX03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TSTX03": {
+      "part_number": "MC-TSTX03",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TSTX03",
+        "counterpart": "MU-TSTX03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TSTX13": {
+      "part_number": "MC-TSTX13",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TSTX13",
+        "counterpart": "MU-TSTX13",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TSTX53": {
+      "part_number": "MC-TSTX53",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TSTX53",
+        "counterpart": "MU-TSTX53",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PAOX03": {
+      "part_number": "MU-PAOX03",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PAOX03",
+        "counterpart": "MC-PAOX03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PAOY22": {
+      "part_number": "MU-PAOY22",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PAOY22",
+        "counterpart": "MC-PAOY22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAOX02": {
+      "part_number": "MC-TAOX02",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAOX02",
+        "counterpart": "MU-TAOX02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAOX12": {
+      "part_number": "MC-TAOX12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAOX12",
+        "counterpart": "MU-TAOX12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAOX52": {
+      "part_number": "MC-TAOX52",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAOX52",
+        "counterpart": "MU-TAOX52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PAOX01": {
+      "part_number": "MU-PAOX01",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-PAOX02": {
+      "part_number": "MU-PAOX02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MC-PAOX03": {
+      "part_number": "MC-PAOX03",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PAOX03",
+        "counterpart": "MU-PAOX03",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAOY22": {
+      "part_number": "MC-TAOY22",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAOY22",
+        "counterpart": "MU-TAOY22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAOY23": {
+      "part_number": "MC-TAOY23",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAOY23",
+        "counterpart": "MU-TAOY23",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAOY52": {
+      "part_number": "MC-TAOY52",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAOY52",
+        "counterpart": "MU-TAOY52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TAOY53": {
+      "part_number": "MC-TAOY53",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TAOY53",
+        "counterpart": "MU-TAOY53",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-PAOY22": {
+      "part_number": "MC-PAOY22",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PAOY22",
+        "counterpart": "MU-PAOY22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TAOY62": {
+      "part_number": "MU-TAOY62",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-TAOY63": {
+      "part_number": "MU-TAOY63",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MC-TDID12": {
+      "part_number": "MC-TDID12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDID12",
+        "counterpart": "MU-TDID12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDID52": {
+      "part_number": "MC-TDID52",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDID52",
+        "counterpart": "MU-TDID52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDID72": {
+      "part_number": "MC-TDID72",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDID72",
+        "counterpart": "MU-TDID72",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PDIX01": {
+      "part_number": "MU-PDIX01",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": null,
+      "compatible_ftas": [
+        "MU-TDID11",
+        "MU-TDID12",
+        "MU-TDID52",
+        "MU-TDID72"
+      ],
+      "compatibility_evidence": "The model MU-PDIX01 Digital Input IOP is compatible with the model MU-TDID11, MU-TDID12, MU-TDID52, and MU-TDID72 24 Vdc DI FTAs"
+    },
+    "MU-PDIX02": {
+      "part_number": "MU-PDIX02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PDIX02",
+        "counterpart": "MC-PDIX02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      },
+      "compatible_ftas": [
+        "MU-TDID11",
+        "MU-TDID12",
+        "MU-TDID52",
+        "MU-TDID72"
+      ],
+      "compatibility_evidence": "The model MU-PDIX02 Digital Input IOP is compatible with the model MU-TDID11, MU-TDID12, MU-TDID52, and MU-TDID72 24 Vdc DI FTAs"
+    },
+    "MC-PDIX02": {
+      "part_number": "MC-PDIX02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PDIX02",
+        "counterpart": "MU-PDIX02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      },
+      "compatible_ftas": [
+        "MU-TDID11",
+        "MU-TDID12",
+        "MU-TDID52",
+        "MU-TDID72"
+      ],
+      "compatibility_inherited_from": "MU-PDIX02",
+      "compatibility_evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d The model MU-PDIX02 Digital Input IOP is compatible with the model MU-TDID11, MU-TDID12, MU-TDID52, and MU-TDID72 24 Vdc DI FTAs"
+    },
+    "MC-TDIY22": {
+      "part_number": "MC-TDIY22",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDIY22",
+        "counterpart": "MU-TDIY22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDIY62": {
+      "part_number": "MC-TDIY62",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDIY62",
+        "counterpart": "MU-TDIY62",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PDIY22": {
+      "part_number": "MU-PDIY22",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PDIY22",
+        "counterpart": "MC-PDIY22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-PDIY22": {
+      "part_number": "MC-PDIY22",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PDIY22",
+        "counterpart": "MU-PDIY22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDIA12": {
+      "part_number": "MC-TDIA12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDIA12",
+        "counterpart": "MU-TDIA12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDIA52": {
+      "part_number": "MC-TDIA52",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDIA52",
+        "counterpart": "MU-TDIA52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDIA72": {
+      "part_number": "MC-TDIA72",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDIA72",
+        "counterpart": "MU-TDIA72",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDIA22": {
+      "part_number": "MC-TDIA22",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDIA22",
+        "counterpart": "MU-TDIA22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDIA62": {
+      "part_number": "MC-TDIA62",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDIA62",
+        "counterpart": "MU-TDIA62",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOD12": {
+      "part_number": "MC-TDOD12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOD12",
+        "counterpart": "MU-TDOD12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOD52": {
+      "part_number": "MC-TDOD52",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOD52",
+        "counterpart": "MU-TDOD52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PDOX01": {
+      "part_number": "MU-PDOX01",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-PDOX02": {
+      "part_number": "MU-PDOX02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PDOX02",
+        "counterpart": "MC-PDOX02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-PDOX02": {
+      "part_number": "MC-PDOX02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PDOX02",
+        "counterpart": "MU-PDOX02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOY22": {
+      "part_number": "MC-TDOY22",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOY22",
+        "counterpart": "MU-TDOY22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOY62": {
+      "part_number": "MC-TDOY62",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOY62",
+        "counterpart": "MU-TDOY62",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PDOY22": {
+      "part_number": "MU-PDOY22",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PDOY22",
+        "counterpart": "MC-PDOY22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-PDOY22": {
+      "part_number": "MC-PDOY22",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PDOY22",
+        "counterpart": "MU-PDOY22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOD13": {
+      "part_number": "MC-TDOD13",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOD13",
+        "counterpart": "MU-TDOD13",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOD14": {
+      "part_number": "MC-TDOD14",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOD14",
+        "counterpart": "MU-TDOD14",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOD53": {
+      "part_number": "MC-TDOD53",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOD53",
+        "counterpart": "MU-TDOD53",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOD54": {
+      "part_number": "MC-TDOD54",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOD54",
+        "counterpart": "MU-TDOD54",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOD22": {
+      "part_number": "MC-TDOD22",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOD22",
+        "counterpart": "MU-TDOD22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOD23": {
+      "part_number": "MC-TDOD23",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOD23",
+        "counterpart": "MU-TDOD23",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOD62": {
+      "part_number": "MC-TDOD62",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOD62",
+        "counterpart": "MU-TDOD62",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOD63": {
+      "part_number": "MC-TDOD63",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOD63",
+        "counterpart": "MU-TDOD63",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOA12": {
+      "part_number": "MC-TDOA12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOA12",
+        "counterpart": "MU-TDOA12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOA13": {
+      "part_number": "MC-TDOA13",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOA13",
+        "counterpart": "MU-TDOA13",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOA52": {
+      "part_number": "MC-TDOA52",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOA52",
+        "counterpart": "MU-TDOA52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOA53": {
+      "part_number": "MC-TDOA53",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOA53",
+        "counterpart": "MU-TDOA53",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOR12": {
+      "part_number": "MC-TDOR12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOR12",
+        "counterpart": "MU-TDOR12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOR52": {
+      "part_number": "MC-TDOR52",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOR52",
+        "counterpart": "MU-TDOR52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOR22": {
+      "part_number": "MC-TDOR22",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOR22",
+        "counterpart": "MU-TDOR22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOR62": {
+      "part_number": "MC-TDOR62",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOR62",
+        "counterpart": "MU-TDOR62",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOY23": {
+      "part_number": "MC-TDOY23",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOY23",
+        "counterpart": "MU-TDOY23",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDOY63": {
+      "part_number": "MC-TDOY63",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDOY63",
+        "counterpart": "MU-TDOY63",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-KBFT01": {
+      "part_number": "MU-KBFT01",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KBFT02": {
+      "part_number": "MU-KBFT02",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MC-TPIX12": {
+      "part_number": "MC-TPIX12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TPIX12",
+        "counterpart": "MU-TPIX12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TPIX52": {
+      "part_number": "MC-TPIX52",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TPIX52",
+        "counterpart": "MU-TPIX52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-PPIX02": {
+      "part_number": "MC-PPIX02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PPIX02",
+        "counterpart": "MU-PPIX02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TSDT02": {
+      "part_number": "MC-TSDT02",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TSDT02",
+        "counterpart": "MU-TSDT02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TSDM02": {
+      "part_number": "MC-TSDM02",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TSDM02",
+        "counterpart": "MU-TSDM02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TSDU02": {
+      "part_number": "MC-TSDU02",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TSDU02",
+        "counterpart": "MU-TSDU02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PSDX02": {
+      "part_number": "MU-PSDX02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PSDX02",
+        "counterpart": "MC-PSDX02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-PSDX02": {
+      "part_number": "MC-PSDX02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PSDX02",
+        "counterpart": "MU-PSDX02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TSIM12": {
+      "part_number": "MC-TSIM12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TSIM12",
+        "counterpart": "MU-TSIM12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TSIA12": {
+      "part_number": "MC-TSIA12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TSIA12",
+        "counterpart": "MU-TSIA12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-PSIM11": {
+      "part_number": "MU-PSIM11",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-PSIM11",
+        "counterpart": "MC-PSIM11",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-PSIM11": {
+      "part_number": "MC-PSIM11",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-PSIM11",
+        "counterpart": "MU-PSIM11",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-TSIM22": {
+      "part_number": "MU-TSIM22",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-PSIX02": {
+      "part_number": "MU-PSIX02",
+      "kind": "iop",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MC-GAIH12": {
+      "part_number": "MC-GAIH12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GAIH12",
+        "counterpart": "MU-GAIH12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GAIH13": {
+      "part_number": "MC-GAIH13",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GAIH13",
+        "counterpart": "MU-GAIH13",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GAIH14": {
+      "part_number": "MC-GAIH14",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GAIH14",
+        "counterpart": "MU-GAIH14",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GAIH22": {
+      "part_number": "MC-GAIH22",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GAIH22",
+        "counterpart": "MU-GAIH22",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GAIH82": {
+      "part_number": "MC-GAIH82",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GAIH82",
+        "counterpart": "MU-GAIH82",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GAIH83": {
+      "part_number": "MC-GAIH83",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GAIH83",
+        "counterpart": "MU-GAIH83",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GAIH84": {
+      "part_number": "MC-GAIH84",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GAIH84",
+        "counterpart": "MU-GAIH84",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GAIH92": {
+      "part_number": "MC-GAIH92",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GAIH92",
+        "counterpart": "MU-GAIH92",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GAOX02": {
+      "part_number": "MC-GAOX02",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GAOX02",
+        "counterpart": "MU-GAOX02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GAOX12": {
+      "part_number": "MC-GAOX12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GAOX12",
+        "counterpart": "MU-GAOX12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GAOX72": {
+      "part_number": "MC-GAOX72",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GAOX72",
+        "counterpart": "MU-GAOX72",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GAOX82": {
+      "part_number": "MC-GAOX82",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GAOX82",
+        "counterpart": "MU-GAOX82",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GDID12": {
+      "part_number": "MC-GDID12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GDID12",
+        "counterpart": "MU-GDID12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GDID13": {
+      "part_number": "MC-GDID13",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GDID13",
+        "counterpart": "MU-GDID13",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GDID82": {
+      "part_number": "MC-GDID82",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GDID82",
+        "counterpart": "MU-GDID82",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GDID83": {
+      "part_number": "MC-GDID83",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GDID83",
+        "counterpart": "MU-GDID83",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GDOD12": {
+      "part_number": "MC-GDOD12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GDOD12",
+        "counterpart": "MU-GDOD12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GDOD82": {
+      "part_number": "MC-GDOD82",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GDOD82",
+        "counterpart": "MU-GDOD82",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GDOL12": {
+      "part_number": "MC-GDOL12",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GDOL12",
+        "counterpart": "MU-GDOL12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GDOL82": {
+      "part_number": "MC-GDOL82",
+      "kind": "fta",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GDOL82",
+        "counterpart": "MU-GDOL82",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GPRD02": {
+      "part_number": "MU-GPRD02",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MU-GPRD02",
+        "counterpart": "MC-GPRD02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GPRD02": {
+      "part_number": "MC-GPRD02",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GPRD02",
+        "counterpart": "MU-GPRD02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GLFD02": {
+      "part_number": "MC-GLFD02",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GLFD02",
+        "counterpart": "MU-GLFD02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-GMAR52": {
+      "part_number": "MC-GMAR52",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-GMAR52",
+        "counterpart": "MU-GMAR52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MU-GMAR02": {
+      "part_number": "MU-GMAR02",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KGPR05": {
+      "part_number": "MU-KGPR05",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KGPR10": {
+      "part_number": "MU-KGPR10",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KDPR02": {
+      "part_number": "MU-KDPR02",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KDPR04": {
+      "part_number": "MU-KDPR04",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KDPR05": {
+      "part_number": "MU-KDPR05",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KSPR05": {
+      "part_number": "MU-KSPR05",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KDPR10": {
+      "part_number": "MU-KDPR10",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KSPR10": {
+      "part_number": "MU-KSPR10",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KDPR15": {
+      "part_number": "MU-KDPR15",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KSPR15": {
+      "part_number": "MU-KSPR15",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KDPR20": {
+      "part_number": "MU-KDPR20",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KSPR20": {
+      "part_number": "MU-KSPR20",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KDPR30": {
+      "part_number": "MU-KDPR30",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KSPR30": {
+      "part_number": "MU-KSPR30",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KDPR40": {
+      "part_number": "MU-KDPR40",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KSPR40": {
+      "part_number": "MU-KSPR40",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KDPR50": {
+      "part_number": "MU-KDPR50",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-KSPR50": {
+      "part_number": "MU-KSPR50",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MC-HPFI03": {
+      "part_number": "MC-HPFI03",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MC-HPFI23": {
+      "part_number": "MC-HPFI23",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MC-HPFI13": {
+      "part_number": "MC-HPFI13",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-IOFX03": {
+      "part_number": "MU-IOFX03",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-PMFX03": {
+      "part_number": "MU-PMFX03",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-PMFR03": {
+      "part_number": "MU-PMFR03",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MU-ILES01": {
+      "part_number": "MU-ILES01",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": null
+    },
+    "MC-TDON12": {
+      "part_number": "MC-TDON12",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDON12",
+        "counterpart": "MU-TDON12",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDON52": {
+      "part_number": "MC-TDON52",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDON52",
+        "counterpart": "MU-TDON52",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    },
+    "MC-TDPR02": {
+      "part_number": "MC-TDPR02",
+      "kind": "unclassified",
+      "connection_figures": [],
+      "document_supported_identity_relation": {
+        "requested": "MC-TDPR02",
+        "counterpart": "MU-TDPR02",
+        "relation": "mc_conformally_coated_mu_noncoated",
+        "evidence": "Conformally coated models of the FTAs and IOPs are identified by the prefix \u201cMC.\u201d Nonconformally coated models are identified by the prefix \u201cMU.\u201d"
+      }
+    }
+  },
+  "coverage": {
+    "recognized_count": 283,
+    "verified_connection_diagram": [
+      "MC-GRMT01",
+      "MU-GAIH12",
+      "MU-GAIH13",
+      "MU-GAIH14",
+      "MU-GAIH22",
+      "MU-GAIH82",
+      "MU-GAIH83",
+      "MU-GAIH84",
+      "MU-GAIH92",
+      "MU-GAOX02",
+      "MU-GAOX12",
+      "MU-GAOX72",
+      "MU-GAOX82",
+      "MU-GDID12",
+      "MU-GDID13",
+      "MU-GDID82",
+      "MU-GDID83",
+      "MU-GDOD12",
+      "MU-GDOD82",
+      "MU-GDOL12",
+      "MU-GDOL82",
+      "MU-TAIH01",
+      "MU-TAIH02",
+      "MU-TAIH03",
+      "MU-TAIH12",
+      "MU-TAIH13",
+      "MU-TAIH22",
+      "MU-TAIH23",
+      "MU-TAIH52",
+      "MU-TAIH53",
+      "MU-TAIH62",
+      "MU-TAMR02",
+      "MU-TAMR03",
+      "MU-TAMT02",
+      "MU-TAMT03",
+      "MU-TAMT12",
+      "MU-TAMT13",
+      "MU-TAOX01",
+      "MU-TAOX02",
+      "MU-TAOX12",
+      "MU-TAOX52",
+      "MU-TAOY22",
+      "MU-TAOY23",
+      "MU-TAOY52",
+      "MU-TAOY53",
+      "MU-TDIA11",
+      "MU-TDIA12",
+      "MU-TDIA21",
+      "MU-TDIA22",
+      "MU-TDIA52",
+      "MU-TDIA62",
+      "MU-TDIA72",
+      "MU-TDID11",
+      "MU-TDID12",
+      "MU-TDID52",
+      "MU-TDID72",
+      "MU-TDIY22",
+      "MU-TDIY62",
+      "MU-TDOA11",
+      "MU-TDOA12",
+      "MU-TDOA13",
+      "MU-TDOA52",
+      "MU-TDOA53",
+      "MU-TDOD11",
+      "MU-TDOD12",
+      "MU-TDOD13",
+      "MU-TDOD14",
+      "MU-TDOD21",
+      "MU-TDOD22",
+      "MU-TDOD23",
+      "MU-TDOD52",
+      "MU-TDOD53",
+      "MU-TDOD54",
+      "MU-TDOD62",
+      "MU-TDOD63",
+      "MU-TDON11",
+      "MU-TDON12",
+      "MU-TDON52",
+      "MU-TDOR11",
+      "MU-TDOR12",
+      "MU-TDOR21",
+      "MU-TDOR22",
+      "MU-TDOR52",
+      "MU-TDOR62",
+      "MU-TDOY22",
+      "MU-TDOY23",
+      "MU-TDOY62",
+      "MU-TDOY63",
+      "MU-TPIX12",
+      "MU-TPIX52",
+      "MU-TSTX03",
+      "MU-TSTX13",
+      "MU-TSTX53"
+    ],
+    "verified_via_document_supported_mc_mu_counterpart": [
+      "MC-GAIH12",
+      "MC-GAIH13",
+      "MC-GAIH14",
+      "MC-GAIH22",
+      "MC-GAIH82",
+      "MC-GAIH83",
+      "MC-GAIH84",
+      "MC-GAIH92",
+      "MC-GAOX02",
+      "MC-GAOX12",
+      "MC-GAOX72",
+      "MC-GAOX82",
+      "MC-GDID12",
+      "MC-GDID13",
+      "MC-GDID82",
+      "MC-GDID83",
+      "MC-GDOD12",
+      "MC-GDOD82",
+      "MC-GDOL12",
+      "MC-GDOL82",
+      "MC-TAIH02",
+      "MC-TAIH03",
+      "MC-TAIH12",
+      "MC-TAIH13",
+      "MC-TAIH22",
+      "MC-TAIH23",
+      "MC-TAIH52",
+      "MC-TAIH53",
+      "MC-TAIH62",
+      "MC-TAMR02",
+      "MC-TAMR03",
+      "MC-TAMT02",
+      "MC-TAMT03",
+      "MC-TAMT12",
+      "MC-TAMT13",
+      "MC-TAOX02",
+      "MC-TAOX12",
+      "MC-TAOX52",
+      "MC-TAOY22",
+      "MC-TAOY23",
+      "MC-TAOY52",
+      "MC-TAOY53",
+      "MC-TDIA12",
+      "MC-TDIA22",
+      "MC-TDIA52",
+      "MC-TDIA62",
+      "MC-TDIA72",
+      "MC-TDID12",
+      "MC-TDID52",
+      "MC-TDID72",
+      "MC-TDIY22",
+      "MC-TDIY62",
+      "MC-TDOA12",
+      "MC-TDOA13",
+      "MC-TDOA52",
+      "MC-TDOA53",
+      "MC-TDOD12",
+      "MC-TDOD13",
+      "MC-TDOD14",
+      "MC-TDOD22",
+      "MC-TDOD23",
+      "MC-TDOD52",
+      "MC-TDOD53",
+      "MC-TDOD54",
+      "MC-TDOD62",
+      "MC-TDOD63",
+      "MC-TDON12",
+      "MC-TDON52",
+      "MC-TDOR12",
+      "MC-TDOR22",
+      "MC-TDOR52",
+      "MC-TDOR62",
+      "MC-TDOY22",
+      "MC-TDOY23",
+      "MC-TDOY62",
+      "MC-TDOY63",
+      "MC-TPIX12",
+      "MC-TPIX52",
+      "MC-TSTX03",
+      "MC-TSTX13",
+      "MC-TSTX53"
+    ],
+    "iop_with_verified_compatible_fta_figures": [
+      "MC-PDIX02",
+      "MU-PDIX01",
+      "MU-PDIX02"
+    ],
+    "recognized_without_verified_connection_diagram": [
+      "MC-GLFD02",
+      "MC-GMAR52",
+      "MC-GPRD02",
+      "MC-GRPA01",
+      "MC-HPFI03",
+      "MC-HPFI13",
+      "MC-HPFI23",
+      "MC-PAIH02",
+      "MC-PAIH03",
+      "MC-PAIL02",
+      "MC-PAOX03",
+      "MC-PAOY22",
+      "MC-PDIY22",
+      "MC-PDOX02",
+      "MC-PDOY22",
+      "MC-PLAM02",
+      "MC-PPIX02",
+      "MC-PRHM01",
+      "MC-PSDX02",
+      "MC-PSIM11",
+      "MC-PSTX02",
+      "MC-PSTX03",
+      "MC-TAIL02",
+      "MC-TAIL03",
+      "MC-TDPR02",
+      "MC-TLPA02",
+      "MC-TRPA01",
+      "MC-TSDM02",
+      "MC-TSDT02",
+      "MC-TSDU02",
+      "MC-TSIA12",
+      "MC-TSIM12",
+      "MU-CMSC03",
+      "MU-CMSS03",
+      "MU-GDID72",
+      "MU-GDOL72",
+      "MU-GLFD02",
+      "MU-GMAR02",
+      "MU-GMAR52",
+      "MU-GPRD02",
+      "MU-GRPA01",
+      "MU-ILES01",
+      "MU-IOFX03",
+      "MU-KBFT01",
+      "MU-KBFT02",
+      "MU-KDPR02",
+      "MU-KDPR04",
+      "MU-KDPR05",
+      "MU-KDPR10",
+      "MU-KDPR15",
+      "MU-KDPR20",
+      "MU-KDPR30",
+      "MU-KDPR40",
+      "MU-KDPR50",
+      "MU-KGPR05",
+      "MU-KGPR10",
+      "MU-KLO305",
+      "MU-KRCJ00",
+      "MU-KSPR05",
+      "MU-KSPR10",
+      "MU-KSPR15",
+      "MU-KSPR20",
+      "MU-KSPR30",
+      "MU-KSPR40",
+      "MU-KSPR50",
+      "MU-MASX02",
+      "MU-PAIH01",
+      "MU-PAIH02",
+      "MU-PAIH03",
+      "MU-PAIL01",
+      "MU-PAIL02",
+      "MU-PAOX01",
+      "MU-PAOX02",
+      "MU-PAOX03",
+      "MU-PAOY22",
+      "MU-PDIY22",
+      "MU-PDOX01",
+      "MU-PDOX02",
+      "MU-PDOY22",
+      "MU-PLAM02",
+      "MU-PMFR03",
+      "MU-PMFX03",
+      "MU-PPIX02",
+      "MU-PRHM01",
+      "MU-PSDX02",
+      "MU-PSIM11",
+      "MU-PSIX02",
+      "MU-PSTX01",
+      "MU-PSTX02",
+      "MU-PSTX03",
+      "MU-TAIL01",
+      "MU-TAIL02",
+      "MU-TAIL03",
+      "MU-TAOY62",
+      "MU-TAOY63",
+      "MU-TDPR01",
+      "MU-TDPR02",
+      "MU-TLP02",
+      "MU-TLPA02",
+      "MU-TRPA01",
+      "MU-TSDM02",
+      "MU-TSDT02",
+      "MU-TSDU02",
+      "MU-TSIA12",
+      "MU-TSIM12",
+      "MU-TSIM22"
+    ],
+    "note": "recognized_without_verified_connection_diagram must not be answered by generic RAG, planning manuals, or compatibility-table-only hits."
+  }
+}
