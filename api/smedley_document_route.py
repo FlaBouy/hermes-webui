@@ -685,6 +685,12 @@ def neutralize_match(match: object, *, public_origin: object = "") -> dict[str, 
         "index_href",
         "index_formats",
         "retrieval",
+        "figure",
+        "printed_page",
+        "pdf_page",
+        "caption_evidence",
+        "diagram_target",
+        "figures",
     ):
         if key in match and match.get(key) is not None:
             out[key] = match.get(key)
@@ -932,6 +938,38 @@ def build_operator_document_reply(
         ]
         return "\n".join(line for line in lines if line is not None).strip(), None
 
+    if kind == "verified_connection_diagram":
+        figures = item.get("figures") if isinstance(item.get("figures"), list) else []
+        if not figures:
+            figures = [item]
+        relation = item.get("document_supported_identity_relation")
+        lines = [
+            f"I found a **verified** wiring-schematic location for **{part or 'the requested part'}**:",
+            "",
+            identity,
+        ]
+        if isinstance(relation, dict) and relation.get("counterpart"):
+            lines.append(
+                f"({part} is the conformally-coated counterpart of {relation.get('counterpart')}; "
+                "same connection diagram.)"
+            )
+        lines.append("")
+        for fig in figures:
+            target = str(fig.get("diagram_target") or "").strip()
+            fig_no = fig.get("figure")
+            printed = fig.get("printed_page")
+            pdf_pg = fig.get("pdf_page")
+            caption = str(fig.get("caption_evidence") or "").strip()
+            line = f"- Figure **{fig_no}**, printed page **{printed}** (PDF page {pdf_pg})"
+            if target:
+                line += f" — {target}"
+            lines.append(line)
+            if caption:
+                lines.append(f"  {caption}")
+        if href:
+            lines.extend(["", f"[Open manual]({href})"])
+        return "\n".join(lines).strip(), None
+
     who = f" for **{part}**" if part else ""
     lines = [
         f"I found the engineering-library manual{who}:",
@@ -1029,6 +1067,17 @@ def build_compact_spoken_document_reply(
             + f", not an exact substitute for {part or 'the requested part'}. "
             "The manual is on screen."
         )
+    if kind == "verified_connection_diagram":
+        printed = top.get("printed_page")
+        fig_no = top.get("figure")
+        bits = [f"I found {title}{(' for ' + part) if part else ''}."]
+        if printed not in (None, ""):
+            page_bit = f"Verified wiring schematic on page {printed}"
+            if fig_no:
+                page_bit += f", figure {fig_no}"
+            bits.append(page_bit + ".")
+        bits.append("The manual is on screen.")
+        return " ".join(bits)
     who = f" for {part}" if part else ""
     bits = [f"I found {title}{who}."]
     if doc_spoken:
