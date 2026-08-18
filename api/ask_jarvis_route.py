@@ -28,8 +28,9 @@ logger = logging.getLogger(__name__)
 _ASK_JARVIS_LEADING = re.compile(r"^\s*ask\s+jarvis\s*:\s*", re.IGNORECASE)
 # Conversational Biggy/PTT forms, including past-tense STT:
 # "Ask Jarvis to …" / "I asked Jarvis to …" / "asking Jarvis for …" / "tell Jarvis to …"
+# / "I need Jarvis to …" / "need Jarvis for …"
 _ASK_JARVIS_EMBEDDED = re.compile(
-    r"(?i)(?:^|[\s,;])(?:ask(?:ed|ing)?|tell|have)\s+jarvis\b(?:\s*:|\s+to\b|\s+for\b)"
+    r"(?i)(?:^|[\s,;])(?:ask(?:ed|ing)?|tell|have|need)\s+jarvis\b(?:\s*:|\s+to\b|\s+for\b)"
 )
 # Role/meta talk about Ask Jarvis without a concrete travel/task handoff.
 _ASK_JARVIS_META_ROLE = re.compile(
@@ -1201,7 +1202,12 @@ def try_ask_jarvis(message: str, *, biggy_ingress_ts: float | None = None, corre
     except Exception:
         logger.exception("ask_jarvis weather tts gate timing merge failed")
     # Chat bubble = speakable answer only (no Citations / receipt footer on screen).
-    reply = tts_spoken or ""
+    # Prefix with a truthful attribution: this turn is answered by Jarvis via
+    # hard-bind, not the host assistant (Smedley/Biggy). The window/session
+    # label stays whatever the host profile is — this line is the per-message
+    # truth about who actually generated the answer, so the chat bubble text
+    # itself cannot silently pass off Jarvis's answer as the host's own.
+    reply = f"**Jarvis:** {tts_spoken}" if tts_spoken else (tts_spoken or "")
     return {
         "handled": True,
         "ok": bool(payload.get("ok", True) and proc.returncode == 0 and payload.get("speak")),
