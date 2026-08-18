@@ -385,20 +385,22 @@ def test_composer_markup_has_gpt_voice_button():
     assert 'data-i18n-title="gpt_voice_toggle"' in html
 
 
-def test_reply_speech_hook_reads_the_same_dom_contract_as_auto_read():
-    """The speech hook must query the selectors the app actually renders.
-
-    A mismatch here is silent: the hook finds no text, never speaks, and the
-    session stays in "processing" with the mic gated until the operator quits.
-    """
+def test_reply_speech_hook_does_not_steal_completed_turns():
+    """Completed Hermes turns stay on Austin. Realtime must not speak replies."""
     js = _voice_client_js()
     ui = open("static/ui.js", encoding="utf-8").read()
     selector = '.msg-row[data-role="assistant"], .assistant-segment[data-raw-text]'
     assert selector in ui, "ui.js changed the assistant DOM contract"
-    assert selector in js, "GPT Voice hook does not match the rendered assistant DOM"
-    assert "dataset.rawText" in js
-    # The selectors that never matched anything must be gone.
-    assert ".message.assistant .msg-content" not in js
+    hook_start = js.index("function _hookHermesReplySpeech")
+    hook_end = js.index("function _unhookHermesReplySpeech")
+    hook = js[hook_start:hook_end]
+    assert "_speakHermesText" not in hook
+    assert "_origAutoRead.apply" in hook
+    emitter_start = js.index("function selectSmedleyVoiceEmitter")
+    emitter = js[emitter_start : js.index("window.selectSmedleyVoiceEmitter")]
+    assert "return 'austin'" in emitter
+    assert "return 'none'" in emitter
+    assert "return 'realtime'" not in emitter
 
 
 def test_finished_turn_always_returns_to_ready():

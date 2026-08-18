@@ -727,6 +727,11 @@
       const pedalAlive=!!status.pedal_alive;
       const phase=String(status.phase||'idle');
       const busy=pedalAlive&&['listening','processing','speaking'].includes(phase);
+      // NOTE: voice-emitter ownership is decided solely by the per-message
+      // ptt_owned_tts/tts_owner stamp (see selectSmedleyVoiceEmitter in
+      // realtime_voice.js). A blanket window here keyed off "pedal busy for
+      // any reason" previously silenced Austin on unrelated GUI/typed turns
+      // (confirmed root cause, 2026-08-18) — do not reintroduce it.
       ptt.classList.remove('ok','active','down');
       if(!pedalAlive)ptt.classList.add('down');
       else if(busy)ptt.classList.add('active');
@@ -793,6 +798,8 @@
           const eventGui=String(status.gui_id||status.completion_instance||'');
           if(eventGui&&eventGui!==GUI_ID&&eventGui!==PTT_INSTANCE)return;
           if(status.completion_instance&&String(status.completion_instance)!==PTT_INSTANCE)return;
+          // Ownership for voice arbitration comes from the loaded session's
+          // own ptt_owned_tts/tts_owner message stamp, not a global timer.
           const loadSess=(typeof window.loadSession==='function')?window.loadSession:(typeof loadSession==='function'?loadSession:null);
           if(completionSid&&loadSess){
             await loadSess(completionSid,{force:true,externalRefreshReason:'ptt-completion',guiId:GUI_ID});
@@ -1001,9 +1008,29 @@
         .replace(/\b(?:sidecar preview|card title|lan_url)\s*:?\s*[^\n]*/gi,'')
         .replace(/\s{2,}/g,' ').trim();
     }
+    function _fallbackLastAssistantPttOwned(){
+      try{
+        const msgs=(typeof S!=='undefined'&&Array.isArray(S.messages))?S.messages:[];
+        for(let i=msgs.length-1;i>=0;i--){
+          const m=msgs[i];
+          if(!m||m.role!=='assistant')continue;
+          return !!(m.ptt_owned_tts||m.tts_owner==='pedal_austin');
+        }
+      }catch(_){}
+      return false;
+    }
     window.autoReadLastAssistant=function(){
-      // Prefer compact spoken_reply from document_route / engineering RAG — never narrate full RAG body.
+      // Load-order fallback (realtime_voice.js not yet loaded) checks the
+      // same per-message ptt_owned_tts/tts_owner stamp directly — never a
+      // global busy-heartbeat window, which silenced unrelated GUI turns.
+      const emitter=(typeof window.selectSmedleyVoiceEmitter==='function')
+        ? window.selectSmedleyVoiceEmitter({realtimeActive:!!window.__smedleyRealtimeVoiceActive})
+        : (_fallbackLastAssistantPttOwned() ? 'none' : 'austin');
+      if(emitter==='none') return;
+      if(emitter!=='austin') return;
+      // Prefer compact spoken_text / spoken_reply — never narrate full RAG body.
       let spoken='';
+      let fromServerSpoken=false;
       try{
         if(window.__smedleyDocSpokenReply){
           spoken=String(window.__smedleyDocSpokenReply||'').trim();
@@ -1017,6 +1044,7 @@
           if(!m||m.role!=='assistant') continue;
           if(m.document_route||m.active_document_review||m.engineering_rag_answer||m.spoken_reply||m.spoken_text){
             spoken=String(m.spoken_text||m.spoken_reply||'').trim();
+            fromServerSpoken=!!spoken;
           }
           break;
         }
@@ -1037,12 +1065,13 @@
       }catch(_){}
       if(!spoken && !isDocRoute) spoken=voiceSafeText(text);
       if(!spoken && isDocRoute) spoken='The manual is on screen.';
-      // Hard cap: governed spoken payloads may be longer; never truncate mid-sentence hard at 240.
-      // Still refuse long retrieval dumps / CoT monologues.
-      if(spoken.length>420){
-        const cut=spoken.slice(0,417);
-        const sp=cut.lastIndexOf(' ');
-        spoken=(sp>280?cut.slice(0,sp):cut).trim()+'…';
+      // Server spoken_text is already complete and <=400. Do not ellipsis-cut the closer.
+      if(!fromServerSpoken){
+        if(spoken.length>420){
+          const cut=spoken.slice(0,417);
+          const sp=cut.lastIndexOf(' ');
+          spoken=(sp>280?cut.slice(0,sp):cut).trim();
+        }
       }
       if(spoken){
         // Strip residual markdown / link chrome before TTS.
@@ -1053,24 +1082,29 @@
           .replace(/\/api\/extensions\/\S+/g,'')
           .replace(/\s{2,}/g,' ')
           .trim();
-        if(spoken.length>400){
+        if(!fromServerSpoken && spoken.length>400){
           const cut=spoken.slice(0,397);
           const sp=cut.lastIndexOf(' ');
-          spoken=(sp>280?cut.slice(0,sp):cut).trim()+'…';
+          spoken=(sp>280?cut.slice(0,sp):cut).trim();
         }
-        const key=`${currentHermesSessionId()}|${rows.length}|${spoken}`;
+        const asstId=(()=>{try{
+          const msgs=(typeof S!=='undefined'&&Array.isArray(S.messages))?S.messages:[];
+          for(let i=msgs.length-1;i>=0;i--){
+            const m=msgs[i];
+            if(m&&m.role==='assistant') return String(m.id||m.timestamp||spoken);
+          }
+        }catch(_){} return spoken;})();
+        const key=`${currentHermesSessionId()}|${asstId}|${spoken}`;
         if(key!==lastSpokenKey){
           lastSpokenKey=key;
           whenAckClear().then(()=>proxyJson('/speak',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:spoken})})).catch(()=>{
             lastSpokenKey='';
             const note=document.getElementById('smedleyHeaderNote');
-            if(note)note.textContent='Smedley voice output failed.';
+            if(note)note.textContent='Smedley voice unavailable — Austin did not play; no substitute voice.';
           });
         }
       }
-      // The distributed-audio contract keeps playback on Smedley. Do not call
-      // Hermes' browser-local TTS path on TD or another viewing workstation.
-      if(!text&&!spoken&&original)return original.apply(this,arguments);
+      return;
     };
   }
 

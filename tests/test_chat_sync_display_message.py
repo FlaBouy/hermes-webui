@@ -234,3 +234,27 @@ def test_sync_chat_oversized_display_message_returns_400_before_agent(
 
     assert handler.status == 400
     assert FakeAgent.instances == []
+
+
+def test_sync_chat_ptt_owned_tts_stamps_assistant(sync_chat_env, monkeypatch):
+    tmp_path = sync_chat_env
+    session = _make_session(tmp_path)
+    _install_fake_agent(monkeypatch, capture={})
+    handler = _FakePostHandler()
+    routes._handle_chat_sync(
+        handler,
+        {
+            "session_id": session.session_id,
+            "message": "What is NEC 250.122?\n\n[Voice PTT turn]",
+            "display_message": "What is NEC 250.122?",
+            "ptt_owned_tts": True,
+            "workspace": str(tmp_path),
+        },
+    )
+    assert handler.status == 200
+    body = handler.json_body()
+    assert body.get("ptt_owned_tts") is True
+    saved = models.get_session(session.session_id)
+    asst = [m for m in saved.messages if m.get("role") == "assistant"][-1]
+    assert asst.get("ptt_owned_tts") is True
+    assert asst.get("tts_owner") == "pedal_austin"

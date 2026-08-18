@@ -456,6 +456,7 @@
   function _setPhase(phase, detail) {
     const prev = STATE.phase;
     STATE.phase = phase;
+    try { window.__smedleyRealtimeVoiceActive = !!STATE.active; } catch (_) {}
     // A fresh listening window is a new voice turn, so re-arm the one-shot
     // submission guard — but only when entering listening from a non-listening
     // phase. Re-entrant listening must not reset mid-utterance state.
@@ -652,6 +653,10 @@
   }
 
   function _speakHermesText(text) {
+    if (typeof selectSmedleyVoiceEmitter === 'function' && selectSmedleyVoiceEmitter({}) === 'none') {
+      if (STATE.active) _setPhase('listening');
+      return;
+    }
     const spoken = _stripSpeechText(text);
     if (!spoken) {
       // Nothing speakable (e.g. a code-only reply) still ends the turn.
@@ -676,14 +681,9 @@
       STATE.pendingSpeak = false;
       _setPhase('listening');
       _notify(
-        _t('gpt_voice_speak_fallback', 'Smedley Voice not ready — using browser TTS'),
+        _t('gpt_voice_speak_fallback', 'Smedley Voice not ready — reply was not spoken'),
         'warning'
       );
-      if (typeof speakMessage === 'function') {
-        try {
-          speakMessage({ textContent: spoken });
-        } catch (_) {}
-      }
     }
   }
 
@@ -1104,34 +1104,44 @@
     });
   }
 
+  function lastAssistantPttOwned() {
+    try {
+      const msgs = (typeof S !== 'undefined' && Array.isArray(S.messages)) ? S.messages : [];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        const m = msgs[i];
+        if (!m || m.role !== 'assistant') continue;
+        return !!(m.ptt_owned_tts || m.tts_owner === 'pedal_austin');
+      }
+    } catch (_) {}
+    return false;
+  }
+
+  function smedleyPttOwnsCompletedTurn() {
+    // Scope ownership to the actual displayed turn via its server-stamped
+    // ptt_owned_tts/tts_owner marker only. A wall-clock window keyed off
+    // "any LEFT-pedal busy heartbeat" (formerly __smedleyPttOwnsVoiceUntil)
+    // silenced Austin for unrelated GUI/typed turns whenever the physical
+    // pedal happened to be busy for any reason within the prior 20s —
+    // confirmed root cause of a silent-voice incident on 2026-08-18.
+    return lastAssistantPttOwned();
+  }
+
+  function selectSmedleyVoiceEmitter(opts) {
+    // LEFT PTT owns Austin for that completed turn. Realtime/browser stay
+    // available as features, but must not emit on the same turn.
+    if (smedleyPttOwnsCompletedTurn()) return 'none';
+    return 'austin';
+  }
+  try { window.selectSmedleyVoiceEmitter = selectSmedleyVoiceEmitter; } catch (_) {}
+
   function _hookHermesReplySpeech() {
     if (_origAutoRead) return;
     if (typeof autoReadLastAssistant !== 'function') return;
     _origAutoRead = autoReadLastAssistant;
     window.autoReadLastAssistant = function () {
-      if (!STATE.active) {
+      if (typeof _origAutoRead === 'function') {
         return _origAutoRead.apply(this, arguments);
       }
-      try {
-        // Must match ui.js autoReadLastAssistant: the reply text lives in
-        // data-raw-text on the assistant row/segment. Guessing other selectors
-        // silently yields no text and strands the session in "processing".
-        const rows = document.querySelectorAll(
-          '.msg-row[data-role="assistant"], .assistant-segment[data-raw-text]'
-        );
-        const last = rows[rows.length - 1];
-        const text = last ? last.dataset.rawText || last.innerText || '' : '';
-        if (text.trim()) {
-          _speakHermesText(text);
-          return;
-        }
-        // Nothing to speak: the turn is still over, so return to ready rather
-        // than leaving the operator stuck behind the echo guard.
-        if (STATE.active) _setPhase('listening');
-        return;
-      } catch (_) {}
-      if (STATE.active) _setPhase('listening');
-      return _origAutoRead.apply(this, arguments);
     };
   }
 
@@ -1249,6 +1259,7 @@
   async function startGptVoice() {
     if (STATE.active) return;
     STATE.active = true;
+    try { window.__smedleyRealtimeVoiceActive = true; } catch (_) {}
     _hookHermesReplySpeech();
     try {
       await _connect();
@@ -1265,6 +1276,7 @@
     // audibly immediate.
     _stopPlayback();
     STATE.active = false;
+    try { window.__smedleyRealtimeVoiceActive = false; } catch (_) {}
     _cleanupMedia();
     _unhookHermesReplySpeech();
     _setPhase('idle');
@@ -1386,6 +1398,7 @@
   /** Test/smoke only: arm hold-to-talk gates without a live WebRTC session. */
   window.__gptVoiceArmHoldForTest = function () {
     STATE.active = true;
+    try { window.__smedleyRealtimeVoiceActive = true; } catch (_) {}
     STATE.phase = 'listening';
     STATE.talking = false;
     STATE.turnSubmitted = false;

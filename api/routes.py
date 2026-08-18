@@ -5769,7 +5769,27 @@ def _handle_extension_sidecar_proxy(
         proxy_timeout = (
             _EXTENSION_SIDECAR_PROXY_STREAM_TIMEOUT_SECONDS if stream_binary else 10
         )
+        # Diagnostic-only (no behavior change): a phantom-200 was observed for
+        # the smedley-engineering /speak proxy on 2026-08-18 — the browser got
+        # 200 back from this proxy but the request never reached the sidecar's
+        # own request log. Log the actual upstream round trip for /speak calls
+        # so the next occurrence pinpoints where the response actually came
+        # from. Low-noise: scoped to the speak path only.
+        _diag_speak = proxy_path.rstrip("/").endswith("speak")
+        _diag_t0 = time.time() if _diag_speak else None
         with opener.open(request, timeout=proxy_timeout) as response:
+            if _diag_speak:
+                try:
+                    logger.warning(
+                        "[sidecar-proxy-diag] speak upstream_url=%s method=%s "
+                        "status=%s elapsed_ms=%.1f",
+                        target["upstream_url"],
+                        method,
+                        getattr(response, "status", None),
+                        (time.time() - _diag_t0) * 1000.0,
+                    )
+                except Exception:
+                    pass
             if stream_binary:
                 return _send_extension_sidecar_proxy_stream(
                     handler,
@@ -5803,10 +5823,16 @@ def _handle_extension_sidecar_proxy(
                 response.headers,
             )
     except ExtensionSidecarProxyError as exc:
+        if proxy_path.rstrip("/").endswith("speak"):
+            logger.warning("[sidecar-proxy-diag] speak resolve failed: %s (status=%s)", exc, exc.status)
         return bad(handler, str(exc), status=exc.status)
     except ValueError as exc:
+        if proxy_path.rstrip("/").endswith("speak"):
+            logger.warning("[sidecar-proxy-diag] speak body error: %s", exc)
         return bad(handler, str(exc), status=502)
     except HTTPError as exc:
+        if proxy_path.rstrip("/").endswith("speak"):
+            logger.warning("[sidecar-proxy-diag] speak upstream HTTPError code=%s", exc.code)
         try:
             body = _read_extension_sidecar_proxy_body(exc)
         except ValueError as read_exc:
@@ -23002,6 +23028,16 @@ def _handle_chat_start(handler, body, diag=None):
         # WebUI and pedal PTT have the same evidence-bound behavior.
         if not attachments:
             try:
+                from api.smedley_fast_route import try_smedley_fast_route
+
+                fast = try_smedley_fast_route(msg)
+            except Exception:
+                logger.exception("smedley fast route failed closed to ordinary chat")
+                fast = None
+            if isinstance(fast, dict) and fast.get("handled"):
+                return _return_smedley_fast_route(handler, s, msg, fast)
+        if not attachments:
+            try:
                 from api.smedley_document_route import try_active_document_review
 
                 review = try_active_document_review(
@@ -23445,6 +23481,142 @@ def _normalize_chat_attachments(raw_attachments):
     return normalized
 
 
+def _chat_body_ptt_owned_tts(body) -> bool:
+    if not isinstance(body, dict):
+        return False
+    value = body.get("ptt_owned_tts")
+    if value is True or value == 1:
+        return True
+    return isinstance(value, str) and value.strip().lower() in {"1", "true", "yes"}
+
+
+def _stamp_ptt_owned_tts(messages, owned: bool) -> None:
+    """Mark the completed assistant row so GUI Realtime/browser TTS stay silent."""
+    if not owned or not isinstance(messages, list):
+        return
+    for row in reversed(messages):
+        if isinstance(row, dict) and row.get("role") == "assistant":
+            row["ptt_owned_tts"] = True
+            row["tts_owner"] = "pedal_austin"
+            return
+
+
+def _server_speak_smedley(text: str) -> None:
+    """Fire-and-forget Smedley Austin speech via the local TTS sidecar.
+
+    Confirmed root cause (2026-08-18): the async /api/chat/start fast-route
+    response carries stream_id=None, which messages.js never recognizes as a
+    terminal state with its own auto-read hook (unlike document_route/
+    active_document_review/engineering_rag_answer, which each have an explicit
+    client-side autoReadLastAssistant call). It falls through to the normal
+    SSE-stream path, whose "done" handler — the only place client TTS is
+    triggered for this shape — never fires. Result: fast-route GUI replies
+    render correctly but never speak, on any browser/tab, local or remote.
+    Speaking directly from the server bypasses that gap (and every client-side
+    failure mode: stale tabs, JS exceptions, remote sessions) entirely.
+    """
+    spoken = str(text or "").strip()
+    if not spoken:
+        return
+
+    def _run():
+        try:
+            body = json.dumps({"text": spoken[:800]}).encode("utf-8")
+            req = Request(
+                "http://127.0.0.1:5004/speak",
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            from urllib.request import urlopen
+
+            urlopen(req, timeout=10).read()
+        except Exception:
+            logger.warning("[smedley-server-speak] direct sidecar speak failed", exc_info=True)
+
+    threading.Thread(target=_run, daemon=True, name="smedley-server-speak").start()
+
+
+def _return_smedley_fast_route(handler, s, msg, routed, ptt_owned_tts=False):
+    """Persist a pre-agent fast-route turn and return JSON. No agent/tools."""
+    reply = str((routed or {}).get("reply") or "").strip()
+    spoken = str(
+        (routed or {}).get("spoken_text")
+        or (routed or {}).get("spoken_reply")
+        or reply
+    ).strip() or None
+    now_ts = int(time.time())
+    if not isinstance(getattr(s, "messages", None), list):
+        s.messages = []
+    s.messages.extend(
+        [
+            {"role": "user", "content": msg, "timestamp": now_ts},
+            {
+                "role": "assistant",
+                "content": reply,
+                "timestamp": now_ts + 1,
+                "smedley_fast_route": True,
+                "smedley_fast_route_kind": (routed or {}).get("route"),
+                "spoken_text": spoken,
+                "spoken_reply": spoken,
+                "tool_calls": int((routed or {}).get("tool_calls") or 0),
+                "provider_calls": int((routed or {}).get("provider_calls") or 0),
+            },
+        ]
+    )
+    server_spoke = False
+    if not ptt_owned_tts:
+        # GUI (/api/chat/start) fast-route turn: the pedal doesn't own this
+        # one, so nothing else will speak it (see _server_speak_smedley).
+        # Speak directly and stamp the row so client-side arbitration
+        # (selectSmedleyVoiceEmitter / lastAssistantPttOwned) treats it as
+        # already-spoken and never double-speaks.
+        _server_speak_smedley(spoken)
+        server_spoke = True
+    _stamp_ptt_owned_tts(s.messages, ptt_owned_tts or server_spoke)
+    s.pending_user_message = None
+    s.active_stream_id = None
+    if hasattr(s, "pending_started_at"):
+        s.pending_started_at = None
+    try:
+        if not getattr(s, "title", None) or str(s.title).strip() in (
+            "",
+            "Untitled",
+            "New chat",
+        ):
+            s.title = (str(msg)[:64] or "Smedley").strip()
+    except Exception:
+        pass
+    try:
+        s.save()
+    except Exception:
+        logger.exception("failed to persist smedley fast route for %s", getattr(s, "session_id", None))
+        return bad(handler, "failed to persist fast route turn", 500)
+    try:
+        with LOCK:
+            SESSIONS[s.session_id] = s
+            SESSIONS.move_to_end(s.session_id)
+    except Exception:
+        pass
+    return j(
+        handler,
+        {
+            "session_id": s.session_id,
+            "stream_id": None,
+            "smedley_fast_route": True,
+            "route": (routed or {}).get("route"),
+            "reply": reply,
+            "spoken_text": spoken,
+            "spoken_reply": spoken,
+            "tool_calls": int((routed or {}).get("tool_calls") or 0),
+            "provider_calls": int((routed or {}).get("provider_calls") or 0),
+            "title": getattr(s, "title", None),
+            "ptt_owned_tts": bool(ptt_owned_tts or server_spoke),
+            "error": None,
+        },
+    )
+
+
 def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
     """PTT/sync ``/api/chat`` Ask Jarvis hard-bind (blocks until Jarvis + TTS done).
 
@@ -23744,6 +23916,7 @@ def _handle_chat_sync(handler, body):
                 handler,
                 f"display_message exceeds {SYNC_DISPLAY_MESSAGE_MAX_CHARS} characters",
             )
+    ptt_owned = _chat_body_ptt_owned_tts(body)
     # PTT Ask Jarvis must hard-bind here (pedal uses /api/chat, not /api/chat/start).
     # Detect on display_message (raw utterance) first — wrapped message may bury the cue.
     try:
@@ -23754,6 +23927,17 @@ def _handle_chat_sync(handler, body):
         if _is_aj_sync(display_msg) or _is_aj_sync(msg):
             ask_objective = display_msg if _is_aj_sync(display_msg) else msg
             return _handle_ask_jarvis_sync_hard_bind(handler, s, ask_objective)
+    try:
+        from api.smedley_fast_route import try_smedley_fast_route
+
+        fast = try_smedley_fast_route(display_msg)
+    except Exception:
+        logger.exception("smedley fast route failed closed to ordinary chat")
+        fast = None
+    if isinstance(fast, dict) and fast.get("handled"):
+        return _return_smedley_fast_route(
+            handler, s, display_msg, fast, ptt_owned_tts=_chat_body_ptt_owned_tts(body)
+        )
     # PTT uses this synchronous endpoint.  Once a document was selected on the
     # same session, answer paragraph/section review asks from that document's
     # extracted preview instead of asking the model to guess from a sidecar URL.
@@ -23787,6 +23971,7 @@ def _handle_chat_sync(handler, body):
                 "spoken_reply": spoken,
             },
         ])
+        _stamp_ptt_owned_tts(s.messages, _chat_body_ptt_owned_tts(body))
         try:
             s.save()
         except Exception:
@@ -23797,6 +23982,7 @@ def _handle_chat_sync(handler, body):
             "answer": reply,
             "spoken_reply": spoken,
             "active_document_review": True,
+            "ptt_owned_tts": _chat_body_ptt_owned_tts(body),
             "source": review.get("source"),
             "active_document": getattr(s, "active_document", None),
             "extraction": review.get("extraction"),
@@ -23842,6 +24028,7 @@ def _handle_chat_sync(handler, body):
                 "spoken_reply": spoken,
             },
         ])
+        _stamp_ptt_owned_tts(s.messages, _chat_body_ptt_owned_tts(body))
         try:
             s.save()
         except Exception:
@@ -23854,6 +24041,7 @@ def _handle_chat_sync(handler, body):
                 "answer": reply,
                 "spoken_reply": spoken,
                 "engineering_rag_answer": True,
+                "ptt_owned_tts": _chat_body_ptt_owned_tts(body),
                 "source": engineering.get("source"),
                 "active_document": getattr(s, "active_document", None),
                 "part_number": engineering.get("part_number"),
@@ -24098,6 +24286,14 @@ def _handle_chat_sync(handler, body):
             source=getattr(s, "pending_user_source", None) or "webui",
         )
         _compact_session_image_parts_for_persistence(s)
+        spoken_text = ""
+        try:
+            from api.smedley_document_route import attach_spoken_text_to_last_assistant
+
+            spoken_text = attach_spoken_text_to_last_assistant(s.messages)
+        except Exception:
+            logger.debug("Failed to attach sync-chat spoken_text", exc_info=True)
+        _stamp_ptt_owned_tts(s.messages, ptt_owned)
         # Only auto-generate title when still default; preserves user renames
         if s.title == "Untitled":
             s.title = title_from(s.messages, s.title)
@@ -24130,6 +24326,8 @@ def _handle_chat_sync(handler, body):
         handler,
         {
             "answer": result.get("final_response") or "",
+            "spoken_text": spoken_text or None,
+            "ptt_owned_tts": bool(ptt_owned),
             "status": "done" if result.get("completed", True) else "partial",
             "session": s.compact() | {"messages": s.messages},
             "result": {k: v for k, v in result.items() if k != "messages"},

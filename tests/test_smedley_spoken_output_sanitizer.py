@@ -9,6 +9,7 @@ payload — speaking only the normal answer prose.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -133,13 +134,13 @@ def test_try_document_route_reply_vs_spoken_reply(monkeypatch):
     # Visible: absolute clickable sidecar URL preserved.
     assert HREF in reply
     assert "📄" in reply or "02-315.pdf" in reply
-    # Spoken: answer prose only — no URL / filename / route chrome.
-    assert "Conductor ampacity table" in spoken
-    assert "02-315.pdf" not in spoken
+    # Spoken: compact TTS — no URL / filename / route chrome.
     assert HREF not in spoken
+    assert "02-315.pdf" not in spoken
     assert "sidecar preview" not in spoken.lower()
     assert "score=" not in spoken.lower()
-    assert spoken == docroute.sanitize_for_spoken_output(reply)
+    assert "http" not in spoken.lower()
+    assert "The manual is on screen" in spoken or "I found" in spoken
 
 
 def test_strip_for_tts_js_matches_voice_safe_contract():
@@ -202,6 +203,88 @@ def test_smedley_distributed_voice_uses_voice_safe_text_before_speak():
     body = extract_function(src, "installSmedleyVoiceOutput")
     assert "function voiceSafeText(raw)" in body
     assert "window._stripForTTS" in body
-    assert "const spoken=voiceSafeText(text);" in body
-    assert "JSON.stringify({text:spoken})" in body
-    assert "JSON.stringify({text})" not in body
+    assert "voiceSafeText(text)" in body
+    assert "JSON.stringify({text:spoken})" in body or "JSON.stringify(body)" in body
+
+
+# Exact 05:13 typed Smedley reply (session 9311944c733a, assistant id 4).
+_SMEDLEY_0513_DISPLAY = (
+    "Systems green across the board:\n\n"
+    "- Hermes Agent API server: running and responding\n"
+    "- Local file access: operational (home at /Users/rick)\n"
+    "- Toolset loaded: all major tools available (terminal, web_search, memory, skill_view, etc.)\n"
+    "- Workspace directory: ready (/Users/rick/.hermes/profiles/smedley/workspace)\n"
+    "- Model active: qwen/qwen3.5-35b-a3b via LM Studio\n"
+    "- Skills catalog loaded: 20+ skills available including hermes-agent, github, debugging, and fleet tools\n\n"
+    "No red flags or blocked resources. What's the first order of business?"
+)
+
+
+def test_gateway_spoken_text_keeps_display_and_closing_question():
+    display = _SMEDLEY_0513_DISPLAY
+    spoken = docroute.spoken_text_for_gateway_reply(display)
+
+    assert display == _SMEDLEY_0513_DISPLAY
+    assert "- Hermes Agent API server" in display
+    assert spoken != display
+    assert len(spoken) <= docroute.GATEWAY_SPOKEN_MAX_CHARS
+    assert "What's the first order of business?" in spoken
+    assert spoken.rstrip().endswith("What's the first order of business?")
+    assert "[" not in spoken
+    assert "]" not in spoken
+    assert "(" not in spoken
+    assert ")" not in spoken
+    assert "board:." not in spoken
+    assert "…" not in spoken
+    assert "..." not in spoken
+    assert not re.search(r"(?m)^\s*[-*•]\s+", spoken)
+    assert "- Hermes" not in spoken
+    assert "Systems green across the board" in spoken
+
+
+_SMELL_DISPLAY = (
+    "*I can smell it.*\n\n"
+    "I can't literally smell it, but if this place had a scent it'd be hot flux, "
+    "ozone, and burnt phenolic — shop floor, not a lithium pack cooking off. "
+    "What's the first meter reading you want?"
+)
+
+
+def test_smell_it_display_kept_spoken_omits_stage_and_false_sensors():
+    display = _SMELL_DISPLAY
+    spoken = docroute.spoken_text_for_gateway_reply(display)
+    assert "*I can smell it.*" in display
+    assert "shop floor" in display
+    assert "I can smell it" not in spoken
+    assert "*" not in spoken
+    assert "can't literally smell" in spoken.lower() or "cannot literally smell" in spoken.lower()
+    assert "shop floor" in spoken.lower() or "hot flux" in spoken.lower()
+    assert not re.search(r"\b(my sensors?|atmospheric scan|verified (?:lithium|hazard))\b", spoken, re.I)
+    assert "What's the first meter reading you want?" in spoken
+    assert spoken.rstrip().endswith("What's the first meter reading you want?")
+    assert "(" not in spoken and ")" not in spoken
+
+
+def test_long_ptt_spoken_text_complete_and_capped():
+    display = _SMEDLEY_0513_DISPLAY
+    msgs = [{"role": "assistant", "content": display}]
+    spoken = docroute.attach_spoken_text_to_last_assistant(msgs)
+    assert msgs[0]["content"] == display
+    assert msgs[0]["spoken_text"] == spoken
+    assert len(spoken) <= docroute.GATEWAY_SPOKEN_MAX_CHARS
+    assert "What's the first order of business?" in spoken
+    assert spoken.rstrip().endswith("What's the first order of business?")
+    assert "…" not in spoken
+    sync_src = (ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+    assert "attach_spoken_text_to_last_assistant" in sync_src
+    assert '"spoken_text": spoken_text or None' in sync_src
+
+
+def test_gateway_chat_writeback_attaches_spoken_text_not_spoken_reply():
+    src = (ROOT / "api" / "gateway_chat.py").read_text(encoding="utf-8")
+    assert "spoken_text_for_gateway_reply" in src
+    assert 'assistant_msg["spoken_text"] = spoken' in src
+    assert 'assistant_msg["spoken_reply"]' not in src
+    live = LIVE_EXT.read_text(encoding="utf-8") if LIVE_EXT.is_file() else ""
+    if live:
+        assert "m.spoken_text||m.spoken_reply" in live.replace(" ", "")

@@ -1018,6 +1018,15 @@ def _run_gateway_chat_streaming(
             if attachments:
                 user_msg["attachments"] = list(attachments)
             assistant_msg = {"role": "assistant", "content": assistant_text, "timestamp": assistant_ts}
+            try:
+                from api.smedley_document_route import spoken_text_for_gateway_reply
+
+                spoken = spoken_text_for_gateway_reply(assistant_text)
+                if spoken:
+                    # TTS/PTT only. Display content stays the markdown body.
+                    assistant_msg["spoken_text"] = spoken
+            except Exception:
+                logger.debug("Failed to derive gateway spoken_text", exc_info=True)
             saved_reasoning = STREAM_REASONING_TEXT.get(stream_id, "")
             if saved_reasoning:
                 assistant_msg["reasoning"] = saved_reasoning

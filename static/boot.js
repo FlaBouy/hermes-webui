@@ -1948,6 +1948,9 @@ window.renderTranscript=function(container, messages, opts){
   // own speak-and-resume flow instead of the default auto-read.
   const _origAutoRead=(typeof autoReadLastAssistant==='function')?autoReadLastAssistant:null;
   window.autoReadLastAssistant=function(){
+    if(typeof window.selectSmedleyVoiceEmitter==='function' && window.selectSmedleyVoiceEmitter({})==='none'){
+      return;
+    }
     if(_voiceModeActive&&_voiceModeState==='thinking'){
       _speakResponse();
       return;
