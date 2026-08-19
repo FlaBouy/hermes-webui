@@ -113,7 +113,7 @@ Focused regression coverage passed (18 checks). Both local WebUI services were r
 
 ## Smedley document-link origin repair
 
-The failed 1756-IB32 link was traced to an incomplete configured public origin: it omitted Smedley's required port 8787. The unported Tailscale URL returned HTTP 404 before reaching Smedley; the corrected ported route reaches the Smedley WebUI and returns its expected authenticated response. The Smedley LaunchAgent was updated to use `https://smedley.tail061f03.ts.net:8787` and restarted. Existing transcript links remain historical text; a new Jarvis request generates the corrected URL.
+The failed 1756-IB32 link was traced to an incomplete configured public origin: it omitted Smedley's required port 8787. The unported Tailscale URL returned HTTP 404 before reaching Smedley; the corrected ported route reaches the Smedley WebUI and returns its expected authenticated response. The Smedley and Biggy LaunchAgents now both use `https://smedley.tail061f03.ts.net:8787`; both services were restarted. Existing transcript links remain historical text; a new Jarvis request generates the corrected URL.
 
 The focused document-link test shard also reports four unrelated pre-existing source/test drift failures: one stale extension string expectation and three references to retired spoken-output helper functions. They do not affect this public-origin repair and remain tracked separately.
 
