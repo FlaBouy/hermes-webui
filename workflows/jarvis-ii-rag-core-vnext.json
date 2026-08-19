@@ -1,0 +1,83 @@
+{
+  "name": "Jarvis II — Generic RAG Core VNext",
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "nodes": [
+    {
+      "id": "vnext-1",
+      "name": "Jarvis II RAG VNext Ingress",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "parameters": { "httpMethod": "POST", "path": "jarvis-ii-rag-vnext", "responseMode": "responseNode", "options": {} }
+    },
+    {
+      "id": "vnext-2",
+      "name": "Validate Read-Only RAG Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [260, 0],
+      "parameters": {
+        "jsCode": "const b=$json.body&&typeof $json.body==='object'?$json.body:{};const h=$json.headers&&typeof $json.headers==='object'?$json.headers:{};const expected=String($env.GPT_BIGGY_PROPOSE_TOKEN||'').trim();const supplied=String(h.authorization||h.Authorization||'').replace(/^Bearer\\s+/i,'').trim();const query=String(b.query||b.objective||'').trim();const correlationId=String(b.correlation_id||b.correlationId||'').trim();if(!expected||supplied!==expected)return [{json:{ok:false,status:401,error:'authenticated GUI ingress required',correlation_id:correlationId||null}}];if(!query||query.length>1000)return [{json:{ok:false,status:400,error:'query must be 1 to 1000 characters',correlation_id:correlationId||null}}];return [{json:{ok:true,query,correlation_id:correlationId||null,caller:String(b.caller||b.source||'gui').slice(0,40)}}];"
+      }
+    },
+    {
+      "id": "vnext-3",
+      "name": "Request Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [510, 0],
+      "parameters": { "conditions": { "boolean": [{ "value1": "={{ $json.ok }}", "operation": "equal", "value2": true }] } }
+    },
+    {
+      "id": "vnext-4",
+      "name": "Invalid Request Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [760, 180],
+      "parameters": { "respondWith": "json", "responseBody": "={{ JSON.stringify($json) }}", "options": { "responseCode": 400 } }
+    },
+    {
+      "id": "vnext-5",
+      "name": "Retrieve and Verify Corpus Evidence",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [760, -100],
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:5014/resolve",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "Content-Type", "value": "application/json" }, { "name": "Accept", "value": "application/json" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ query: $('Validate Read-Only RAG Request').first().json.query }) }}",
+        "options": { "timeout": 60000, "response": { "response": { "fullResponse": true, "neverError": true } } }
+      }
+    },
+    {
+      "id": "vnext-6",
+      "name": "Render Verified Evidence Contract",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1040, -100],
+      "parameters": {
+        "jsCode": "const request=$('Validate Read-Only RAG Request').first().json;const raw=$json.body&&typeof $json.body==='object'?$json.body:{};const first=Array.isArray(raw.pages)?raw.pages[0]||{}:{};const page=Number(first.pdf_page)||null;const relativeUrl=String(raw.url||'');const pageUrl=relativeUrl&&page?relativeUrl+'#page='+page:relativeUrl||null;const verified=raw.ok===true&&raw.status==='VERIFIED_EVIDENCE'&&Boolean(raw.source)&&Boolean(page);const answer=verified?'I found verified wiring evidence for '+String(raw.catalog_term||'the requested equipment')+' in '+String(raw.source).split('/').pop()+', PDF page '+page+'.':'I could not verify a wiring-schematic page in the engineering library for that request.';return [{json:{ok:verified,schema:'jarvis.ii.rag_evidence.vnext.v1',status:verified?'COMPLETED':'NO_VERIFIED_EVIDENCE',correlation_id:request.correlation_id,caller:request.caller,answer,speak:answer,spoken_text:answer,spoken_reply:answer,citations:verified?[{source:raw.source,url:pageUrl,pdf_page:page,excerpt:String(first.excerpt||'')}]:[],rag_evidence:verified?{provider:'jarvis-ii-generic-rag-core',retrieval:raw.retrieval,catalog_term:raw.catalog_term,source:raw.source,pages:raw.pages}:null}}];"
+      }
+    },
+    {
+      "id": "vnext-7",
+      "name": "Return Single Evidence Response",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1320, -100],
+      "parameters": { "respondWith": "json", "responseBody": "={{ JSON.stringify($json) }}", "options": { "responseCode": 200 } }
+    }
+  ],
+  "connections": {
+    "Jarvis II RAG VNext Ingress": { "main": [[{ "node": "Validate Read-Only RAG Request", "type": "main", "index": 0 }]] },
+    "Validate Read-Only RAG Request": { "main": [[{ "node": "Request Valid?", "type": "main", "index": 0 }]] },
+    "Request Valid?": { "main": [[{ "node": "Retrieve and Verify Corpus Evidence", "type": "main", "index": 0 }], [{ "node": "Invalid Request Response", "type": "main", "index": 0 }]] },
+    "Retrieve and Verify Corpus Evidence": { "main": [[{ "node": "Render Verified Evidence Contract", "type": "main", "index": 0 }]] },
+    "Render Verified Evidence Contract": { "main": [[{ "node": "Return Single Evidence Response", "type": "main", "index": 0 }]] }
+  }
+}
