@@ -1628,7 +1628,7 @@
     const okSchema =
       (rvm.schema === 'jarvis.recommendation_view_model.v1' ||
         rvm.schema === 'jarvis.lodging_view_model.v1') &&
-      rvm.emitted_by === '3 AI Agent';
+      (rvm.emitted_by === '3 AI Agent' || rvm.emitted_by === 'Jarvis II PA Tool');
     if (!okSchema) return { rendered: false, count: 0, category: null };
     const category = String(rvm.category || (rvm.schema === 'jarvis.lodging_view_model.v1' ? 'lodging' : '') || '');
     const title =

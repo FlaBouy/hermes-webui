@@ -45,6 +45,10 @@ The PA now calls `POST /api/jarvis-ii/pa-context` before local planning. The end
 
 The current PA workflow is `Jarvis II — PA Core POC` (`cD6uUqpzXQl3n3iU`), remains inactive, and now contains eight nodes. The n8n container-to-adapter check passed with the `jarvis.pa.durable_context.v1` contract and the write policy `DISABLED_PENDING_OWNER_RETENTION_POLICY`.
 
+## Implemented POC milestone: travel evidence
+
+`POST /api/jarvis-ii/pa-travel` is a read-only tool adapter backed by the installed local maps skill and OpenStreetMap/Nominatim. It resolves a canonical destination and returns nearby hotel/guest-house POIs as structured cards. It does not return or imply rates, availability, booking status, tickets, or calendar status. The Biggy card renderer accepts the dedicated `Jarvis II PA Tool` producer identity for this source-backed contract.
+
 ## Deliberately deferred
 
 Live calendar writes, bookings, purchases, persistent-memory writes, and automatic skill installation are outside the baseline POC. They require their own approved capability contracts and tests.

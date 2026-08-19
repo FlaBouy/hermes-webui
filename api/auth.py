@@ -57,6 +57,7 @@ PUBLIC_PATHS = frozenset({
     # route handler; it must be reachable without a browser session cookie.
     '/api/jarvis-ii/document-resolve',
     '/api/jarvis-ii/pa-context',
+    '/api/jarvis-ii/pa-travel',
     '/share',
     '/manifest.json', '/manifest.webmanifest',
     '/session/manifest.json', '/session/manifest.webmanifest',

@@ -15631,6 +15631,9 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/jarvis-ii/pa-context":
         return _handle_jarvis_ii_pa_context(handler, body)
 
+    if parsed.path == "/api/jarvis-ii/pa-travel":
+        return _handle_jarvis_ii_pa_travel(handler, body)
+
     if parsed.path == "/api/chat/start":
         return _handle_chat_start(handler, body, diag=diag)
 
@@ -24123,6 +24126,26 @@ def _handle_jarvis_ii_pa_context(handler, body):
             "retention": "Persistent retention is disabled until the owner approves a retention policy.",
         },
     )
+
+
+def _handle_jarvis_ii_pa_travel(handler, body):
+    """Resolve a destination and public lodging POIs for the PA, read-only."""
+    if not _jarvis_ii_authenticated(handler):
+        logger.warning("Jarvis II PA travel rejected auth")
+        return j(handler, {"ok": False, "error": "authenticated Biggy ingress required"}, status=401)
+    try:
+        from api.jarvis_pa_travel import resolve_travel
+
+        result = resolve_travel(
+            destination=str(body.get("destination") or body.get("query") or ""),
+            include_lodging=bool(body.get("include_lodging", True)),
+        )
+        return j(handler, result, status=200 if result.get("ok") else 404)
+    except ValueError as exc:
+        return j(handler, {"ok": False, "error": str(exc)}, status=400)
+    except Exception as exc:
+        logger.exception("Jarvis II PA travel adapter failed")
+        return j(handler, {"ok": False, "error": type(exc).__name__}, status=502)
 
 
 def _handle_jarvis_ii_document_resolve(handler, body):
