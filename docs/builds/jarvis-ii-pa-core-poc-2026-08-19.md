@@ -49,6 +49,10 @@ The current PA workflow is `Jarvis II — PA Core POC` (`cD6uUqpzXQl3n3iU`), rem
 
 `POST /api/jarvis-ii/pa-travel` is a read-only tool adapter backed by the installed local maps skill and OpenStreetMap/Nominatim. It resolves a canonical destination and returns nearby hotel/guest-house POIs as structured cards. It does not return or imply rates, availability, booking status, tickets, or calendar status. The Biggy card renderer accepts the dedicated `Jarvis II PA Tool` producer identity for this source-backed contract.
 
+The inactive PA workflow now has an 11-node travel branch: local plan → policy → travel-tool selection → travel evidence → evidence-only response. It has not been cut over to Biggy.
+
+**Acceptance result:** the controlled travel fixture completed through the local 120B planner and returned the canonical `Mercedes-Benz Stadium` with five source-backed OpenStreetMap lodging cards. Natural-language destination input is normalized at the adapter boundary before geocoding; unresolved destinations fail closed without cards.
+
 ## Deliberately deferred
 
 Live calendar writes, bookings, purchases, persistent-memory writes, and automatic skill installation are outside the baseline POC. They require their own approved capability contracts and tests.

@@ -8,6 +8,7 @@ availability, prices, booking status, or calendar conclusions.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -38,8 +39,20 @@ def resolve_travel(*, destination: str, include_lodging: bool = True) -> dict[st
     destination = str(destination or "").strip()
     if not destination or len(destination) > 240:
         raise ValueError("destination must be 1 to 240 characters")
-    resolved = _run("search", destination)
-    places = resolved.get("results") if isinstance(resolved.get("results"), list) else []
+    candidates = [destination]
+    match = re.search(r"\b(?:near|to|at)\s+(.+?)(?:\s+in\s+[^.?!,]+)?[.?!,]?$", destination, re.I)
+    if match:
+        place = match.group(1).strip(" .,!?")
+        if place and place not in candidates:
+            candidates.append(place)
+    places: list[dict[str, Any]] = []
+    resolved: dict[str, Any] = {}
+    for candidate in candidates:
+        resolved = _run("search", candidate)
+        found = resolved.get("results") if isinstance(resolved.get("results"), list) else []
+        if found:
+            places = found
+            break
     if not places:
         return {"ok": False, "reason": "DESTINATION_NOT_FOUND", "source": "OpenStreetMap/Nominatim"}
     place = places[0]
