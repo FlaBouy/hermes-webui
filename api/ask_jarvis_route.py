@@ -30,7 +30,11 @@ _ASK_JARVIS_LEADING = re.compile(r"^\s*ask\s+jarvis\s*:\s*", re.IGNORECASE)
 # "Ask Jarvis to …" / "I asked Jarvis to …" / "asking Jarvis for …" / "tell Jarvis to …"
 # / "I need Jarvis to …" / "need Jarvis for …"
 _ASK_JARVIS_EMBEDDED = re.compile(
-    r"(?i)(?:^|[\s,;])(?:ask(?:ed|ing)?|tell|have|need)\s+jarvis\b(?:\s*:|\s+to\b|\s+for\b)"
+    r"(?i)(?:^|[\s,;])(?:"
+    r"(?:ask(?:ed|ing)?|tell|need)\s+jarvis\b(?:\s*:|\s+to\b|\s+for\b)"
+    # Natural coordinator wording: “have Jarvis pull/map/check/get …”
+    r"|have\s+jarvis\b(?:\s+to\b|\s+(?:pull|map|find|check|get|look\s+up|plan|schedule)\b)"
+    r")"
 )
 # Role/meta talk about Ask Jarvis without a concrete travel/task handoff.
 _ASK_JARVIS_META_ROLE = re.compile(
@@ -572,7 +576,7 @@ def _is_recommendation_sentence(s: str) -> bool:
     )
 
 
-def compact_travel_tts(text: str, *, recommendation_category: str | None = None, lodging_names: list[str] | None = None) -> str:
+def compact_travel_tts(text: str, *, recommendation_category: str | None = None, lodging_names: list[str] | None = None, allow_lodging_claims: bool = True) -> str:
     """Admit only compact venue + route + calendar prose for initial TTS.
 
     Never speak card titles, source cues, hostnames, numbered results,
@@ -675,7 +679,7 @@ def compact_travel_tts(text: str, *, recommendation_category: str | None = None,
         r"[A-Za-z0-9'.\- ]{2,40}?|[A-Z][A-Za-z0-9'.\- ]{2,40}?)\b(?:Inn|Hotel|Motel|Suites|Resort|Lodge)\b",
         raw,
     )
-    if not lodging and m_lodge:
+    if allow_lodging_claims and not lodging and m_lodge:
         name = re.sub(r"\s+", " ", m_lodge.group(0)).strip(" ,.-")
         name = re.sub(r"(?i)^(may consider the|consider the|the|is the)\s+", "", name).strip()
         if name and not re.search(r"(?i)\b(?:best hotels|top\s*\d+|hotels in)\b", name):
@@ -703,6 +707,28 @@ def compact_travel_tts(text: str, *, recommendation_category: str | None = None,
         safe = [x for x in parts if x and not reject_tts_residue(x)]
         out = _sanitize_spoken_prose(" ".join(safe))
     return out.strip()
+
+
+def _canonical_venue_from_map(map_view_model: dict[str, Any] | None) -> str | None:
+    """Use the travel model's resolved venue name, never a model abbreviation."""
+    destination = map_view_model.get("destination") if isinstance(map_view_model, dict) else None
+    label = str(destination.get("label") or "") if isinstance(destination, dict) else ""
+    for venue in ("Mercedes-Benz Stadium", "Jordan-Hare Stadium", "Bryant-Denny Stadium"):
+        if venue.lower() in label.lower():
+            return venue
+    return None
+
+
+def _restore_canonical_venue(text: str, map_view_model: dict[str, Any] | None) -> str:
+    venue = _canonical_venue_from_map(map_view_model)
+    if not venue:
+        return str(text or "")
+    aliases = {
+        "Mercedes-Benz Stadium": r"\b(?:Mercedes[ -]?Benz|Benz) Stadium\b",
+        "Jordan-Hare Stadium": r"\b(?:Jordan[ -]?Hare|Hare) Stadium\b",
+        "Bryant-Denny Stadium": r"\b(?:Bryant[ -]?Denny|Denny) Stadium\b",
+    }
+    return re.sub(aliases[venue], venue, str(text or ""), flags=re.IGNORECASE)
 
 
 def post_render_visual_line(*, category: str | None = None) -> str:
@@ -1152,6 +1178,17 @@ def try_ask_jarvis(message: str, *, biggy_ingress_ts: float | None = None, corre
         # Never retain lodging cards when category is not lodging.
         if rec_cat and rec_cat != "lodging":
             lvm = None
+    # The map model is the resolved location authority.  Preserve its complete
+    # venue name in both the displayed and spoken response; never pass through
+    # a shorthand such as "Benz Stadium" or "Hare Stadium" from a model.
+    spoken_text = _restore_canonical_venue(spoken_text, mvm if isinstance(mvm, dict) else None)
+    lodging_cards_available = bool(
+        isinstance(rvm, dict)
+        and str(rvm.get("category") or "").lower() == "lodging"
+        and rvm.get("available") is not False
+        and isinstance(rvm.get("options"), list)
+        and rvm.get("options")
+    )
     # TTS contract: compact venue/route/calendar only for travel packages from n8n.
     # Travel interpretation/defaulting lives in n8n B1 — not here.
     pre_compact = spoken_text
@@ -1168,7 +1205,12 @@ def try_ask_jarvis(message: str, *, biggy_ingress_ts: float | None = None, corre
                 for _o in (_vm.get("options") or []):
                     if isinstance(_o, dict) and _o.get("name"):
                         _lodge_names.append(str(_o.get("name")))
-        tts_spoken = compact_travel_tts(pre_compact, recommendation_category=rec_cat, lodging_names=_lodge_names)
+        tts_spoken = compact_travel_tts(
+            pre_compact,
+            recommendation_category=rec_cat,
+            lodging_names=_lodge_names,
+            allow_lodging_claims=lodging_cards_available,
+        )
         if reject_tts_residue(tts_spoken):
             tts_spoken = ""
         # destination_unresolved confirm-asks have no miles/ETA — keep sanitized prose.

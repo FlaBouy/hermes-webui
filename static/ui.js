@@ -8879,7 +8879,7 @@ function autoReadLastAssistant(){
   const msgs=(typeof S!=='undefined'&&Array.isArray(S.messages))?S.messages:[];
   let jarvisMsg=null;
   for(let i=msgs.length-1;i>=0;i--){
-    if(msgs[i]&&msgs[i].role==='assistant'&&msgs[i].ask_jarvis_hard_bind){ jarvisMsg=msgs[i]; break; }
+    if(msgs[i]&&msgs[i].role==='assistant'&&(msgs[i].ask_jarvis_hard_bind||msgs[i].jarvis_response)){ jarvisMsg=msgs[i]; break; }
     if(msgs[i]&&msgs[i].role==='assistant') break;
   }
   if(jarvisMsg){
@@ -10693,6 +10693,25 @@ function _assistantRoleHtml(tsTitle='', tpsText=''){
   const _bn=assistantDisplayName();
   const tps=(isTpsDisplayEnabled()&&tpsText)?`<span class="msg-tps-inline" title="Tokens per second">${esc(tpsText)}</span>`:'';
   return `<div class="msg-role assistant" ${tsTitle?`title="${esc(tsTitle)}"`:''}><div class="role-icon assistant">${esc(_bn.charAt(0).toUpperCase())}</div><span class="msg-role-name">${esc(_bn)}</span>${tps}</div>`;
+}
+// Identity is a property of the response, not of the browser profile.  A
+// governed Jarvis response can be rendered inside the Smedley shell, so the
+// shell's default assistantDisplayName() must not overwrite the response
+// identity.  Do this while the transcript is built rather than relying on an
+// extension observer that may run after a stale/cached turn is already shown.
+function _setAssistantTurnIdentity(turn, message){
+  if(!turn||!message) return;
+  const text=String(message.content||'');
+  const isJarvis=!!(message.jarvis_response||message.ask_jarvis_hard_bind||message.document_route&&message._ask_jarvis)
+    || /^\s*(?:\*\*)?Jarvis\s*:/i.test(text);
+  if(!isJarvis) return;
+  const role=turn.querySelector('.msg-role.assistant');
+  if(!role) return;
+  const icon=role.querySelector('.role-icon.assistant');
+  const name=role.querySelector('.msg-role-name');
+  if(icon) icon.textContent='J';
+  if(name) name.textContent='Jarvis';
+  turn.dataset.assistantIdentity='jarvis';
 }
 function _setAssistantTurnTps(turn, tpsText=''){
   if(!turn) return;
@@ -16200,13 +16219,14 @@ function renderMessages(options){
         if(role) role.outerHTML=_assistantRoleHtml(tsTitle, isTpsDisplayEnabled()?_formatTurnTps(m._turnTps):'');
         currentAssistantTurn=recycled;
       }else{
-        currentAssistantTurn=_createAssistantTurn(tsTitle, isTpsDisplayEnabled()?_formatTurnTps(m._turnTps):'');
+      currentAssistantTurn=_createAssistantTurn(tsTitle, isTpsDisplayEnabled()?_formatTurnTps(m._turnTps):'');
       }
       currentAssistantTurn.dataset.role='assistant';
       if(S.session) currentAssistantTurn.dataset.sessionId=S.session.session_id;
       currentAssistantTurn.dataset.recycleKey=rawIdx;
       inner.appendChild(currentAssistantTurn);
     }
+    _setAssistantTurnIdentity(currentAssistantTurn, m);
     _setLatestAssistantTurnLandmark(currentAssistantTurn, !m._live&&rawIdx===latestRenderedAssistantRawIdx);
     const seg=document.createElement('div');
     if(Array.isArray(orderedTransparentParts)&&orderedTransparentParts.length){
@@ -16272,11 +16292,11 @@ function renderMessages(options){
     seg.dataset.sessionMsgIdx=_messageSessionIndexForRawIdx(rawIdx);
     seg.dataset.messageAnchorKey=_messageViewportAnchorKeyForMessage(m);
     // Ask Jarvis hard-bind: TTS/PTT uses spoken_text only; chat body keeps full reply.
-    const _askJarvisSpoken=m&&m.ask_jarvis_hard_bind&&(m.spoken_text||m.spoken_reply);
+    const _askJarvisSpoken=m&&(m.ask_jarvis_hard_bind||m.jarvis_response)&&(m.spoken_text||m.spoken_reply);
     seg.dataset.rawText=String(_askJarvisSpoken||content).trim();
-    if(m.ask_jarvis_hard_bind&&m.evidence_footer) seg.dataset.evidenceFooter=String(m.evidence_footer);
-    if(m.ask_jarvis_hard_bind&&m.tts_voice_id) seg.dataset.ttsVoiceId=String(m.tts_voice_id);
-    if(m.ask_jarvis_hard_bind&&m.tts_voice_profile) seg.dataset.ttsVoiceProfile=String(m.tts_voice_profile);
+    if((m.ask_jarvis_hard_bind||m.jarvis_response)&&m.evidence_footer) seg.dataset.evidenceFooter=String(m.evidence_footer);
+    if((m.ask_jarvis_hard_bind||m.jarvis_response)&&m.tts_voice_id) seg.dataset.ttsVoiceId=String(m.tts_voice_id);
+    if((m.ask_jarvis_hard_bind||m.jarvis_response)&&m.tts_voice_profile) seg.dataset.ttsVoiceProfile=String(m.tts_voice_profile);
     if(m._activityBurstId!==undefined&&m._activityBurstId!==null) seg.setAttribute('data-activity-burst-id',String(m._activityBurstId));
     if(Number.isFinite(Number(m._liveSegmentSeq))) seg.setAttribute('data-live-segment-seq',String(Number(m._liveSegmentSeq)));
     const messageBelongsInWorklog=!S.busy&&isCompactWorklogMode()&&_assistantMessageBelongsInWorklog(m, rawIdx, toolCallAssistantIdxs, displayContent, {isTurnFinalAssistant});

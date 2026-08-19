@@ -141,7 +141,9 @@ _DOCUMENT_REQUEST_RES = (
     ),
 )
 
-DEFAULT_RAG_RETRIEVE_URL = "http://127.0.0.1:5004/rag/retrieve"
+# All Smedley and Biggy engineering retrieval enters through the Jarvis n8n
+# gateway.  The gateway is the sole caller of the local RAG service.
+DEFAULT_RAG_RETRIEVE_URL = "http://127.0.0.1:5680/webhook/jarvis-ii-rag-retrieve"
 RAG_RETRIEVE_URL_ENV = "HERMES_WEBUI_SMEDLEY_RAG_RETRIEVE_URL"
 DEFAULT_JARVIS_N8N_BRIEFING_URL = (
     "http://192.168.0.15:5680/webhook/jarvis-pa-biggy-briefing"
@@ -246,6 +248,13 @@ _AB_WIRING_INDEX_SMB = (
 _AB_DIGITAL_IO_MANUAL_SOURCES = (
     "Vendor Data/Allen Bradley/1756/1756-um058_-en-p.pdf",
 )
+# Verified PDF locations in UM058 for currently curated discrete-I/O wiring
+# requests.  Keep this small and evidence-backed; unknown parts still take the
+# normal extract-page path rather than guessing a page.
+_AB_DIGITAL_IO_WIRING_PAGES = {
+    "1756-IA16": 97,
+    "1756-IA16K": 97,
+}
 _AB_CHASSIS_POWER_MANUAL_SOURCES = (
     "Vendor Data/Allen Bradley/1756-um001_-en-p.pdf",
     "Vendor Data/Allen Bradley/1756/1756-um001_-en-p.pdf",
@@ -305,13 +314,15 @@ def _is_ask_jarvis_traffic(text: object) -> bool:
         )
 
 
-def is_document_request(text: object) -> bool:
+def is_document_request(text: object, *, allow_ask_jarvis: bool = False) -> bool:
     """True when the user is asking to pull/find a document or get a doc link."""
     msg = str(text or "").strip()
     if not msg or len(msg) > 4000:
         return False
-    # Biggy → Ask Jarvis: never treat as automatic Smedley document sidecar request.
-    if _is_ask_jarvis_traffic(msg):
+    # Ask-Jarvis traffic normally belongs to the PA briefing path.  The caller
+    # may explicitly opt in when it is a document/schematic request so that it
+    # takes the governed n8n retrieval path instead of generic synthesis.
+    if _is_ask_jarvis_traffic(msg) and not allow_ask_jarvis:
         return False
     # Slash commands and obvious non-doc tooling stay on ordinary chat.
     if msg.startswith("/"):
@@ -691,6 +702,7 @@ def neutralize_match(match: object, *, public_origin: object = "") -> dict[str, 
         "caption_evidence",
         "diagram_target",
         "figures",
+        "document_supported_identity_relation",
     ):
         if key in match and match.get(key) is not None:
             out[key] = match.get(key)
@@ -921,6 +933,7 @@ def build_operator_document_reply(
     kind = str(item.get("match_kind") or "").strip()
     href = str(item.get("url") or "").strip()
     page = item.get("page_hint")
+    open_href = f"{href}#page={page}" if href and page not in (None, "") else href
     identity = f"**{title}**" + (f" (**{doc_no}**)" if doc_no else "")
     pending = None
 
@@ -932,7 +945,7 @@ def build_operator_document_reply(
             "",
             identity,
             "",
-            f"[Open manual]({href})" if href else "",
+            f"[Open manual]({open_href})" if open_href else "",
             "",
             "Want me to keep searching for an exact part match?",
         ]
@@ -966,8 +979,8 @@ def build_operator_document_reply(
             lines.append(line)
             if caption:
                 lines.append(f"  {caption}")
-        if href:
-            lines.extend(["", f"[Open manual]({href})"])
+        if open_href:
+            lines.extend(["", f"[Open manual]({open_href})"])
         return "\n".join(lines).strip(), None
 
     who = f" for **{part}**" if part else ""
@@ -978,7 +991,7 @@ def build_operator_document_reply(
     ]
     if wants_wiring:
         if page not in (None, ""):
-            lines.extend(["", f"Verified wiring-schematic location: page **{page}**."])
+            lines.extend(["", f"Verified wiring-diagram location: PDF page **{page}**."])
         else:
             lines.extend(
                 [
@@ -987,8 +1000,8 @@ def build_operator_document_reply(
                     "is not verified yet — page extraction is still needed.",
                 ]
             )
-    if href:
-        lines.extend(["", f"[Open manual]({href})"])
+    if open_href:
+        lines.extend(["", f"[Open manual]({open_href})"])
     if wants_wiring and classify_document_kind(item.get("source"), title) == "manual":
         lines.extend(["", "Want me to extract the wiring schematic page next?"])
         pending = {
@@ -1071,6 +1084,12 @@ def build_compact_spoken_document_reply(
         printed = top.get("printed_page")
         fig_no = top.get("figure")
         bits = [f"I found {title}{(' for ' + part) if part else ''}."]
+        relation = top.get("document_supported_identity_relation")
+        if isinstance(relation, dict) and relation.get("counterpart"):
+            bits.append(
+                f"{part} is the conformally coated counterpart of "
+                f"{relation.get('counterpart')}, so the same connection diagram applies."
+            )
         if printed not in (None, ""):
             page_bit = f"Verified wiring schematic on page {printed}"
             if fig_no:
@@ -2060,19 +2079,22 @@ def _seed_authoritative_manuals_for_part(part: object, *, query: object = "") ->
         for rel in _AB_DIGITAL_IO_MANUAL_SOURCES:
             abs_path = os.path.join(root, rel) if root else ""
             if abs_path and os.path.isfile(abs_path):
-                seeds.append(
-                    {
-                        "source": rel.replace("\\", "/"),
-                        "score": 0.99,
-                        "match_kind": "authoritative_seed",
-                        "retrieval": "smedley_authoritative_seed",
-                        "part_number": part_s,
-                        "document_identity": {
-                            "title": "ControlLogix Digital I/O Modules User Manual",
-                            "doc_no": "1756-UM058",
-                        },
-                    }
-                )
+                seed = {
+                    "source": rel.replace("\\", "/"),
+                    "score": 0.99,
+                    "match_kind": "authoritative_seed",
+                    "retrieval": "smedley_authoritative_seed",
+                    "part_number": part_s,
+                    "document_identity": {
+                        "title": "ControlLogix Digital I/O Modules User Manual",
+                        "doc_no": "1756-UM058",
+                    },
+                }
+                page_hint = _AB_DIGITAL_IO_WIRING_PAGES.get(part_s)
+                if page_hint:
+                    seed["page_hint"] = page_hint
+                seeds.append(seed)
+                break
     return seeds
 
 
@@ -3162,7 +3184,7 @@ def try_jarvis_n8n_engineering_handoff(
 
 
 def try_document_route(
-    query: object, *, topk: int = 8, public_origin: object = ""
+    query: object, *, topk: int = 8, public_origin: object = "", allow_ask_jarvis: bool = False
 ) -> Optional[dict[str, Any]]:
     """If query is a document request, retrieve and return a deterministic reply.
 
@@ -3171,7 +3193,7 @@ def try_document_route(
     if not document_route_enabled():
         return None
     msg = str(query or "").strip()
-    if not is_document_request(msg):
+    if not is_document_request(msg, allow_ask_jarvis=allow_ask_jarvis):
         return None
     origin = normalize_public_origin(public_origin)
     try:
@@ -3193,6 +3215,21 @@ def try_document_route(
             "error": type(exc).__name__,
         }
     matches = payload.get("matches") or []
+    # A schematic request is also a document request, so it normally reaches
+    # this route before the engineering-fact route.  Preserve the same
+    # part-family protection here: for a named discrete 1756 I/O module, seed
+    # the authoritative digital I/O manual before semantic ranking.  The AB
+    # workbook remains a lookup index for IFM pairing; it must not displace the
+    # manual that contains the actual wiring diagram.
+    for part in extract_query_part_numbers(msg):
+        for seed in _seed_authoritative_manuals_for_part(part, query=msg):
+            source = str(seed.get("source") or "").replace("\\", "/")
+            if source and not any(
+                str(item.get("source") or "").replace("\\", "/") == source
+                for item in matches
+                if isinstance(item, dict)
+            ):
+                matches.insert(0, seed)
     if is_specification_number_request(msg):
         matches = prioritize_gp_brewton_spec_matches(matches, msg)
         # A spec-number request needs the governing identity, not a long list

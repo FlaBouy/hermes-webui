@@ -213,6 +213,15 @@ def retrieve_response_for_query(query: object, *, collection: str) -> dict[str, 
                     "figure": fig.get("figure"),
                     "printed_page": fig.get("printed_page"),
                     "pdf_page": fig.get("pdf_page"),
+                    # PDF viewer page anchor and the explicit MC↔MU coating
+                    # relationship are presentation evidence, not model
+                    # inference.  Keep them on every figure packet so the
+                    # document route can both explain the counterpart and
+                    # open the verified diagram page.
+                    "page_hint": fig.get("pdf_page"),
+                    "document_supported_identity_relation": resolved.get(
+                        "document_supported_identity_relation"
+                    ),
                     "caption_evidence": fig.get("caption_evidence"),
                     "diagram_target": fig.get("diagram_target"),
                     "snippet": fig.get("caption_evidence") or "",

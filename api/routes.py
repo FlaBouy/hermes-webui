@@ -10288,8 +10288,13 @@ def _safe_login_redirect_path(raw_path: str | None) -> str:
 def _request_base_url(handler) -> str:
     from api.auth import _is_secure_context
 
+    public_origin = str(os.environ.get("HERMES_WEBUI_SMEDLEY_PUBLIC_ORIGIN") or "").strip()
+    if public_origin:
+        return public_origin.rstrip("/")
     scheme = "https" if _is_secure_context(handler) else "http"
     host = str(handler.headers.get("Host") or "").strip() or "127.0.0.1:8787"
+    if host.lower().startswith(("localhost:", "127.0.0.1:", "[::1]:")):
+        return "https://smedley.tail061f03.ts.net"
     return f"{scheme}://{host}"
 
 
@@ -15619,6 +15624,9 @@ def handle_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/bg-task-complete-ack":
         return _handle_bg_task_complete_ack(handler, body)
+
+    if parsed.path == "/api/jarvis-ii/document-resolve":
+        return _handle_jarvis_ii_document_resolve(handler, body)
 
     if parsed.path == "/api/chat/start":
         return _handle_chat_start(handler, body, diag=diag)
@@ -22590,6 +22598,110 @@ def _handle_chat_start(handler, body, diag=None):
             return bad(handler, "message is required")
         diag.stage("normalize_attachments") if diag else None
         attachments = _normalize_chat_attachments(body.get("attachments") or [])[:20]
+        # An explicit Ask Jarvis document/schematic request is still a Jarvis
+        # request, but it must use the governed document route rather than the
+        # PA briefing model.  The old ordering sent it to generic synthesis
+        # first, bypassing the MC/MU resolver and producing an uncited answer.
+        # This route traverses the Jarvis n8n retrieval gateway and persists a
+        # compact spoken reply separately from the displayed evidence.
+        if not attachments:
+            try:
+                from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj_document
+                from api.smedley_document_route import is_document_request, try_document_route
+
+                jarvis_document = (
+                    try_document_route(
+                        msg,
+                        public_origin=_request_base_url(handler),
+                        allow_ask_jarvis=True,
+                    )
+                    if _is_aj_document(msg) and is_document_request(msg, allow_ask_jarvis=True)
+                    else None
+                )
+                # "Get me a wiring schematic" is an extraction request, not
+                # merely a request to identify a manual.  Once the governed
+                # route has bound the manual, extract the strongest verified
+                # page in the same Jarvis turn.
+                if (
+                    isinstance(jarvis_document, dict)
+                    and jarvis_document.get("handled")
+                    and re.search(r"\b(?:wiring|schematic|connection\s+diagram|pinout)\b", msg, re.I)
+                    and isinstance(jarvis_document.get("active_document"), dict)
+                ):
+                    from api.smedley_document_route import try_active_document_review
+
+                    extracted = try_active_document_review(
+                        "extract the wiring schematic",
+                        jarvis_document["active_document"],
+                        public_origin=_request_base_url(handler),
+                    )
+                    if isinstance(extracted, dict) and extracted.get("handled"):
+                        jarvis_document = dict(jarvis_document)
+                        jarvis_document["reply"] = extracted.get("reply") or jarvis_document.get("reply")
+                        jarvis_document["spoken_reply"] = extracted.get("spoken_reply") or jarvis_document.get("spoken_reply")
+                        if isinstance(extracted.get("active_document"), dict):
+                            jarvis_document["active_document"] = extracted["active_document"]
+            except Exception:
+                logger.exception("Ask Jarvis document route failed closed to ordinary Jarvis path")
+                jarvis_document = None
+            if isinstance(jarvis_document, dict) and jarvis_document.get("handled"):
+                reply = str(jarvis_document.get("reply") or "").strip()
+                spoken = str(jarvis_document.get("spoken_reply") or "").strip() or None
+                active_document = jarvis_document.get("active_document")
+                s.active_document = (
+                    active_document
+                    if isinstance(active_document, dict) and active_document.get("source")
+                    else None
+                )
+                now_ts = int(time.time())
+                if not isinstance(getattr(s, "messages", None), list):
+                    s.messages = []
+                s.messages.extend(
+                    [
+                        {"role": "user", "content": msg, "timestamp": now_ts, "_ask_jarvis": True},
+                        {
+                            "role": "assistant",
+                            "content": reply,
+                            "timestamp": now_ts + 1,
+                            "document_route": True,
+                            "jarvis_response": True,
+                            "ask_jarvis_hard_bind": True,
+                            "spoken_reply": spoken,
+                            "spoken_text": spoken,
+                            "tts_voice_id": "dzRy05hNK3bab9ViJ0oU",
+                            "tts_voice_profile": "jarvis_james_michael",
+                        },
+                    ]
+                )
+                s.pending_user_message = None
+                s.active_stream_id = None
+                if hasattr(s, "pending_started_at"):
+                    s.pending_started_at = None
+                try:
+                    s.save()
+                except Exception:
+                    logger.exception("failed to persist Ask Jarvis document-route turn for %s", s.session_id)
+                    return bad(handler, "failed to persist Ask Jarvis document-route turn", 500)
+                return j(
+                    handler,
+                    {
+                        "session_id": s.session_id,
+                        "stream_id": None,
+                        "document_route": True,
+                        "jarvis_response": True,
+                        "ask_jarvis_hard_bind": True,
+                        "reply": reply,
+                        "spoken_reply": spoken,
+                        "spoken_text": spoken,
+                        "tts_voice_id": "dzRy05hNK3bab9ViJ0oU",
+                        "tts_voice_profile": "jarvis_james_michael",
+                        "matches": jarvis_document.get("matches") or [],
+                        "collection": jarvis_document.get("collection") or "",
+                        "active_document": getattr(s, "active_document", None),
+                        "retrieval_receipt": jarvis_document.get("retrieval_receipt") or None,
+                        "error": jarvis_document.get("error"),
+                    },
+                )
         # Hard-bind: explicit leading "Ask Jarvis:" → Jarvis PA briefing webhook.
         # PTT-style two-stage: immediate Austin ack (once), then governed Jarvis
         # Agent path unchanged; James Michael speaks the final once. No Agent bypass.
@@ -22611,7 +22723,9 @@ def _handle_chat_start(handler, body, diag=None):
             except Exception:
                 logger.exception("ask_jarvis imports failed; falling through to ordinary chat")
             else:
-                if is_ask_jarvis_command(msg):
+                _jarvis_followup_objective = _jarvis_travel_followup_objective(s, msg)
+                if is_ask_jarvis_command(msg) or _jarvis_followup_objective:
+                    _jarvis_objective = _jarvis_followup_objective or msg
                     _ask_jarvis_ingress_ts = time.time()
                     corr = mint_correlation_id()
                     tpath = timing_path_for(corr)
@@ -22714,7 +22828,7 @@ def _handle_chat_start(handler, body, diag=None):
 
                     def _ask_jarvis_finish_bg(
                         session_id=sid,
-                        objective=msg,
+                        objective=_jarvis_objective,
                         correlation_id=corr,
                         ingress_ts=_ask_jarvis_ingress_ts,
                         timing_file=str(tpath),
@@ -23617,6 +23731,49 @@ def _return_smedley_fast_route(handler, s, msg, routed, ptt_owned_tts=False):
     )
 
 
+def _jarvis_travel_followup_objective(session, message: str) -> str | None:
+    """Bind an unambiguous lodging follow-up to the prior Jarvis travel turn.
+
+    The owner should not have to repeat a venue that Jarvis just established.
+    This is intentionally narrow: it only fires for a lodging request when the
+    current session already contains a Jarvis travel map with a canonical
+    destination.  The generated context preserves the full venue label and
+    never supplies recommendations itself.
+    """
+    text = str(message or "").strip()
+    if not re.search(r"(?i)\b(?:lodging|accommodations?|hotel|motel|place\s+to\s+stay)\b", text):
+        return None
+    prior = None
+    for item in reversed(list(getattr(session, "messages", None) or [])):
+        if not isinstance(item, dict) or item.get("role") != "assistant":
+            continue
+        model = item.get("map_view_model")
+        destination = model.get("destination") if isinstance(model, dict) else None
+        label = str(destination.get("label") or "").strip() if isinstance(destination, dict) else ""
+        if item.get("ask_jarvis_hard_bind") and label:
+            prior = label
+            break
+    if not prior:
+        return None
+    # Retain the owner's earlier date expression when it is present in the
+    # same conversation; it is context, not an invented reservation date.
+    date_context = ""
+    for item in reversed(list(getattr(session, "messages", None) or [])):
+        if isinstance(item, dict) and item.get("role") == "user":
+            previous = str(item.get("content") or "")
+            match = re.search(r"(?i)\b(?:on|for)\s+([A-Z][a-z]+\s+\d{1,2}(?:st|nd|rd|th)?)\b", previous)
+            if match:
+                date_context = match.group(1)
+                break
+    suffix = f" The relevant event date from this conversation is {date_context}." if date_context else ""
+    return (
+        "Ask Jarvis: " + text
+        + " Carry forward the previously verified venue exactly as " + prior + "."
+        + suffix
+        + " Return only verified lodging recommendations as structured cards; do not invent names, rates, distances, or availability."
+    )
+
+
 def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
     """PTT/sync ``/api/chat`` Ask Jarvis hard-bind (blocks until Jarvis + TTS done).
 
@@ -23892,6 +24049,71 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
     )
 
 
+def _handle_jarvis_ii_document_resolve(handler, body):
+    """Read-only, authenticated document resolution for Jarvis II n8n.
+
+    This intentionally does not create a Smedley session, invoke a model, or
+    queue any voice output.  It gives the production n8n workflow the same
+    authoritative-manual selection used by the Smedley document route.
+    """
+    expected_tokens = {str(os.environ.get("GPT_BIGGY_PROPOSE_TOKEN") or "").strip()}
+    token_file = str(os.environ.get("GPT_BIGGY_PROPOSE_TOKEN_FILE") or "").strip()
+    for candidate in (token_file, "/Users/rick/.jarvis-ptt/gpt-biggy-propose.token"):
+        if not candidate:
+            continue
+        try:
+            expected_tokens.add(Path(candidate).read_text(encoding="utf-8").strip())
+        except OSError:
+            pass
+    expected_tokens.discard("")
+    supplied = str(handler.headers.get("Authorization") or "")
+    supplied = re.sub(r"^Bearer\s+", "", supplied, flags=re.I).strip()
+    if not supplied:
+        supplied = str(handler.headers.get("X-GPT-Propose-Token") or "").strip()
+    if not expected_tokens or supplied not in expected_tokens:
+        logger.warning("Jarvis II document resolver rejected auth")
+        return j(handler, {"ok": False, "error": "authenticated Biggy ingress required"}, status=401)
+
+    query = str(body.get("query") or body.get("objective") or "").strip()
+    if not query or len(query) > 1000:
+        return j(handler, {"ok": False, "error": "query must be 1 to 1000 characters"}, status=400)
+
+    try:
+        from api.smedley_document_route import try_active_document_review, try_document_route
+
+        result = try_document_route(query, topk=8, public_origin=_request_base_url(handler), allow_ask_jarvis=True)
+        if not isinstance(result, dict) or not result.get("handled"):
+            return j(handler, {"ok": False, "error": "no verified document route", "matches": []}, status=404)
+        if (
+            re.search(r"\b(?:wiring|schematic|connection\\s+diagram|pinout)\b", query, re.I)
+            and isinstance(result.get("active_document"), dict)
+        ):
+            review = try_active_document_review(
+                "extract the wiring schematic",
+                result["active_document"],
+                public_origin=_request_base_url(handler),
+            )
+            if isinstance(review, dict) and review.get("handled"):
+                result = dict(result)
+                result["reply"] = review.get("reply") or result.get("reply")
+                result["spoken_reply"] = review.get("spoken_reply") or result.get("spoken_reply")
+                result["active_document"] = review.get("active_document") or result.get("active_document")
+        return j(
+            handler,
+            {
+                "ok": True,
+                "answer": result.get("reply") or "",
+                "spoken_reply": result.get("spoken_reply") or result.get("reply") or "",
+                "matches": result.get("matches") or [],
+                "active_document": result.get("active_document") or None,
+                "retrieval_receipt": result.get("retrieval_receipt") or None,
+            },
+        )
+    except Exception as exc:
+        logger.exception("Jarvis II read-only document resolver failed")
+        return j(handler, {"ok": False, "error": type(exc).__name__, "matches": []}, status=502)
+
+
 def _handle_chat_sync(handler, body):
     """Fallback synchronous chat endpoint (POST /api/chat). Not used by frontend."""
     stale_response = _agent_runtime_barrier_response(runner_local_owned=False)
@@ -23917,6 +24139,87 @@ def _handle_chat_sync(handler, body):
                 f"display_message exceeds {SYNC_DISPLAY_MESSAGE_MAX_CHARS} characters",
             )
     ptt_owned = _chat_body_ptt_owned_tts(body)
+    # A pedal/synchronous Ask-Jarvis request for an engineering document is a
+    # governed document retrieval, not a PA-briefing request.  This endpoint
+    # previously skipped the document-first branch used by /api/chat/start and
+    # therefore launched the legacy hard-bind instead (including its extra
+    # acknowledgement/final-response cycle).  Keep the response as one
+    # persisted Jarvis turn and stop before the legacy path can run.
+    try:
+        from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj_document_sync
+        from api.smedley_document_route import (
+            is_document_request,
+            try_active_document_review,
+            try_document_route,
+        )
+
+        ask_document = (
+            try_document_route(
+                display_msg,
+                public_origin=_request_base_url(handler),
+                allow_ask_jarvis=True,
+            )
+            if _is_aj_document_sync(display_msg)
+            and is_document_request(display_msg, allow_ask_jarvis=True)
+            else None
+        )
+        if (
+            isinstance(ask_document, dict)
+            and ask_document.get("handled")
+            and re.search(r"\b(?:wiring|schematic|connection\s+diagram|pinout)\b", display_msg, re.I)
+            and isinstance(ask_document.get("active_document"), dict)
+        ):
+            extracted = try_active_document_review(
+                "extract the wiring schematic",
+                ask_document["active_document"],
+                public_origin=_request_base_url(handler),
+            )
+            if isinstance(extracted, dict) and extracted.get("handled"):
+                ask_document = dict(ask_document)
+                ask_document["reply"] = extracted.get("reply") or ask_document.get("reply")
+                ask_document["spoken_reply"] = extracted.get("spoken_reply") or ask_document.get("spoken_reply")
+                if isinstance(extracted.get("active_document"), dict):
+                    ask_document["active_document"] = extracted["active_document"]
+    except Exception:
+        logger.exception("synchronous Ask Jarvis document route failed closed to legacy path")
+        ask_document = None
+    if isinstance(ask_document, dict) and ask_document.get("handled"):
+        reply = str(ask_document.get("reply") or "").strip()
+        spoken = str(ask_document.get("spoken_reply") or "").strip() or None
+        active_document = ask_document.get("active_document")
+        s.active_document = active_document if isinstance(active_document, dict) and active_document.get("source") else None
+        now_ts = int(time.time())
+        if not isinstance(getattr(s, "messages", None), list):
+            s.messages = []
+        s.messages.extend([
+            {"role": "user", "content": display_msg, "timestamp": now_ts, "_ask_jarvis": True},
+            {"role": "assistant", "content": reply, "timestamp": now_ts + 1,
+             "document_route": True, "jarvis_response": True, "ask_jarvis_hard_bind": True,
+             "spoken_reply": spoken, "spoken_text": spoken,
+             "tts_voice_id": "dzRy05hNK3bab9ViJ0oU", "tts_voice_profile": "jarvis_james_michael",
+             "smedley_document_sidecar": "governed_document_route"},
+        ])
+        s.pending_user_message = None
+        s.active_stream_id = None
+        if hasattr(s, "pending_started_at"):
+            s.pending_started_at = None
+        try:
+            s.save()
+        except Exception:
+            logger.exception("failed to persist synchronous Ask Jarvis document turn for %s", s.session_id)
+            return bad(handler, "failed to persist Ask Jarvis document-route turn", 500)
+        return j(handler, {
+            "session_id": s.session_id, "answer": reply, "reply": reply,
+            "spoken_reply": spoken, "spoken_text": spoken,
+            "document_route": True, "jarvis_response": True, "ask_jarvis_hard_bind": True,
+            "tts_voice_id": "dzRy05hNK3bab9ViJ0oU", "tts_voice_profile": "jarvis_james_michael",
+            "ptt_owned_tts": ptt_owned,
+            "matches": ask_document.get("matches") or [],
+            "collection": ask_document.get("collection") or "",
+            "active_document": getattr(s, "active_document", None),
+            "retrieval_receipt": ask_document.get("retrieval_receipt") or None,
+            "error": ask_document.get("error"),
+        })
     # PTT Ask Jarvis must hard-bind here (pedal uses /api/chat, not /api/chat/start).
     # Detect on display_message (raw utterance) first — wrapped message may bury the cue.
     try:
@@ -23924,8 +24227,9 @@ def _handle_chat_sync(handler, body):
     except Exception:
         logger.exception("ask_jarvis sync import failed; falling through to ordinary chat")
     else:
-        if _is_aj_sync(display_msg) or _is_aj_sync(msg):
-            ask_objective = display_msg if _is_aj_sync(display_msg) else msg
+        _jarvis_followup_objective = _jarvis_travel_followup_objective(s, display_msg)
+        if _is_aj_sync(display_msg) or _is_aj_sync(msg) or _jarvis_followup_objective:
+            ask_objective = _jarvis_followup_objective or (display_msg if _is_aj_sync(display_msg) else msg)
             return _handle_ask_jarvis_sync_hard_bind(handler, s, ask_objective)
     try:
         from api.smedley_fast_route import try_smedley_fast_route

@@ -294,26 +294,11 @@
         target=u.pathname+(u.search||'');
       }
     }catch(_){ }
-    try{
-      const res=await fetch(target,{credentials:'include',cache:'no-store'});
-      if(!res.ok){
-        const detail=(await res.text().catch(()=>'')).slice(0,180);
-        window.alert('Corpus open failed ('+res.status+'). '+detail);
-        return;
-      }
-      const ctype=(res.headers.get('content-type')||'').toLowerCase();
-      const buf=await res.arrayBuffer();
-      const blob=new Blob([buf],{type:ctype||'application/octet-stream'});
-      const blobUrl=URL.createObjectURL(blob);
-      const win=window.open(blobUrl,'_blank');
-      if(!win){
-        window.location.assign(target);
-        return;
-      }
-      setTimeout(()=>{ try{ URL.revokeObjectURL(blobUrl); }catch(_){ } }, 120000);
-    }catch(err){
-      window.alert('Corpus open failed: '+(err&&err.message?err.message:err));
-    }
+    // Open the authenticated sidecar URL itself.  Fetching it into a blob makes
+    // some browsers download the PDF instead of honoring the sidecar's inline
+    // Content-Disposition response.
+    const win=window.open(target,'_blank','noopener');
+    if(!win) window.location.assign(target);
   }
 
   function installCorpusLinkFix(){
@@ -605,46 +590,11 @@
     }catch(err){
       console.warn('document route send failed; falling back', err);
     }
-    const filter=searchScope==='library'?{library_only:true}:currentProject&&searchScope!=='library'?{project:currentProject,scope:searchScope}:{};
-    proxyJson('/rag/retrieve',{method:'POST',body:JSON.stringify({query:q,topk:8,snippet_chars:900,filter})}).then((data)=>{
-      composer.value='';
-      composer.dispatchEvent(new Event('input',{bubbles:true}));
-      try{
-        const matches=Array.isArray(data.matches)?data.matches:[];
-        const exact=matches.find((m)=>m&&m.match_kind==='exact'&&m.url);
-        if(exact){
-          // Deterministic: never let the LLM invent IO03-684 / LAN URLs.
-          const ident=exact.document_identity||{};
-          const title=ident.title||exact.source||'manual';
-          const docNo=ident.doc_no||exact.revision||'';
-          const href=normalizeCorpusSidecarUrl(exact.url)||exact.url;
-          const label=docNo?`${title} (${docNo})`:title;
-          const reply=[
-            `I found the engineering-library manual${exact.part_number?` for **${exact.part_number}**`:''}:`,
-            '',
-            `**${title}**${docNo?` (**${docNo}**)`:''}`,
-            '',
-            'The part appears in this manual, but a specific wiring-schematic page is not verified yet — page extraction is still needed.',
-            '',
-            href?`[Open manual](${href})`:'',
-            '',
-            'Want me to extract the wiring schematic page next?'
-          ].filter(Boolean).join('\n');
-          const spoken=`I found ${title}${docNo?', document '+String(docNo).replace(/([A-Z]+)(\d{2})-(\d{3})/,'$1 $2-$3'):''}${exact.part_number?' for '+exact.part_number:''}. The wiring schematic page still needs extraction. The manual is on screen.`;
-          if(typeof S!=='undefined'&&Array.isArray(S.messages)){
-            S.messages.push({role:'user',content:q,timestamp:Date.now()/1000});
-            S.messages.push({role:'assistant',content:reply,spoken_reply:spoken,document_route:true,timestamp:Date.now()/1000});
-            if(typeof renderMessages==='function') renderMessages();
-          }
-          whenAckClear().then(()=>speakSmedleyNow(spoken));
-          if(href) openCorpusDocument(href);
-          note.textContent='Canonical index hit opened.';
-        }else{
-          sendThroughHermes(buildGroundedPrompt(q,matches));
-          note.textContent=`${matches.length} source excerpt(s) sent to Smedley.`;
-        }
-      }finally{__docRouteBusy=false;}
-    }).catch((error)=>{__docRouteBusy=false;note.textContent=`Retrieval failed: ${error.message||error}`;});
+    // Retrieval must traverse the shared WebUI document route, which calls the
+    // Jarvis n8n gateway.  Never fall back to a browser-to-RAG request here.
+    __docRouteBusy=false;
+    note.textContent='Document route unavailable. Retry the request from the Smedley message box.';
+    return;
   }
 
   function currentHermesSessionId(){
@@ -1108,9 +1058,37 @@
     };
   }
 
+  // Smedley remains the host surface, but a response produced by the explicit
+  // Jarvis route must be visibly attributed to Jarvis.  The shared renderer
+  // only has one global assistant display name, so annotate the completed turn
+  // from its persisted message metadata rather than changing every Smedley
+  // response label.
+  function labelJarvisResponses(root){
+    try{
+      const messages=(typeof S!=='undefined'&&Array.isArray(S.messages))?S.messages:[];
+      const scope=root&&root.querySelectorAll?root:document;
+      scope.querySelectorAll('.assistant-segment[data-msg-idx]').forEach((segment)=>{
+        const idx=Number(segment.dataset.msgIdx);
+        const message=Number.isFinite(idx)?messages[idx]:null;
+        const visible=String(segment.dataset.rawText||segment.textContent||'');
+        const isJarvis=!!(message&&(message.jarvis_response===true||message.ask_jarvis_hard_bind))
+          ||/^\s*(?:\*\*)?Jarvis\s*:/i.test(visible);
+        if(!isJarvis)return;
+        const turn=segment.closest('.assistant-turn');
+        const role=turn&&turn.querySelector('.msg-role.assistant');
+        if(!role)return;
+        const name=role.querySelector('.msg-role-name');
+        const icon=role.querySelector('.role-icon.assistant');
+        if(name)name.textContent='Jarvis';
+        if(icon)icon.textContent='J';
+        if(turn)turn.dataset.responseAgent='jarvis';
+      });
+    }catch(_){}
+  }
+
   function installBrandingObserver(){
     installDocumentTitleBranding();
-    withBrandingLock(()=>{brandingScanRoots().forEach(brandSubtree);});
+    withBrandingLock(()=>{brandingScanRoots().forEach(brandSubtree);labelJarvisResponses(document);});
     const observer=new MutationObserver((mutations)=>{
       withBrandingLock(()=>{
         mutations.forEach((mutation)=>{
@@ -1124,6 +1102,7 @@
           }
           if(mutation.type==='childList'){
             mutation.addedNodes.forEach(brandSubtree);
+            labelJarvisResponses(document);
             return;
           }
           if(mutation.type==='attributes'&&BRANDING_ATTRS.includes(mutation.attributeName||'')){

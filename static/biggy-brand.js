@@ -527,6 +527,44 @@
     });
   }
 
+  // Biggy is the coordinator surface.  Replies supplied by the explicit
+  // Ask-Jarvis route must retain their own author label instead of inheriting
+  // Biggy's global assistant name from the shared renderer.
+  function labelJarvisResponses(root) {
+    try {
+      const messages = (typeof S !== 'undefined' && Array.isArray(S.messages)) ? S.messages : [];
+      const scope = root && root.querySelectorAll ? root : document;
+      scope.querySelectorAll('.assistant-segment[data-msg-idx]').forEach((segment) => {
+        const idx = Number(segment.dataset.msgIdx);
+        const message = Number.isFinite(idx) ? messages[idx] : null;
+        const visible = String(segment.dataset.rawText || segment.textContent || '');
+        const isJarvis = !!(message && (message.ask_jarvis_hard_bind || message.jarvis_response))
+          || /^\s*(?:\*\*)?Jarvis\s*:/i.test(visible);
+        if (!isJarvis) return;
+        const turn = segment.closest('.assistant-turn');
+        const role = turn && turn.querySelector('.msg-role.assistant');
+        if (!role) return;
+        const name = role.querySelector('.msg-role-name');
+        const icon = role.querySelector('.role-icon.assistant');
+        if (name) name.textContent = 'Jarvis';
+        if (icon) icon.textContent = 'J';
+        if (turn) turn.dataset.responseAgent = 'jarvis';
+      });
+    } catch (_) {}
+  }
+
+  function installJarvisResponseLabels() {
+    if (window.__biggyJarvisResponseLabelsInstalled) return;
+    window.__biggyJarvisResponseLabelsInstalled = true;
+    const root = document.getElementById('msgInner');
+    if (!root) return;
+    labelJarvisResponses(root);
+    new MutationObserver(() => labelJarvisResponses(root)).observe(root, {
+      childList: true,
+      subtree: true,
+    });
+  }
+
   function removeCaduceus() {
     document.querySelectorAll('#emptyState .empty-logo').forEach((node) => node.remove());
   }
@@ -1067,6 +1105,7 @@
     syncModelFromDom();
     updateIdentityChip();
     forceChromeLabels();
+    installJarvisResponseLabels();
     installComposerBranding();
     installBiggyVoiceLabels();
     installGuiDiagnostics();
@@ -1762,6 +1801,7 @@
     installDocumentTitle();
     installComposerBranding();
     forceChromeLabels();
+    installJarvisResponseLabels();
     removeCaduceus();
     updateIdentityChip();
     ensureTravelMapDialog();
