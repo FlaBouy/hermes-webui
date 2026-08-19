@@ -8,6 +8,7 @@ def test_catalog_terms_are_generic_and_normalized():
         "1756-IA16",
         "MU-TDID12",
     ]
+    assert catalog_terms("schematic for 900A16-0103") == ["900A16-0103", "900A16"]
 
 
 def test_wiring_resolution_uses_exact_corpus_evidence_and_pdf_pages(tmp_path):
@@ -79,3 +80,25 @@ def test_wiring_resolution_rejects_a_specification_page_that_only_mentions_wirin
 
     assert result["ok"] is False
     assert result["status"] == "NO_VERIFIED_EVIDENCE"
+
+
+def test_wiring_resolution_accepts_compacted_ocr_when_the_page_names_a_diagram(tmp_path):
+    manual = "Vendor Data/Example/Installation.pdf"
+    manual_path = tmp_path / manual
+    manual_path.parent.mkdir(parents=True)
+    manual_path.write_bytes(b"test")
+
+    result = resolve_wiring_request(
+        "schematic for 900A16-0103",
+        scroll=lambda term: [
+            {"source": manual, "text": f"{term} module wiring"}
+        ],
+        library_root=str(tmp_path),
+        page_reader=lambda _path: [
+            "HighLevelAnalogInputModule(16Channels)WiringSeeTheFollowingDiagram900A16-XXXX"
+        ],
+    )
+
+    assert result["ok"] is True
+    assert result["catalog_term"] == "900A16-0103"
+    assert result["matched_catalog_term"] == "900A16"

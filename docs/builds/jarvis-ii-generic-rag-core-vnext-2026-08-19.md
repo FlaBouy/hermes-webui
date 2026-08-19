@@ -35,11 +35,12 @@ write memory, or modify tools/credentials.
 | --- | --- | --- |
 | `1756-IA16` wiring schematic | Pass | `1756-UM058`, PDF page 97 |
 | `1756-IB32` wiring schematic | Pass | `1756-UM058`, PDF page 102 |
-| Honeywell Edge `900A16-0103` schematic | Safe fail | `NO_VERIFIED_EVIDENCE`; generic core rejected broad specifications pages rather than inventing a schematic page |
+| Honeywell Edge `900A16-0103` schematic | Pass | Hardware Planning and Installation Guide, PDF page 159; the PDF identifies the `900A16` family heading and contains the High Level Analog Input wiring diagram |
 
-The Edge safe-fail is intentional. It is evidence that VNext will not make the
-same error as the legacy path. The actual schematic source/page must be found by
-retrieval and verified from its PDF before Edge can be marked accepted.
+The initial Edge pass safely rejected broad specifications pages. The final pass
+used the request's exact configuration plus a generic derived family token,
+inspected the retrieved source PDF once, and verified the page from its OCR
+evidence. No Honeywell-specific source or page mapping was added.
 
 ## Durable-memory design boundary
 
@@ -54,8 +55,8 @@ PDF verification; memory must never return a stored answer or bypass retrieval.
 
 No Smedley or Biggy GUI route points to VNext. Cutover requires:
 
-1. A verified Edge `900A16-0103` schematic fixture.
-2. Broader multi-vendor acceptance fixtures.
-3. A direct n8n wrapper execution test with the production authentication
+1. Broader multi-vendor acceptance fixtures beyond the current Allen-Bradley
+   and Honeywell baseline.
+2. A direct n8n wrapper execution test with the production authentication
    contract.
-4. Owner approval of the GUI adapter change.
+3. Owner approval of the GUI adapter change.

@@ -61,7 +61,7 @@ def resolve(payload: object) -> tuple[int, dict[str, Any]]:
         query,
         scroll=corpus_scroll,
         library_root=LIB_ROOT,
-        maximum_sources=3,
+        maximum_sources=6,
     )
     result["schema"] = "jarvis.ii.rag_core.vnext.v1"
     result["collection"] = COLLECTION

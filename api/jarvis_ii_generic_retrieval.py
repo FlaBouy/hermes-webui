@@ -20,10 +20,10 @@ _INDEX_EXTENSIONS = {".csv", ".tsv", ".xls", ".xlsx"}
 _CATALOG_TERM = re.compile(
     r"(?<![A-Za-z0-9])[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+(?![A-Za-z0-9])"
 )
-_WIRING_TERMS = re.compile(r"\b(?:wiring|schematic|connection|terminal|pinout|diagram)\b", re.I)
+_WIRING_TERMS = re.compile(r"(?:wiring|schematic|connection|terminal|pinout|diagram)", re.I)
 _DIAGRAM_EVIDENCE = re.compile(
-    r"\b(?:wiring\s+diagrams?|simplified\s+schematic|connection\s+diagram|"
-    r"terminal\s+assignment|terminal\s+diagram)\b",
+    r"(?:wiring\s*diagrams?|schematic|connection\s*diagram|"
+    r"terminal\s*assignment|terminal\s*diagram|diagram)",
     re.I,
 )
 
@@ -35,6 +35,12 @@ def catalog_terms(query: object) -> list[str]:
         term = re.sub(r"\s+", "", match.group(0)).upper()
         if any(character.isdigit() for character in term):
             terms.append(term)
+            # A trailing numeric configuration/suffix is commonly absent from
+            # a manual's family heading (for example, MODEL-0103 vs MODEL).
+            # Keep the exact token first and add the derived family only as a
+            # second retrieval term; PDF evidence still decides the answer.
+            if re.search(r"-\d{3,}$", term):
+                terms.append(term.rsplit("-", 1)[0])
     return list(dict.fromkeys(terms))
 
 
@@ -103,6 +109,7 @@ def verify_wiring_pages(
     source: object,
     catalog_term: str,
     *,
+    catalog_aliases: Iterable[str] = (),
     library_root: str,
     page_reader: Callable[[str], list[str]] = _pdf_page_texts,
     maximum_pages: int = 3,
@@ -115,15 +122,19 @@ def verify_wiring_pages(
     if not os.path.isfile(path):
         return []
     pages: list[dict[str, Any]] = []
+    accepted_terms = list(dict.fromkeys([catalog_term, *catalog_aliases]))
     for number, text in enumerate(page_reader(path), start=1):
+        matched_term = next(
+            (term for term in accepted_terms if _contains_term(text, term)), ""
+        )
         if not (
-            _contains_term(text, catalog_term)
+            matched_term
             and _WIRING_TERMS.search(text)
             and _DIAGRAM_EVIDENCE.search(text)
         ):
             continue
         lower = text.lower()
-        term_hits = _term_occurrences(text, catalog_term)
+        term_hits = _term_occurrences(text, matched_term)
         wiring_hits = len(_WIRING_TERMS.findall(text))
         score = term_hits * 100 + wiring_hits * 8
         if re.search(r"\b(?:wiring\s+diagrams?|simplified\s+schematic)\b", lower):
@@ -139,6 +150,7 @@ def verify_wiring_pages(
         pages.append(
             {
                 "pdf_page": number,
+                "matched_catalog_term": matched_term,
                 "evidence_score": score,
                 "excerpt": re.sub(r"\s+", " ", text).strip()[:900],
             }
@@ -153,7 +165,7 @@ def resolve_wiring_request(
     scroll: Callable[[str], Iterable[dict[str, Any]]],
     library_root: str,
     page_reader: Callable[[str], list[str]] = _pdf_page_texts,
-    maximum_sources: int = 12,
+    maximum_sources: int = 6,
 ) -> dict[str, Any]:
     """Produce one verified, source-grounded schematic result or fail closed."""
     terms = catalog_terms(query)
@@ -161,27 +173,30 @@ def resolve_wiring_request(
         return {"ok": False, "status": "UNSUPPORTED_REQUEST", "evidence": []}
 
     verified: list[dict[str, Any]] = []
-    inspected: set[tuple[str, str]] = set()
+    inspected: set[str] = set()
     for candidate in exact_catalog_candidates(query, scroll=scroll):
         source = str(candidate.get("source") or "")
         if document_kind(source) != "manual":
             continue
         term = str(candidate.get("matched_catalog_term") or "")
-        identity = (source, term)
-        if identity in inspected:
+        if source in inspected:
             continue
-        inspected.add(identity)
+        inspected.add(source)
         if len(inspected) > maximum_sources:
             break
         pages = verify_wiring_pages(
-            source, term, library_root=library_root, page_reader=page_reader
+            source,
+            term,
+            catalog_aliases=terms,
+            library_root=library_root,
+            page_reader=page_reader,
         )
         if not pages:
             continue
         verified.append(
             {
                 "source": source,
-                "term": term,
+                "term": str(pages[0].get("matched_catalog_term") or term),
                 "pages": pages,
                 "evidence_score": int(pages[0]["evidence_score"]),
             }
@@ -193,7 +208,8 @@ def resolve_wiring_request(
             "ok": True,
             "status": "VERIFIED_EVIDENCE",
             "query": str(query or "").strip(),
-            "catalog_term": best["term"],
+            "catalog_term": terms[0],
+            "matched_catalog_term": best["term"],
             "source": best["source"],
             "url": source_url(best["source"]),
             "pages": best["pages"],
