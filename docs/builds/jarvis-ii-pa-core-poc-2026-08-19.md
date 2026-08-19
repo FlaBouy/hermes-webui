@@ -39,6 +39,12 @@ The planner uses LM Studio's local `openai/gpt-oss-120b` through its OpenAI-comp
 4. A durable-memory write attempt is denied pending retention approval.
 5. Every response has correlation, operation, policy, and audit fields.
 
+## Implemented POC milestone: durable-context read
+
+The PA now calls `POST /api/jarvis-ii/pa-context` before local planning. The endpoint is reachable only through the internal Jarvis II bearer credential and returns bounded, redacted Biggy `MEMORY.md`, `USER.md`, and `SOUL.md` context with a hash for each section. It excludes browser transcripts and all write actions.
+
+The current PA workflow is `Jarvis II — PA Core POC` (`cD6uUqpzXQl3n3iU`), remains inactive, and now contains eight nodes. The n8n container-to-adapter check passed with the `jarvis.pa.durable_context.v1` contract and the write policy `DISABLED_PENDING_OWNER_RETENTION_POLICY`.
+
 ## Deliberately deferred
 
 Live calendar writes, bookings, purchases, persistent-memory writes, and automatic skill installation are outside the baseline POC. They require their own approved capability contracts and tests.

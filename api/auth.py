@@ -56,6 +56,7 @@ PUBLIC_PATHS = frozenset({
     # This narrow n8n bridge performs its own Bearer-token validation in the
     # route handler; it must be reachable without a browser session cookie.
     '/api/jarvis-ii/document-resolve',
+    '/api/jarvis-ii/pa-context',
     '/share',
     '/manifest.json', '/manifest.webmanifest',
     '/session/manifest.json', '/session/manifest.webmanifest',

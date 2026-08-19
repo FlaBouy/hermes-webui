@@ -15628,6 +15628,9 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/jarvis-ii/document-resolve":
         return _handle_jarvis_ii_document_resolve(handler, body)
 
+    if parsed.path == "/api/jarvis-ii/pa-context":
+        return _handle_jarvis_ii_pa_context(handler, body)
+
     if parsed.path == "/api/chat/start":
         return _handle_chat_start(handler, body, diag=diag)
 
@@ -24049,12 +24052,12 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
     )
 
 
-def _handle_jarvis_ii_document_resolve(handler, body):
-    """Read-only, authenticated document resolution for Jarvis II n8n.
+def _jarvis_ii_authenticated(handler) -> bool:
+    """Authenticate an internal Jarvis II request from Biggy/n8n.
 
-    This intentionally does not create a Smedley session, invoke a model, or
-    queue any voice output.  It gives the production n8n workflow the same
-    authoritative-manual selection used by the Smedley document route.
+    This is intentionally narrower than the browser session auth path.  It is
+    used only by local, bearer-authenticated service calls and never grants
+    write authority.
     """
     expected_tokens = {str(os.environ.get("GPT_BIGGY_PROPOSE_TOKEN") or "").strip()}
     token_file = str(os.environ.get("GPT_BIGGY_PROPOSE_TOKEN_FILE") or "").strip()
@@ -24070,7 +24073,66 @@ def _handle_jarvis_ii_document_resolve(handler, body):
     supplied = re.sub(r"^Bearer\s+", "", supplied, flags=re.I).strip()
     if not supplied:
         supplied = str(handler.headers.get("X-GPT-Propose-Token") or "").strip()
-    if not expected_tokens or supplied not in expected_tokens:
+    return bool(expected_tokens and supplied in expected_tokens)
+
+
+def _handle_jarvis_ii_pa_context(handler, body):
+    """Return bounded, read-only Biggy durable context to Jarvis II PA.
+
+    This endpoint deliberately excludes browser transcripts, project files,
+    and memory writes.  Persistent-memory retention and write policy remain
+    owner decisions, so the PA may use this only as planning context.
+    """
+    if not _jarvis_ii_authenticated(handler):
+        logger.warning("Jarvis II PA context rejected auth")
+        return j(handler, {"ok": False, "error": "authenticated Biggy ingress required"}, status=401)
+    requested = body.get("sections") or ["memory", "user", "soul"]
+    if not isinstance(requested, list):
+        return j(handler, {"ok": False, "error": "sections must be a list"}, status=400)
+    allowed = {"memory": "MEMORY.md", "user": "USER.md", "soul": "SOUL.md"}
+    sections = [str(item).strip().lower() for item in requested]
+    if not sections or any(item not in allowed for item in sections):
+        return j(handler, {"ok": False, "error": "unsupported context section"}, status=400)
+    base = Path("/Users/rick/.hermes/profiles/biggy")
+    paths = {
+        "memory": base / "memories" / "MEMORY.md",
+        "user": base / "memories" / "USER.md",
+        "soul": base / "SOUL.md",
+    }
+    import hashlib
+
+    context = {}
+    for section in sections:
+        path = paths[section]
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")[:24000]
+        except OSError:
+            text = ""
+        context[section] = {
+            "content": _redact_text(text),
+            "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+            "truncated": len(text) >= 24000,
+        }
+    return j(
+        handler,
+        {
+            "ok": True,
+            "schema": "jarvis.pa.durable_context.v1",
+            "context": context,
+            "write_policy": "DISABLED_PENDING_OWNER_RETENTION_POLICY",
+            "retention": "Persistent retention is disabled until the owner approves a retention policy.",
+        },
+    )
+
+
+def _handle_jarvis_ii_document_resolve(handler, body):
+    """Read-only, authenticated document resolution for Jarvis II n8n.
+
+    This intentionally does not create a Smedley session, invoke a model, or
+    queue any voice output.  It gives the production n8n workflow the same
+    authoritative-manual selection used by the Smedley document route.
+    """
+    if not _jarvis_ii_authenticated(handler):
         logger.warning("Jarvis II document resolver rejected auth")
         return j(handler, {"ok": False, "error": "authenticated Biggy ingress required"}, status=401)
 
