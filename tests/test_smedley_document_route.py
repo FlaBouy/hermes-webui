@@ -49,6 +49,14 @@ def test_hc900_edge_schematic_request_routes_to_the_hc900_manual(monkeypatch):
     assert result["active_document"]["source"].endswith("ControlEdge HC900 IO Modules Specifications.pdf")
 
 
+def test_vendor_neutral_schematic_request_is_a_document_request():
+    # No Honeywell, Allen-Bradley, or other vendor-specific catalog rule may
+    # be required for a request to retrieve engineering library evidence.
+    assert docroute.is_document_request(
+        "Get me a wiring schematic for the Acme Controls ZX-47 module."
+    )
+
+
 def test_normalize_corpus_url_never_emits_lan_and_absolutizes():
     abs_url = docroute.normalize_corpus_url(LAN, source=SOURCE, public_origin=ORIGIN)
     assert abs_url == (

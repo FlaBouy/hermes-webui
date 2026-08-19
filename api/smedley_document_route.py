@@ -56,10 +56,13 @@ SIDECAR_SEARCH_MD_RE = re.compile(
     re.IGNORECASE,
 )
 
-# Intent: pull/find/open a document OR ask for a document link.
+# Intent: pull/find/open a document OR ask for a document link.  This is
+# deliberately vendor-neutral: library retrieval cannot depend on a curated
+# catalog-number regex for a particular manufacturer.
 _DOC_NOUN = (
     r"(?:document|doc(?:ument)?s?|spec(?:ification)?s?|manuals?|datasheets?|"
-    r"pdfs?|drawings?|prints?|procedures?|standards?|dock)"
+    r"pdfs?|drawings?|prints?|procedures?|standards?|schematics?|wiring|"
+    r"(?:connection|terminal|wiring)\s+diagrams?|pinouts?|dock)"
 )
 _DOC_VERB = (
     r"(?:pull|get|fetch|find|locate|open|show|send|give|provide|bring|grab|"
