@@ -25,6 +25,30 @@ def test_is_document_request_detects_pull_find_link_intents():
     )
 
 
+def test_hc900_edge_schematic_request_routes_to_the_hc900_manual(monkeypatch):
+    query = "Hey Smedley, ask Jarvis to get me a schematic on a Honeywell Edge 900A16-0103 analog input module."
+    assert docroute.is_document_request(query, allow_ask_jarvis=True)
+    assert docroute.extract_query_part_numbers(query) == ["900A16-0103"]
+
+    monkeypatch.setattr(
+        docroute,
+        "retrieve_documents",
+        lambda *_args, **_kwargs: {
+            "matches": [
+                {
+                    "source": "Vendor Data/Honeywell/Honeywell Edge UIO/ControlEdge HC900 IO Modules Specifications.pdf",
+                    "url": "/api/extensions/smedley-engineering/sidecar/doc/Vendor%20Data/Honeywell/Honeywell%20Edge%20UIO/ControlEdge%20HC900%20IO%20Modules%20Specifications.pdf",
+                    "snippet": "ControlEdge HC900 Universal Analog Input module specifications.",
+                    "score": 0.79,
+                }
+            ]
+        },
+    )
+    result = docroute.try_document_route(query, allow_ask_jarvis=True, public_origin=ORIGIN)
+    assert result and result["handled"] is True
+    assert result["active_document"]["source"].endswith("ControlEdge HC900 IO Modules Specifications.pdf")
+
+
 def test_normalize_corpus_url_never_emits_lan_and_absolutizes():
     abs_url = docroute.normalize_corpus_url(LAN, source=SOURCE, public_origin=ORIGIN)
     assert abs_url == (

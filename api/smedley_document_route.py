@@ -74,6 +74,9 @@ _HW_PART = re.compile(
     r"\b(?:MU\s*/\s*MC|MC\s*/\s*MU|MU|MC)[- ]?[A-Z]{2,6}\d{2,}[A-Z]?\b",
     re.IGNORECASE,
 )
+# Honeywell ControlEdge HC900 I/O catalog numbers (for example 900A16-0103).
+# These are a different product family from the older MC/MU FTA/IOP modules.
+_HC900_PART = re.compile(r"\b900[A-Z]{1,4}\d{1,3}-\d{4}\b", re.IGNORECASE)
 _AB_PART = re.compile(
     r"\b(?:1756|1769|1794|5094)[- ]?[A-Z0-9]{2,}\b",
     re.IGNORECASE,
@@ -129,6 +132,14 @@ _DOCUMENT_REQUEST_RES = (
         re.IGNORECASE | re.DOTALL,
     ),
     re.compile(rf"(?:{_HW_PART.pattern})", re.IGNORECASE),
+    # ControlEdge HC900 I/O requests are engineering-document requests even when
+    # the operator says "schematic" rather than "manual".
+    re.compile(
+        rf"(?:{_HC900_PART.pattern}).{{0,80}}\b(?:{_DOC_NOUN}|wiring|schematics?)\b|"
+        rf"\b(?:{_DOC_NOUN}|wiring|schematics?)\b.{{0,80}}(?:{_HC900_PART.pattern})",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    re.compile(rf"(?:{_HC900_PART.pattern})", re.IGNORECASE),
     # Allen-Bradley / Rockwell catalog numbers with wiring/manual cues.
     re.compile(
         rf"(?:{_AB_PART.pattern}).{{0,80}}\b(?:{_DOC_NOUN}|wiring|schematics?)\b|"
@@ -746,7 +757,7 @@ def infer_query_vendor(query: object) -> str:
     """Best-effort vendor family from the operator query."""
     msg = str(query or "")
     low = msg.lower()
-    if "honeywell" in low or "tdc3000" in low or "tdc 3000" in low or "experion" in low or _HW_PART.search(msg):
+    if "honeywell" in low or "tdc3000" in low or "tdc 3000" in low or "experion" in low or _HW_PART.search(msg) or _HC900_PART.search(msg):
         return "honeywell"
     if "allen" in low or "bradley" in low or "rockwell" in low or _AB_PART.search(msg):
         return "allen_bradley"
@@ -772,7 +783,7 @@ def extract_query_part_numbers(query: object) -> list[str]:
     """Catalog/part numbers explicitly present in the operator query."""
     msg = str(query or "")
     found: list[str] = []
-    for rx in (_HW_PART, _AB_PART):
+    for rx in (_HW_PART, _HC900_PART, _AB_PART):
         for m in rx.finditer(msg):
             found.append(re.sub(r"\s+", "-", m.group(0).upper()))
     return list(dict.fromkeys(found))
@@ -811,6 +822,13 @@ def manual_relevant_to_query_parts(match: dict[str, Any], query_parts: list[str]
             observed,
         ]
     )
+    # HC900 catalog variants commonly share one ControlEdge HC900 I/O manual.
+    # A retrieved page may discuss a sibling module, so require the manual family
+    # rather than falsely requiring the exact catalog number in every excerpt.
+    if any(_HC900_PART.fullmatch(q) for q in query_parts) and re.search(
+        r"honeywell\s+edge\s+uio|controledge\s+hc900", blob, re.I
+    ):
+        return True
     return any(_text_mentions_part(blob, q) for q in query_parts)
 
 
@@ -1343,7 +1361,7 @@ def is_wiring_extract_followup(query: object) -> bool:
     if not msg or not _ACTIVE_DOCUMENT_WIRING_EXTRACT_RE.search(msg):
         return False
     # Fresh part/doc lookups belong to document_route, not extract-on-bound-doc.
-    if _HW_PART.search(msg) or _AB_PART.search(msg) or _DOCNUM.search(msg):
+    if _HW_PART.search(msg) or _HC900_PART.search(msg) or _AB_PART.search(msg) or _DOCNUM.search(msg):
         return False
     if re.search(
         r"\b(?:user\s+)?manuals?\b|\bdatasheets?\b|\bknowledgebase\b|\biota\b|\biom\b",
@@ -1901,7 +1919,7 @@ def is_electrical_equipment_fact_question(query: object) -> bool:
         return False
     if _CHASSIS_POWER_TOPIC_RE.search(msg):
         return True
-    has_part = bool(_HW_PART.search(msg) or _AB_PART.search(msg))
+    has_part = bool(_HW_PART.search(msg) or _HC900_PART.search(msg) or _AB_PART.search(msg))
     return bool(has_part and _ELECTRICAL_FACT_RE.search(msg))
 
 
@@ -1915,7 +1933,7 @@ def is_active_chassis_power_followup(query: object, active_document: object) -> 
     msg = str(query or "").strip()
     if not msg or is_document_request(msg):
         return False
-    if _HW_PART.search(msg) or _AB_PART.search(msg):
+    if _HW_PART.search(msg) or _HC900_PART.search(msg) or _AB_PART.search(msg):
         return False
     if _SLOT_FOLLOWUP_RE.match(msg):
         return True
@@ -1937,7 +1955,7 @@ def is_active_part_compatibility_followup(query: object, active_document: object
     msg = str(query or "").strip()
     if not msg or is_document_request(msg):
         return False
-    if _HW_PART.search(msg) or _AB_PART.search(msg):
+    if _HW_PART.search(msg) or _HC900_PART.search(msg) or _AB_PART.search(msg):
         # Explicit new part — treat as a fresh engineering ask, not follow-up reuse.
         return False
     return bool(_COMPATIBILITY_FOLLOWUP_RE.search(msg) and _ENGINEERING_QUESTION_RE.search(msg))
@@ -3239,7 +3257,7 @@ def try_document_route(
     # Exact Honeywell part-number index hits: keep the canonical exact PDF only.
     # Apply vendor/kind gates before truncating so an unrelated corpus hit
     # (e.g. Allen-Bradley knowledgebase xlsx) cannot displace the Honeywell manual.
-    if _HW_PART.search(msg):
+    if _HW_PART.search(msg) or _HC900_PART.search(msg):
         manual, index = select_operator_document_match(matches, query=msg)
         gated: list[dict[str, Any]] = []
         if isinstance(manual, dict):
