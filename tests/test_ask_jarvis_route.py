@@ -84,3 +84,14 @@ def test_jarvis_identity_and_server_tts_guard_are_durable():
     assert '"assistant_identity": "jarvis"' in routes
     assert "message.assistant_identity" in ui
     assert "startData.tts_final_queued" in messages
+
+
+def test_explicit_ask_jarvis_does_not_default_to_legacy_document_shortcut():
+    """Hard-bound PA/RAG delegation must win unless an operator opts into legacy routing."""
+    from pathlib import Path
+
+    routes = (Path(__file__).resolve().parents[1] / "api" / "routes.py").read_text(
+        encoding="utf-8"
+    )
+    assert "HERMES_WEBUI_ASK_JARVIS_DOCUMENT_FAST_PATH" in routes
+    assert "_ask_jarvis_document_fast_path\n                        and _is_aj_document" in routes

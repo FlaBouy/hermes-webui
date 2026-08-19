@@ -22604,12 +22604,14 @@ def _handle_chat_start(handler, body, diag=None):
             return bad(handler, "message is required")
         diag.stage("normalize_attachments") if diag else None
         attachments = _normalize_chat_attachments(body.get("attachments") or [])[:20]
-        # An explicit Ask Jarvis document/schematic request is still a Jarvis
-        # request, but it must use the governed document route rather than the
-        # PA briefing model.  The old ordering sent it to generic synthesis
-        # first, bypassing the MC/MU resolver and producing an uncited answer.
-        # This route traverses the Jarvis n8n retrieval gateway and persists a
-        # compact spoken reply separately from the displayed evidence.
+        # The legacy direct-document shortcut remains available only as an
+        # operator opt-in.  Explicit Ask-Jarvis requests must normally reach
+        # the PA hard-bind below first: that preserves the immediate Biggy
+        # acknowledgement, governed tool selection, and the current RAG Core
+        # instead of bypassing it through the older index-first resolver.
+        _ask_jarvis_document_fast_path = str(
+            os.environ.get("HERMES_WEBUI_ASK_JARVIS_DOCUMENT_FAST_PATH") or ""
+        ).strip().lower() in {"1", "true", "yes", "on"}
         if not attachments:
             try:
                 from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj_document
@@ -22621,7 +22623,11 @@ def _handle_chat_start(handler, body, diag=None):
                         public_origin=_request_base_url(handler),
                         allow_ask_jarvis=True,
                     )
-                    if _is_aj_document(msg) and is_document_request(msg, allow_ask_jarvis=True)
+                    if (
+                        _ask_jarvis_document_fast_path
+                        and _is_aj_document(msg)
+                        and is_document_request(msg, allow_ask_jarvis=True)
+                    )
                     else None
                 )
                 # "Get me a wiring schematic" is an extraction request, not

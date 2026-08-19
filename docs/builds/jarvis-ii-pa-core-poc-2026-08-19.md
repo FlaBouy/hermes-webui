@@ -117,6 +117,10 @@ The failed 1756-IB32 link was traced to an incomplete configured public origin: 
 
 The focused document-link test shard also reports four unrelated pre-existing source/test drift failures: one stale extension string expectation and three references to retired spoken-output helper functions. They do not affect this public-origin repair and remain tracked separately.
 
+## Ask-Jarvis engineering-route precedence repair
+
+An explicit Ask-Jarvis schematic request was being intercepted by the legacy direct-document shortcut before the two-stage PA handoff. That bypass explained the missing immediate acknowledgement and the older index-first response. The shortcut is now disabled by default and available only through the explicit operator environment flag `HERMES_WEBUI_ASK_JARVIS_DOCUMENT_FAST_PATH`. Explicit Ask-Jarvis requests now proceed through the PA hard-bind and governed RAG delegation path first. Focused route/identity/voice regression coverage passed (19 checks), and both WebUI services were restarted.
+
 ## Current workflow inventory and activation state
 
 | Workflow | ID | State | Role |
