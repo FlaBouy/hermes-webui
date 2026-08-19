@@ -10702,7 +10702,8 @@ function _assistantRoleHtml(tsTitle='', tpsText=''){
 function _setAssistantTurnIdentity(turn, message){
   if(!turn||!message) return;
   const text=String(message.content||'');
-  const isJarvis=!!(message.jarvis_response||message.ask_jarvis_hard_bind||message.document_route&&message._ask_jarvis)
+  const isJarvis=String(message.assistant_identity||'').toLowerCase()==='jarvis'
+    || !!(message.jarvis_response||message.ask_jarvis_hard_bind||message.document_route&&message._ask_jarvis)
     || /^\s*(?:\*\*)?Jarvis\s*:/i.test(text);
   if(!isJarvis) return;
   const role=turn.querySelector('.msg-role.assistant');

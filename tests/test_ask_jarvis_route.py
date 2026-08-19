@@ -70,3 +70,17 @@ def test_ask_jarvis_reply_is_attributed_in_chat_bubble(monkeypatch):
     assert result is not None
     assert result["reply"].startswith("**Jarvis:**")
     assert "Tallahassee" in result["reply"]
+
+
+def test_jarvis_identity_and_server_tts_guard_are_durable():
+    """Every UI shell must receive an explicit Jarvis identity and avoid a second TTS pass."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[1]
+    routes = (root / "api" / "routes.py").read_text(encoding="utf-8")
+    ui = (root / "static" / "ui.js").read_text(encoding="utf-8")
+    messages = (root / "static" / "messages.js").read_text(encoding="utf-8")
+
+    assert '"assistant_identity": "jarvis"' in routes
+    assert "message.assistant_identity" in ui
+    assert "startData.tts_final_queued" in messages

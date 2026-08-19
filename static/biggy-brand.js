@@ -538,7 +538,10 @@
         const idx = Number(segment.dataset.msgIdx);
         const message = Number.isFinite(idx) ? messages[idx] : null;
         const visible = String(segment.dataset.rawText || segment.textContent || '');
-        const isJarvis = !!(message && (message.ask_jarvis_hard_bind || message.jarvis_response))
+        const isJarvis = !!(message && (
+          String(message.assistant_identity || '').toLowerCase() === 'jarvis'
+          || message.ask_jarvis_hard_bind || message.jarvis_response
+        ))
           || /^\s*(?:\*\*)?Jarvis\s*:/i.test(visible);
         if (!isJarvis) return;
         const turn = segment.closest('.assistant-turn');

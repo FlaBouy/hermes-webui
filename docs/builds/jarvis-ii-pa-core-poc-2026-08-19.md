@@ -105,6 +105,12 @@ Durable context remains read-only. The governed response contract now detects ex
 
 **Acceptance result:** a harmless controlled request to remember a coffee preference returned `write_denied`. The normal lodging fixture was restored immediately. The PA remained inactive with 22 nodes before and after the test.
 
+## Biggy/Jarvis presentation repair — pending browser acceptance
+
+The shared Biggy and Smedley renderers now use a durable response field, `assistant_identity = "jarvis"`, in addition to the existing Ask-Jarvis route flags. This ensures that a Jarvis response retains its own label even when it is displayed inside another assistant's shell. The client also recognizes the server's final-TTS queue marker, preventing a second browser-side read after the server has already queued Jarvis voice output.
+
+Focused regression coverage passed (18 checks). Both local WebUI services were restarted: Smedley on port 8787 and Biggy on port 8790. A live browser handoff still needs owner acceptance before the presentation repair is marked complete.
+
 ## Current workflow inventory and activation state
 
 | Workflow | ID | State | Role |

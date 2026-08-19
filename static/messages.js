@@ -2059,7 +2059,7 @@ async function send(){
     if(typeof autoReadLastAssistant==='function'){
       // Server already queued James Michael on Smedley /speak — skip client sink
       // so a cache-stuck Austin path cannot override/double-speak.
-      if(!startData.tts_server_queued){
+      if(!(startData.tts_server_queued || startData.tts_final_queued)){
         setTimeout(()=>autoReadLastAssistant(), 300);
       }
     }

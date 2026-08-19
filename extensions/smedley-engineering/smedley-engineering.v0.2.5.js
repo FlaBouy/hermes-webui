@@ -1071,7 +1071,10 @@
         const idx=Number(segment.dataset.msgIdx);
         const message=Number.isFinite(idx)?messages[idx]:null;
         const visible=String(segment.dataset.rawText||segment.textContent||'');
-        const isJarvis=!!(message&&(message.jarvis_response===true||message.ask_jarvis_hard_bind))
+        const isJarvis=!!(message&&(
+          String(message.assistant_identity||'').toLowerCase()==='jarvis'
+          ||message.jarvis_response===true||message.ask_jarvis_hard_bind
+        ))
           ||/^\s*(?:\*\*)?Jarvis\s*:/i.test(visible);
         if(!isJarvis)return;
         const turn=segment.closest('.assistant-turn');
