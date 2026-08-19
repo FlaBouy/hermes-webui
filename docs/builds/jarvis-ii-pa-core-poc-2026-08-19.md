@@ -119,7 +119,9 @@ The focused document-link test shard also reports four unrelated pre-existing so
 
 ## Ask-Jarvis engineering-route precedence repair
 
-An explicit Ask-Jarvis schematic request was being intercepted by the legacy direct-document shortcut before the two-stage PA handoff. That bypass explained the missing immediate acknowledgement and the older index-first response. The shortcut is now disabled by default and available only through the explicit operator environment flag `HERMES_WEBUI_ASK_JARVIS_DOCUMENT_FAST_PATH`. Explicit Ask-Jarvis requests now proceed through the PA hard-bind and governed RAG delegation path first. Focused route/identity/voice regression coverage passed (19 checks), and both WebUI services were restarted.
+An explicit Ask-Jarvis schematic request was being intercepted by the legacy direct-document shortcut before the two-stage PA handoff. That bypass explained the missing immediate acknowledgement and the older index-first response. The shortcut is now disabled by default and available only through the explicit operator environment flag `HERMES_WEBUI_ASK_JARVIS_DOCUMENT_FAST_PATH`.
+
+The two interfaces now deliberately differ: Biggy leaves that flag unset and uses the PA hard-bind/governed RAG delegation path; Smedley sets it true and retains its proven direct engineering-document/RAG route. Both services use the same ported Smedley public origin. The service definitions were reloaded through `launchctl unload/load` after it was discovered that a simple process restart does not apply edited LaunchAgent environment variables. Focused route/identity/voice regression coverage passed (19 checks).
 
 ## Current workflow inventory and activation state
 
