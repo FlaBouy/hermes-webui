@@ -1213,6 +1213,7 @@
 
   const TRAVEL_CATEGORIES = [
     'Travel',
+    'Weather',
     'Lodging',
     'Meals',
     'Entertainment',
@@ -1227,6 +1228,7 @@
   function mapRecCategoryToRail(category) {
     const c = String(category || '').trim().toLowerCase();
     if (!c || c === 'travel') return 'travel';
+    if (c === 'weather' || c === 'radar') return 'weather';
     if (c === 'lodging' || c === 'hotel') return 'lodging';
     if (c === 'meals' || c === 'meal' || c === 'restaurant' || c === 'steakhouse' || c === 'dining') {
       return 'meals';
@@ -1315,14 +1317,17 @@
       const lodging = dlg.querySelector('#biggyTravelLodging');
       const empty = dlg.querySelector('#biggyTravelEmptyCat');
       const showTravel = key === 'travel';
+      const showWeatherActions =
+        key === 'weather' && mapActions && mapActions.getAttribute('data-action-category') === 'weather' &&
+        mapActions.childElementCount > 0;
       if (mapCanvas) mapCanvas.hidden = !showTravel;
-      if (mapActions) mapActions.hidden = !showTravel;
-      if (mapNote) mapNote.hidden = !showTravel;
+      if (mapActions) mapActions.hidden = !(showTravel || showWeatherActions);
+      if (mapNote) mapNote.hidden = !(showTravel || showWeatherActions);
       if (lodging) {
-        lodging.hidden = showTravel || lodging.getAttribute('data-has-cards') !== '1';
+        lodging.hidden = showTravel || showWeatherActions || lodging.getAttribute('data-has-cards') !== '1';
       }
       if (empty) {
-        empty.hidden = showTravel || (lodging && lodging.getAttribute('data-has-cards') === '1');
+        empty.hidden = showTravel || showWeatherActions || (lodging && lodging.getAttribute('data-has-cards') === '1');
       }
       if (open) {
         dlg.hidden = false;
@@ -1731,6 +1736,54 @@
   window.__biggyRenderLodgingViewModel = renderLodgingViewModel;
   window.__biggyRenderRecommendationViewModel = renderRecommendationViewModel;
 
+  function safeJarvisVisualActionHref(value) {
+    // The PA may only offer the two reviewed, host-local MyRadar launch targets.
+    // Never turn arbitrary model text into a custom-protocol launch link.
+    const href = String(value || '').trim();
+    return href === 'radar://open' || href === 'radar://primary' ? href : '';
+  }
+
+  function renderVisualActionViewModel(vm) {
+    if (!vm || typeof vm !== 'object') return false;
+    if (vm.schema !== 'jarvis.visual_action_view_model.v1' || vm.emitted_by !== 'Jarvis II PA Tool') {
+      return false;
+    }
+    if (mapRecCategoryToRail(vm.category) !== 'weather') return false;
+    const actionsIn = Array.isArray(vm.actions) ? vm.actions : [];
+    const actions = actionsIn
+      .map((item) => ({ label: String(item && item.label || '').trim(), href: safeJarvisVisualActionHref(item && item.href) }))
+      .filter((item) => item.label && item.href);
+    if (!actions.length) return false;
+
+    const dlg = ensureTravelMapDialog();
+    if (!dlg) return false;
+    const actionBox = dlg.querySelector('#biggyTravelMapActions');
+    const note = dlg.querySelector('#biggyTravelMapNote');
+    if (!actionBox) return false;
+    actionBox.innerHTML = '';
+    actionBox.setAttribute('data-action-category', 'weather');
+    actions.forEach((item) => {
+      const a = document.createElement('a');
+      a.className = 'biggy-travel-nav-btn';
+      a.href = item.href;
+      a.textContent = item.label;
+      a.setAttribute('data-testid', item.href === 'radar://primary' ? 'biggy-weather-myradar-primary' : 'biggy-weather-myradar-secondary');
+      a.setAttribute('title', 'Opens local MyRadar only after you click');
+      actionBox.appendChild(a);
+    });
+    if (note) {
+      note.textContent = String(vm.notice || 'Local MyRadar action · opens only after you click it.');
+    }
+    if (typeof dlg.__biggySetActiveCategory === 'function') {
+      dlg.__biggySetActiveCategory('weather', { open: true });
+    } else if (typeof dlg.__biggySetCollapsed === 'function') {
+      dlg.__biggySetCollapsed(false);
+    }
+    return true;
+  }
+
+  window.__biggyRenderVisualActionViewModel = renderVisualActionViewModel;
+
   async function handoffTravelVisualsFromMessages(messages, correlationId) {
     try {
       const list = Array.isArray(messages) ? messages : (typeof S !== 'undefined' && S && S.messages) || [];
@@ -1743,9 +1796,11 @@
         const mvm = m.map_view_model;
         const rvm = m.recommendation_view_model;
         const lvm = m.lodging_view_model;
+        const avm = m.visual_action_view_model;
         // Prefer recommendation_view_model; never fall back to lodging when category != lodging.
         let mapOk = false;
         let recInfo = { rendered: false, count: 0, category: null };
+        let visualActionOk = false;
         if (mvm && typeof mvm === 'object') {
           mapOk = !!(await renderMapViewModel(mvm));
         }
@@ -1755,14 +1810,18 @@
           // Only render lodging alias when no non-lodging recommendation is present.
           recInfo = renderLodgingViewModel(lvm) || recInfo;
         }
-        if ((mvm && typeof mvm === 'object') || (rvm && typeof rvm === 'object') || (lvm && typeof lvm === 'object')) {
+        if (avm && typeof avm === 'object') {
+          visualActionOk = renderVisualActionViewModel(avm);
+        }
+        if ((mvm && typeof mvm === 'object') || (rvm && typeof rvm === 'object') || (lvm && typeof lvm === 'object') || (avm && typeof avm === 'object')) {
           const dlg = document.getElementById('biggyTravelMapDialog');
           postRenderAck({
             correlation_id: corr,
             map_rendered: !!mapOk,
             recommendations_rendered: !!recInfo.rendered,
             recommendation_card_count: recInfo.count || 0,
-            category: recInfo.category || null,
+            category: recInfo.category || (visualActionOk ? 'weather' : null),
+            visual_actions_rendered: visualActionOk,
             layout_slot: 'docked_landing_panel',
             overlay_dialog: false,
             displaces_conversation: false,
