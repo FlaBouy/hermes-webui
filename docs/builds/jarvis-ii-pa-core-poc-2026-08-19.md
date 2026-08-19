@@ -56,3 +56,50 @@ The inactive PA workflow now has an 11-node travel branch: local plan → policy
 ## Deliberately deferred
 
 Live calendar writes, bookings, purchases, persistent-memory writes, and automatic skill installation are outside the baseline POC. They require their own approved capability contracts and tests.
+
+## Implemented POC milestone: owner-approved read tools
+
+The inactive PA workflow now contains the following read-only agent tools, all connected as `ai_tool` inputs to the local 120B decision agent:
+
+| Tool | Contract boundary | Verification result |
+| --- | --- | --- |
+| Weather Underground current conditions | Existing owner Weather Underground subscription; current conditions only | Controlled tool-call smoke passed with a natural-language briefing and no travel run |
+| Weather Underground five-day forecast | Existing owner Weather Underground subscription; five-day outlook only | Agent tool-call metadata verified; returned a bounded Lynn Haven forecast briefing |
+| Google Calendar read | Existing `jarvis_google_calendar_readonly` credential; bounded date window and result count; no mutations | Credential reconnected by owner; controlled smoke returned calendar items without exposing them in the build record |
+| Gmail read | Existing `jarvis_gmail_readonly` credential; at most ten sender/subject/date/snippet summaries; no bodies, attachments, or mutations | Credential reconnected by owner; controlled smoke returned bounded header/snippet evidence |
+| Public lodging/map evidence | OpenStreetMap/Nominatim via the PA travel adapter; source-backed POI cards only | Controlled Mercedes-Benz Stadium test returned five lodging cards; no invented rates, availability, or booking state |
+
+The weather lane produces a structured optional visual action for the existing MyRadar experience. The UI is user-click only: Jarvis can offer a radar view or the existing broad-coverage MyRadar action, but cannot open a display, purchase, book, write to a calendar, or launch software autonomously.
+
+## RAG Core status
+
+Engineering-document retrieval is now serviceable through the separate active workflow `Jarvis II — Production RAG Core` (`JarvisIIProdRAG001`). It receives `POST /webhook/jarvis-ii` and remains the evidence authority for technical manuals, exact printed/PDF page references, and schematic links. The PA must delegate engineering-document requests to this core; it must not synthesize engineering evidence.
+
+Recent fixes established vendor-neutral schematic resolution and verified a Honeywell ControlEdge HC900 page result. The associated source changes are committed as `7b2657e5`, `cd48a5e0`, and `5fe994c3`.
+
+## Research lane decision — Google/Chrome
+
+The earlier DuckDuckGo-based public-research draft is not accepted and must not be used as the PA's production research surface. The owner selected Google/Chrome for consistency with the broader Google environment and for future Chrome-extension capabilities.
+
+On 2026-08-19, the local Chrome bridge was verified: Google Chrome is running, the Codex browser extension is installed and enabled on the Default profile, the native-messaging manifest is correct, and a fresh Chrome window established the live connection. This bridge is a live interactive Codex capability, not an n8n runtime service. It may be used for operator-assisted Google research and validation, but must not be represented as an unattended PA tool.
+
+The production replacement therefore needs a durable, separately governed Google-backed research connector with source evidence returned to the PA. Until that connector is implemented and tested, research requests fail closed rather than producing uncited web claims. The PA POC remains inactive.
+
+## Current workflow inventory and activation state
+
+| Workflow | ID | State | Role |
+| --- | --- | --- | --- |
+| Jarvis II — PA Core POC | `cD6uUqpzXQl3n3iU` | Inactive | Local 120B decision agent with weather, calendar, Gmail, travel, durable-context, and research-contract lanes |
+| Jarvis II — Production RAG Core | `JarvisIIProdRAG001` | Active | Verified engineering evidence retrieval |
+| Jarvis II — Calendar Read Tool POC | `pPRdrWBRJCIhga7g` | Inactive | Bounded Google Calendar read tool |
+| Jarvis II — Gmail Read Tool POC | `7ORc6ERMVy3tC4st` | Inactive | Bounded Gmail read tool |
+
+No PA cutover to Biggy has occurred. Existing Biggy/Jarvis behavior is not proof that this POC is ready for activation.
+
+## Next implementation sequence
+
+1. Replace the rejected DuckDuckGo research draft with a durable Google-backed, evidence-returning connector; keep Chrome as the interactive/operator research surface.
+2. Add controlled fixtures for research, weather/current, forecast, calendar, Gmail, travel, RAG delegation, and policy-denied cases.
+3. Verify the agent uses each tool rather than merely describing a plan; require evidence before factual responses and cards are rendered.
+4. Resolve the remaining Biggy GUI identity/voice-label and duplicate-response defects before any PA cutover.
+5. Propose durable-memory write contracts only after the owner approves retention, redaction, scope, and explicit write authority.
