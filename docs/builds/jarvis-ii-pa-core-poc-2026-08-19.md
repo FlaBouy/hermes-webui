@@ -93,6 +93,18 @@ The sub-workflow has four linear nodes: workflow input → bounded query validat
 
 **Acceptance result:** a controlled local-120B fixture requested verification of the National Air and Space Museum location. The Decision Agent invoked the Firecrawl workflow, received normalized evidence from five public sources, and emitted a governed response with `status = COMPLETED` and audit stage `research_evidence = agent_tool_completed`. The test fixture was immediately restored to the normal Mercedes-Benz Stadium lodging objective afterward. Both the PA POC and the Firecrawl sub-workflow remain inactive.
 
+## Implemented POC milestone: governed RAG delegation
+
+The PA now exposes `Jarvis II RAG Delegation` as a bounded Execute-Workflow Tool. It calls the separate inactive workflow `Jarvis II — RAG Delegation Tool POC` (`TIEU7dGs4fzf3wU1`), which validates an engineering-document request, calls the existing production RAG Core with its internal authorization boundary, and normalizes only the returned verified evidence.
+
+**Acceptance result:** the controlled local-120B request for an Allen-Bradley 1756-IB32 wiring schematic invoked the RAG delegation tool and returned the verified `1756-UM058` evidence with the cited PDF page and wiring-page link. The normal lodging fixture was restored afterward. The PA and RAG-delegation tool remain inactive; the already-approved Production RAG Core remains active as the evidence service.
+
+## Implemented POC milestone: durable-memory write denial
+
+Durable context remains read-only. The governed response contract now detects explicit durable-memory requests and marks the requested action as denied until the owner approves retention, redaction, scope, and explicit write authority. No memory store is called and no durable write is attempted on this path.
+
+**Acceptance result:** a harmless controlled request to remember a coffee preference returned `write_denied`. The normal lodging fixture was restored immediately. The PA remained inactive with 22 nodes before and after the test.
+
 ## Current workflow inventory and activation state
 
 | Workflow | ID | State | Role |
@@ -101,13 +113,14 @@ The sub-workflow has four linear nodes: workflow input → bounded query validat
 | Jarvis II — Production RAG Core | `JarvisIIProdRAG001` | Active | Verified engineering evidence retrieval |
 | Jarvis II — Calendar Read Tool POC | `pPRdrWBRJCIhga7g` | Inactive | Bounded Google Calendar read tool |
 | Jarvis II — Gmail Read Tool POC | `7ORc6ERMVy3tC4st` | Inactive | Bounded Gmail read tool |
+| Jarvis II — Firecrawl Research Tool POC | `w2WJmXeU873L8wwa` | Inactive | Bounded public-research evidence tool |
+| Jarvis II — RAG Delegation Tool POC | `TIEU7dGs4fzf3wU1` | Inactive | Validates and delegates engineering requests to Production RAG Core |
 
 No PA cutover to Biggy has occurred. Existing Biggy/Jarvis behavior is not proof that this POC is ready for activation.
 
 ## Next implementation sequence
 
-1. Replace the rejected DuckDuckGo research draft with a durable Google-backed, evidence-returning connector; keep Chrome as the interactive/operator research surface.
-2. Add controlled fixtures for research, weather/current, forecast, calendar, Gmail, travel, RAG delegation, and policy-denied cases.
+1. Resolve the remaining Biggy GUI identity/voice-label and duplicate-response defects before any PA cutover.
+2. Add an owner-reviewed acceptance matrix for the completed weather, calendar, Gmail, travel, Firecrawl, RAG-delegation, and durable-memory denial fixtures.
 3. Verify the agent uses each tool rather than merely describing a plan; require evidence before factual responses and cards are rendered.
-4. Resolve the remaining Biggy GUI identity/voice-label and duplicate-response defects before any PA cutover.
-5. Propose durable-memory write contracts only after the owner approves retention, redaction, scope, and explicit write authority.
+4. Propose durable-memory write contracts only after the owner approves retention, redaction, scope, and explicit write authority.
