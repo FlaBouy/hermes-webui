@@ -47,6 +47,21 @@ def test_hc900_edge_schematic_request_routes_to_the_hc900_manual(monkeypatch):
     result = docroute.try_document_route(query, allow_ask_jarvis=True, public_origin=ORIGIN)
     assert result and result["handled"] is True
     assert result["active_document"]["source"].endswith("ControlEdge HC900 IO Modules Specifications.pdf")
+    assert result["active_document"]["part_number"] == "900A16-0103"
+
+
+def test_hc900_900a16_verified_wiring_page_includes_printed_page():
+    active = {
+        "source": "Vendor Data/Honeywell/Honeywell Edge UIO/ControlEdge HC900 IO Modules Specifications.pdf",
+        "title": "ControlEdge HC900 IO Modules Specifications.pdf",
+        "part_number": "900A16-0103",
+    }
+    result = docroute.try_active_document_review(
+        "extract the wiring schematic", active, public_origin=ORIGIN
+    )
+    assert result and result["handled"] is True
+    assert result["active_document"]["page_hint"] == 12
+    assert "printed page **12**" in result["reply"]
 
 
 def test_vendor_neutral_schematic_request_is_a_document_request():

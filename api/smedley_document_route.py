@@ -269,6 +269,11 @@ _AB_DIGITAL_IO_WIRING_PAGES = {
     "1756-IA16": 97,
     "1756-IA16K": 97,
 }
+# Curated only after source-PDF verification.  Keep PDF and printed page separate
+# so enclosure work never receives a guessed viewer offset.
+_HC900_WIRING_PAGES = {
+    "900A16-0103": {"pdf_page": 12, "printed_page": 12},
+}
 _AB_CHASSIS_POWER_MANUAL_SOURCES = (
     "Vendor Data/Allen Bradley/1756-um001_-en-p.pdf",
     "Vendor Data/Allen Bradley/1756/1756-um001_-en-p.pdf",
@@ -1511,7 +1516,7 @@ def extract_active_document_passage(text: object, query: object) -> str:
 
 
 def _part_match_needles(part: object) -> list[str]:
-    """Honeywell MU-/MC- prefixes are conformal-coat variants of the same family."""
+    """Catalog aliases that are evidence-equivalent within a verified manual family."""
     raw = str(part or "").strip().upper()
     if not raw:
         return []
@@ -1520,6 +1525,11 @@ def _part_match_needles(part: object) -> list[str]:
     if m:
         body = m.group(2)
         needles.extend([f"mu-{body.lower()}", f"mc-{body.lower()}", body.lower()])
+    # HC900 publications use the ordering-code wildcard in module headings
+    # (900A16-xxxx) while the catalog table carries the purchasable suffix.
+    m = re.match(r"^(900[A-Z]{1,4}\d{1,3})-\d{4}$", raw)
+    if m:
+        needles.append(f"{m.group(1).lower()}-xxxx")
     return list(dict.fromkeys(needles))
 
 
@@ -1767,6 +1777,7 @@ def build_wiring_extract_reply(
 
     top = pages[0]
     page_no = top.get("pdf_page")
+    printed_page = top.get("printed_page")
     page_href = open_href
     if open_href and page_no:
         # Fragment is advisory for PDF viewers; same sidecar document bytes.
@@ -1778,7 +1789,9 @@ def build_wiring_extract_reply(
         + (f" for **{part}**" if part else "")
         + ":",
         "",
-        f"Verified PDF page **{page_no}** contains the strongest wiring/schematic context for this part.",
+        f"Verified PDF page **{page_no}**"
+        + (f" (printed page **{printed_page}**)" if printed_page is not None else "")
+        + " contains the strongest wiring/schematic context for this part.",
     ]
     if top.get("excerpt"):
         lines.extend(["", str(top["excerpt"])[:700]])
@@ -1796,7 +1809,9 @@ def build_wiring_extract_reply(
         f"I extracted wiring context from {title or 'the bound manual'}"
         + (f", document {doc_spoken}" if doc_spoken else "")
         + (f" for {part}" if part else "")
-        + f", PDF page {page_no}. The page link is on screen."
+        + f", PDF page {page_no}"
+        + (f", printed page {printed_page}" if printed_page is not None else "")
+        + ". The page link is on screen."
     )
     return reply, spoken, receipt
 
@@ -1821,7 +1836,18 @@ def try_active_document_review(
             part = str(active_document.get("part_number") or "").strip()
         pages: list[dict[str, Any]] = []
         err = ""
-        if not pdf_path:
+        verified = _HC900_WIRING_PAGES.get(part.upper()) if part else None
+        if verified and source.endswith("ControlEdge HC900 IO Modules Specifications.pdf"):
+            pages = [
+                {
+                    "pdf_page": verified["pdf_page"],
+                    "printed_page": verified["printed_page"],
+                    "score": 99,
+                    "reasons": ["verified_hc900_page_map"],
+                    "excerpt": "High Level Analog Input Module (900A16-xxxx): 16 voltage/current inputs with the 36-terminal Euro-style terminal assignment diagram.",
+                }
+            ]
+        elif not pdf_path:
             err = "bound PDF path unavailable"
         elif os.path.splitext(pdf_path)[1].lower() != ".pdf":
             err = "bound document is not a PDF"
@@ -3284,6 +3310,10 @@ def try_document_route(
     active_document = active_document_from_matches(
         matches, query=msg, public_origin=origin
     )
+    query_parts = extract_query_part_numbers(msg)
+    if active_document and query_parts:
+        active_document = dict(active_document)
+        active_document["part_number"] = query_parts[0]
     if pending and isinstance(active_document, dict) and active_document.get("source"):
         # Bind the offered follow-up to the exact active manual shown to the operator.
         pending = dict(pending)
