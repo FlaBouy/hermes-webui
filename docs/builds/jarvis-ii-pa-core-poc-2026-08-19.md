@@ -85,6 +85,14 @@ On 2026-08-19, the local Chrome bridge was verified: Google Chrome is running, t
 
 The production replacement therefore needs a durable, separately governed Google-backed research connector with source evidence returned to the PA. Until that connector is implemented and tested, research requests fail closed rather than producing uncited web claims. The PA POC remains inactive.
 
+## Implemented POC milestone: Firecrawl public-research tool
+
+The DuckDuckGo Code Tool draft has been retired from the PA graph and replaced with the read-only workflow tool `Jarvis II Firecrawl Research`. It invokes the separate inactive workflow `Jarvis II — Firecrawl Research Tool POC` (`w2WJmXeU873L8wwa`) through an Execute-Workflow Tool binding.
+
+The sub-workflow has four linear nodes: workflow input → bounded query validation → Firecrawl search → normalized evidence. It uses an existing encrypted n8n Header Auth credential by reference only; no credential value appears in the workflow definition, test output, or build record. The Firecrawl request is limited to a short text query, at most five web results, and the Firecrawl search endpoint. It rejects URLs, file paths, private-network targets, control characters, and overlong input. The normalizer returns only title, public URL, source host, and shortened summary records; raw provider payloads are not passed to the PA agent.
+
+**Acceptance result:** a controlled local-120B fixture requested verification of the National Air and Space Museum location. The Decision Agent invoked the Firecrawl workflow, received normalized evidence from five public sources, and emitted a governed response with `status = COMPLETED` and audit stage `research_evidence = agent_tool_completed`. The test fixture was immediately restored to the normal Mercedes-Benz Stadium lodging objective afterward. Both the PA POC and the Firecrawl sub-workflow remain inactive.
+
 ## Current workflow inventory and activation state
 
 | Workflow | ID | State | Role |
