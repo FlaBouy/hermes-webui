@@ -16,9 +16,12 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -73,6 +76,10 @@ _JARVIS_ELEVENLABS_VOICE_ID = "dzRy05hNK3bab9ViJ0oU"
 _JARVIS_TTS_ENGINE = "elevenlabs"
 _SMEDLEY_SPEAK_URL = "http://127.0.0.1:5004/speak"
 _TIMING_DIR = Path("/Users/rick/jarvis-n8n/validation/ask-jarvis-timing")
+_PA_CORE_WEBHOOK_URL = os.environ.get(
+    "HERMES_WEBUI_JARVIS_II_PA_CORE_URL",
+    "http://127.0.0.1:5680/webhook/jarvis-ii-pa",
+).strip()
 
 # Biggy default Austin (Hermes config.yaml tts.elevenlabs.voice_id). Ack only.
 _AUSTIN_VOICE_ID = "Bj9UqZbhQsanLzgalpEG"
@@ -92,6 +99,166 @@ _FINAL_DONE_AT: dict[str, float] = {}
 
 def mint_correlation_id() -> str:
     return f"biggy-ask-jarvis-{time.strftime('%Y%m%dT%H%M%SZ')}-{uuid4().hex[:8]}"
+
+
+def jarvis_ii_pa_core_enabled() -> bool:
+    """True only for Biggy's owner-enabled PA Core handoff."""
+    return str(os.environ.get("HERMES_WEBUI_JARVIS_II_PA_CORE_ENABLED") or "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def _pa_core_token() -> str:
+    token = str(os.environ.get("GPT_BIGGY_PROPOSE_TOKEN") or "").strip()
+    if token:
+        return token
+    token_file = str(os.environ.get("GPT_BIGGY_PROPOSE_TOKEN_FILE") or "").strip()
+    if not token_file:
+        return ""
+    try:
+        return Path(token_file).read_text(encoding="utf-8").strip()
+    except OSError:
+        logger.exception("PA Core token file unavailable")
+        return ""
+
+
+def try_jarvis_ii_pa_core(
+    objective: str,
+    *,
+    biggy_ingress_ts: float | None = None,
+    correlation_id: str | None = None,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Run Biggy's explicit Ask-Jarvis turn through the governed PA Core.
+
+    The PA owns local-120B planning, tool calls, policy, and final evidence.
+    This function only adapts its completed read-only response to Biggy's
+    existing single-final-response/TTS contract.
+    """
+    corr = str(correlation_id or "").strip() or mint_correlation_id()
+    token = _pa_core_token()
+    if not token:
+        return {
+            "handled": True, "ok": False, "reply": "Jarvis PA authentication is unavailable.",
+            "spoken_text": "Jarvis PA authentication is unavailable.",
+            "spoken_reply": "Jarvis PA authentication is unavailable.", "citations": [],
+            "correlation_id": corr, "transport": "jarvis_ii_pa_core", "error": "pa_core_auth_unavailable",
+        }
+    # The PA's short-term memory is intentionally scoped to the Biggy chat,
+    # never to the per-request correlation ID.  A correlation ID is unique to
+    # one request and would make "yes, dig deeper" look like a new chat.
+    session = str(session_id or "").strip()
+    payload = {
+        "objective": str(objective or "").strip(), "authority": "owner_local_biggy_chat",
+        "source": "biggy", "requester": "biggy", "correlation_id": corr,
+    }
+    if session:
+        payload["session_id"] = session
+        # This is a short-lived, process-local turn window. It does not store
+        # evidence or bypass a new retrieval; it lets the agent resolve a
+        # same-chat follow-up such as "yes, dig deeper".
+        from api.jarvis_pa_conversation_memory import recent_context
+
+        payload["conversation_context"] = recent_context(session)
+    try:
+        request = urllib.request.Request(
+            _PA_CORE_WEBHOOK_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Accept": "application/json", "Authorization": f"Bearer {token}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=180) as response:
+            raw = response.read()
+        result = json.loads(raw.decode("utf-8"))
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        logger.exception("Jarvis II PA Core request failed")
+        return {
+            "handled": True, "ok": False, "reply": "Jarvis PA could not complete that request.",
+            "spoken_text": "Jarvis PA could not complete that request.",
+            "spoken_reply": "Jarvis PA could not complete that request.", "citations": [],
+            "correlation_id": corr, "transport": "jarvis_ii_pa_core", "error": type(exc).__name__,
+        }
+    if not isinstance(result, dict):
+        result = {}
+    citations = result.get("citations") if isinstance(result.get("citations"), list) else []
+    completed = result.get("status") == "COMPLETED"
+    # Owner-approved durable learning is deliberately strategy-only.  Never
+    # store the objective, response, citation text, URLs, or any raw evidence.
+    # A later turn may use this aggregate only to choose an already-approved
+    # tool; it must still perform a fresh call and verification.
+    try:
+        from api.jarvis_pa_strategy_memory import record_outcome
+
+        requested_tools = result.get("requestedTools") if isinstance(result.get("requestedTools"), list) else []
+        status = str(result.get("status") or "")
+        outcome = "verified" if completed else (
+            "not_found" if status in {"NO_VERIFIED_EVIDENCE", "NO_TRAVEL_EVIDENCE"} else "unverified"
+        )
+        answer = result.get("answer") if isinstance(result.get("answer"), dict) else {}
+        evidence = answer.get("evidence") if isinstance(answer.get("evidence"), dict) else {}
+        provider = str(evidence.get("provider") or ("biggy_pa_travel" if isinstance(result.get("map_view_model"), dict) else "jarvis_ii_pa_core"))
+        executed_tools: list[str] = []
+        if isinstance(result.get("map_view_model"), dict):
+            executed_tools.extend(tool for tool in requested_tools if tool in {"maps", "lodging_poi"})
+        if provider == "jarvis_ii_generic_rag_core_vnext":
+            executed_tools.append("rag_core")
+        if provider == "firecrawl":
+            executed_tools.append("research")
+        for stage in result.get("auditChain") if isinstance(result.get("auditChain"), list) else []:
+            if not isinstance(stage, dict) or stage.get("status") != "agent_tool_completed":
+                continue
+            name = str(stage.get("stage") or "")
+            if name == "weather_evidence":
+                executed_tools.append("weather")
+        record_outcome(
+            tools=executed_tools,
+            outcome=outcome,
+            provider=provider,
+            evidence_status=status.lower()[:80] or "unknown",
+        )
+    except Exception:
+        logger.exception("Jarvis II PA strategy-memory record failed")
+    spoken = str(result.get("spokenText") or "").strip()
+    if not spoken:
+        spoken = "Jarvis PA could not verify that request." if not completed else "Jarvis PA completed the request."
+    try:
+        from api.jarvis_pa_conversation_memory import record_turn
+
+        record_turn(
+            session,
+            objective=objective,
+            status=str(result.get("status") or "unknown"),
+            spoken_summary=spoken,
+            tools=result.get("requestedTools") if isinstance(result.get("requestedTools"), list) else [],
+        )
+    except Exception:
+        logger.exception("Jarvis II PA short-term conversation record failed")
+    reply = f"**Jarvis:** {spoken}"
+    if completed and citations and isinstance(citations[0], dict):
+        url = str(citations[0].get("url") or "").strip()
+        if url:
+            reply += f"\n\n[Open verified source]({url})"
+    return {
+        "handled": True, "ok": completed, "reply": reply, "spoken_text": spoken,
+        "spoken_reply": spoken, "citations": citations, "rag_evidence": (result.get("answer") or {}).get("evidence"),
+        "tools_selected": result.get("requestedTools") or [], "correlation_id": str(result.get("correlationId") or corr),
+        "receipt": result.get("operationId"), "tts_engine": _JARVIS_TTS_ENGINE,
+        "tts_voice_id": _JARVIS_ELEVENLABS_VOICE_ID, "tts_voice_profile": "jarvis",
+        "response_channel": "biggy_direct_speak", "transport": "jarvis_ii_pa_core",
+        "map_view_model": result.get("map_view_model")
+        if isinstance(result.get("map_view_model"), dict)
+        else None,
+        "lodging_view_model": result.get("lodging_view_model")
+        if isinstance(result.get("lodging_view_model"), dict)
+        else None,
+        "recommendation_view_model": result.get("recommendation_view_model")
+        if isinstance(result.get("recommendation_view_model"), dict)
+        else None,
+        "trip_plan_view_model": result.get("trip_plan_view_model")
+        if isinstance(result.get("trip_plan_view_model"), dict)
+        else None,
+        "error": None if completed else str(result.get("status") or "pa_core_unverified"),
+    }
 
 
 def ack_spoken_text() -> str:
@@ -1266,6 +1433,9 @@ def try_ask_jarvis(message: str, *, biggy_ingress_ts: float | None = None, corre
         "map_view_model": mvm if isinstance(mvm, dict) else None,
         "lodging_view_model": lvm if isinstance(lvm, dict) else None,
         "recommendation_view_model": rvm if isinstance(rvm, dict) else None,
+        "trip_plan_view_model": payload.get("trip_plan_view_model")
+        if isinstance(payload.get("trip_plan_view_model"), dict)
+        else None,
         "weather_speech": weather_speech,
         "weather_speech_gate": weather_speech_gate,
         "response_channel": payload.get("response_channel") or "biggy_direct_speak",

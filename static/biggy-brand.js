@@ -1347,6 +1347,11 @@
           setCollapsed(true);
           return;
         }
+        const cachedRecommendation = recommendationModelsByCategory[key];
+        if (cachedRecommendation && key !== 'travel' && key !== 'weather') {
+          renderRecommendationViewModel(cachedRecommendation);
+          return;
+        }
         setActiveCategory(key, { open: true });
       });
     });
@@ -1438,8 +1443,9 @@
       if (note) note.textContent = 'Map unavailable: ' + String(mvm.reason || 'no route model');
       return false;
     }
-    if (mvm.schema !== 'jarvis.map_view_model.v1' || mvm.emitted_by !== '3 AI Agent') {
-      return false; // refuse non-Agent models
+    if (mvm.schema !== 'jarvis.map_view_model.v1' ||
+        (mvm.emitted_by !== '3 AI Agent' && mvm.emitted_by !== 'Jarvis II PA Tool')) {
+      return false; // refuse untrusted map models
     }
     const dlg = ensureTravelMapDialog();
     if (!dlg) return false;
@@ -1631,6 +1637,8 @@
   }
   window.__biggyPostAskJarvisRenderAck = postRenderAck;
 
+  const recommendationModelsByCategory = Object.create(null);
+
   function renderRecommendationViewModel(rvm) {
     if (!rvm || typeof rvm !== 'object') return { rendered: false, count: 0, category: null };
     const okSchema =
@@ -1639,6 +1647,7 @@
       (rvm.emitted_by === '3 AI Agent' || rvm.emitted_by === 'Jarvis II PA Tool');
     if (!okSchema) return { rendered: false, count: 0, category: null };
     const category = String(rvm.category || (rvm.schema === 'jarvis.lodging_view_model.v1' ? 'lodging' : '') || '');
+    if (category) recommendationModelsByCategory[mapRecCategoryToRail(category)] = rvm;
     const title =
       String(rvm.title || '').trim() ||
       (category === 'steakhouse'
@@ -1738,6 +1747,18 @@
 
   window.__biggyRenderLodgingViewModel = renderLodgingViewModel;
   window.__biggyRenderRecommendationViewModel = renderRecommendationViewModel;
+  window.__biggyRenderTripPlanViewModel = function renderTripPlanViewModel(tvm) {
+    if (!tvm || typeof tvm !== 'object' || tvm.schema !== 'jarvis.trip_plan_view_model.v1' ||
+        tvm.emitted_by !== 'Jarvis II PA Tool') return { rendered: false, count: 0, category: null };
+    const models = Array.isArray(tvm.categories) ? tvm.categories : [];
+    models.forEach((model) => {
+      if (model && typeof model === 'object' && model.category) {
+        recommendationModelsByCategory[mapRecCategoryToRail(model.category)] = model;
+      }
+    });
+    const first = models.find((model) => model && model.category === 'lodging') || models.find((model) => model && model.available) || models[0];
+    return first ? renderRecommendationViewModel(first) : { rendered: false, count: 0, category: null };
+  };
 
   function safeJarvisVisualActionHref(value) {
     // The PA may only offer the two reviewed, host-local MyRadar launch targets.
@@ -1798,6 +1819,7 @@
         if (corr) window.__askJarvisActiveCorrelation = corr;
         const mvm = m.map_view_model;
         const rvm = m.recommendation_view_model;
+        const tpm = m.trip_plan_view_model;
         const lvm = m.lodging_view_model;
         const avm = m.visual_action_view_model;
         // Prefer recommendation_view_model; never fall back to lodging when category != lodging.
@@ -1809,6 +1831,8 @@
         }
         if (rvm && typeof rvm === 'object') {
           recInfo = renderRecommendationViewModel(rvm) || recInfo;
+        } else if (tpm && typeof tpm === 'object') {
+          recInfo = window.__biggyRenderTripPlanViewModel(tpm) || recInfo;
         } else if (lvm && typeof lvm === 'object') {
           // Only render lodging alias when no non-lodging recommendation is present.
           recInfo = renderLodgingViewModel(lvm) || recInfo;
@@ -1816,7 +1840,7 @@
         if (avm && typeof avm === 'object') {
           visualActionOk = renderVisualActionViewModel(avm);
         }
-        if ((mvm && typeof mvm === 'object') || (rvm && typeof rvm === 'object') || (lvm && typeof lvm === 'object') || (avm && typeof avm === 'object')) {
+        if ((mvm && typeof mvm === 'object') || (rvm && typeof rvm === 'object') || (tpm && typeof tpm === 'object') || (lvm && typeof lvm === 'object') || (avm && typeof avm === 'object')) {
           const dlg = document.getElementById('biggyTravelMapDialog');
           postRenderAck({
             correlation_id: corr,

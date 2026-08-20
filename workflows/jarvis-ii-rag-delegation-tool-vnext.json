@@ -1,0 +1,69 @@
+{
+  "id": "TIEU7dGs4fzf3wU1",
+  "name": "Jarvis II — RAG Delegation Tool POC",
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "nodes": [
+    {
+      "id": "rag-input",
+      "name": "RAG Delegation Input",
+      "type": "n8n-nodes-base.executeWorkflowTrigger",
+      "typeVersion": 1.1,
+      "position": [0, 0],
+      "parameters": {
+        "inputSource": "workflowInputs",
+        "workflowInputs": { "values": [{ "name": "objective", "type": "string" }] }
+      }
+    },
+    {
+      "id": "rag-validate",
+      "name": "Validate Engineering Request",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 0],
+      "parameters": {
+        "jsCode": "const objective=String($json.objective||'').replace(/\\s+/g,' ').trim(); if(!objective||objective.length>1000||/[\\u0000-\\u001f]/.test(objective))throw new Error('RAG_OBJECTIVE_REJECTED'); const engineering=/\\b(schematic|wiring|manual|datasheet|part\\s*(number|no\\.?|#)|1756[-\\s]?[a-z0-9]+|honeywell|allen[-\\s]?bradley|conformal(?:ly)?\\s+coat(?:ed|ing)?)\\b/i.test(objective); if(!engineering)throw new Error('RAG_ENGINEERING_ONLY'); return [{json:{query:objective,correlation_id:String($execution.id),caller:'jarvis_pa',side_effect:'none',durable_memory_write:false}}];"
+      }
+    },
+    {
+      "id": "rag-call-vnext",
+      "name": "Call Generic RAG Core VNext",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [600, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5678/webhook/jarvis-ii-rag-vnext",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" },
+            { "name": "Authorization", "value": "={{ 'Bearer ' + $env.GPT_BIGGY_PROPOSE_TOKEN }}" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "timeout": 60000,
+          "response": { "response": { "neverError": true, "fullResponse": true } }
+        }
+      }
+    },
+    {
+      "id": "rag-normalize-vnext",
+      "name": "Normalize Verified VNext Evidence",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 0],
+      "parameters": {
+        "jsCode": "const raw=$json.body&&typeof $json.body==='object'?$json.body:{}; const verified=raw.schema==='jarvis.ii.rag_evidence.vnext.v1'&&raw.status==='COMPLETED'&&raw.ok===true&&Array.isArray(raw.citations)&&raw.citations.length>0; const citations=verified?raw.citations.slice(0,5).map(c=>({source:String(c.source||'Smedley Library').slice(0,180),url:c.url||null,page_hint:Number(c.pdf_page)||null,excerpt:String(c.excerpt||'').slice(0,1200)})):[]; const answer=String(raw.answer||raw.spoken_text||'I could not verify an engineering-library page for that request.'); return [{json:{schema:'jarvis.rag_delegation.v2',outcome:verified?'ok':'no_verified_evidence',provider:'jarvis_ii_generic_rag_core_vnext',answer,spoken:String(raw.spoken_text||raw.speak||answer),citations,rag_evidence:verified?raw.rag_evidence:null,side_effect:'none',durable_memory_write:false,rag_write:false}}];"
+      }
+    }
+  ],
+  "connections": {
+    "RAG Delegation Input": { "main": [[{ "node": "Validate Engineering Request", "type": "main", "index": 0 }]] },
+    "Validate Engineering Request": { "main": [[{ "node": "Call Generic RAG Core VNext", "type": "main", "index": 0 }]] },
+    "Call Generic RAG Core VNext": { "main": [[{ "node": "Normalize Verified VNext Evidence", "type": "main", "index": 0 }]] }
+  }
+}

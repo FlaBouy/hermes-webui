@@ -72,6 +72,172 @@ def test_vendor_neutral_schematic_request_is_a_document_request():
     )
 
 
+def test_generic_vnext_wiring_contract_returns_one_natural_reply_and_page_link(monkeypatch):
+    payload = {
+        "schema": "jarvis.ii.rag_evidence.vnext.v1",
+        "status": "COMPLETED",
+        "correlation_id": "test-vnext-complete",
+        "answer": "I found verified wiring evidence for 1756-IB32 in 1756-um058.pdf, PDF page 102.",
+        "citations": [{
+            "source": "Vendor Data/Allen Bradley/1756/1756-um058.pdf",
+            "url": "/api/extensions/smedley-engineering/sidecar/doc/Vendor%20Data/Allen%20Bradley/1756/1756-um058.pdf#page=102",
+            "pdf_page": 102,
+        }],
+        "rag_evidence": {"provider": "jarvis-ii-generic-rag-core"},
+    }
+    sent = {}
+
+    class Response:
+        status = 200
+
+        def read(self):
+            return json.dumps(payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def fake_urlopen(request, timeout):
+        sent["body"] = json.loads(request.data.decode("utf-8"))
+        sent["auth"] = request.get_header("Authorization")
+        assert timeout == 65
+        return Response()
+
+    monkeypatch.setenv(docroute.JARVIS_II_GENERIC_RAG_VNEXT_ENABLED_ENV, "true")
+    monkeypatch.setattr(docroute, "_load_jarvis_n8n_propose_token", lambda: "test-token")
+    monkeypatch.setattr(docroute.urllib.request, "urlopen", fake_urlopen)
+
+    result = docroute.try_document_route(
+        "Ask Jarvis for a wiring schematic for a 1756-IB32", public_origin=ORIGIN,
+        allow_ask_jarvis=True,
+    )
+
+    assert result and result["handled"] is True
+    assert result["jarvis_ii_generic_rag_vnext"] is True
+    assert result["spoken_reply"] == payload["answer"]
+    assert result["reply"].count("Open wiring page") == 1
+    assert result["active_document"]["url"] == ORIGIN + payload["citations"][0]["url"]
+    assert sent["body"]["query"].endswith("1756-IB32")
+    assert sent["auth"] == "Bearer test-token"
+
+
+def test_generic_vnext_replaces_loopback_citation_origin(monkeypatch):
+    payload = {
+        "schema": "jarvis.ii.rag_evidence.vnext.v1",
+        "status": "COMPLETED",
+        "answer": "I found verified wiring evidence.",
+        "citations": [{
+            "source": "Vendor Data/Allen Bradley/1756/1756-um058.pdf",
+            "url": "http://127.0.0.1:8787/api/jarvis-ii/rag-document/Vendor%20Data/Allen%20Bradley/1756/1756-um058.pdf#page=119",
+            "pdf_page": 119,
+        }],
+    }
+
+    class Response:
+        status = 200
+        def read(self): return json.dumps(payload).encode("utf-8")
+        def __enter__(self): return self
+        def __exit__(self, *_args): return False
+
+    monkeypatch.setenv(docroute.JARVIS_II_GENERIC_RAG_VNEXT_ENABLED_ENV, "true")
+    monkeypatch.setenv(docroute.PUBLIC_ORIGIN_ENV, ORIGIN)
+    monkeypatch.setattr(docroute, "_load_jarvis_n8n_propose_token", lambda: "test-token")
+    monkeypatch.setattr(docroute.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
+    result = docroute.try_document_route("Find a wiring schematic for 1756-OW16I", public_origin="http://127.0.0.1:8787")
+
+    assert result and result["handled"] is True
+    assert "127.0.0.1" not in result["reply"]
+    assert result["active_document"]["url"] == ORIGIN + "/api/jarvis-ii/rag-document/Vendor%20Data/Allen%20Bradley/1756/1756-um058.pdf#page=119"
+
+
+def test_generic_vnext_manual_contract_returns_one_natural_reply_and_manual_link(monkeypatch):
+    payload = {
+        "schema": "jarvis.ii.rag_evidence.vnext.v1",
+        "status": "COMPLETED",
+        "correlation_id": "test-vnext-manual",
+        "answer": "I found the verified manual pm20520.pdf.",
+        "citations": [{
+            "source": "Vendor Data/Honeywell/Experian PKS/TDC3000/pm20520.pdf",
+            "url": "/api/jarvis-ii/rag-document/Vendor%20Data/Honeywell/Experian%20PKS/TDC3000/pm20520.pdf",
+            "pdf_page": None,
+            "excerpt": "Process Manager I/O Installation (PM/APM/HPM) PM20-520",
+        }],
+        "rag_evidence": {"provider": "jarvis-ii-generic-rag-core", "document_kind": "manual"},
+    }
+    sent = {}
+
+    class Response:
+        status = 200
+
+        def read(self):
+            return json.dumps(payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    def fake_urlopen(request, timeout):
+        sent["body"] = json.loads(request.data.decode("utf-8"))
+        assert timeout == 65
+        return Response()
+
+    query = "Have Jarvis find the Honeywell Process Manager I/O Installation manual for the TDC3000 system"
+    monkeypatch.setenv(docroute.JARVIS_II_GENERIC_RAG_VNEXT_ENABLED_ENV, "true")
+    monkeypatch.setattr(docroute, "_load_jarvis_n8n_propose_token", lambda: "test-token")
+    monkeypatch.setattr(docroute.urllib.request, "urlopen", fake_urlopen)
+
+    result = docroute.try_document_route(query, public_origin=ORIGIN, allow_ask_jarvis=True)
+
+    assert result and result["handled"] is True
+    assert result["jarvis_ii_generic_rag_vnext"] is True
+    assert result["spoken_reply"] == payload["answer"]
+    assert result["reply"].count("Open manual") == 1
+    assert "Open wiring page" not in result["reply"]
+    assert result["active_document"]["url"] == ORIGIN + payload["citations"][0]["url"]
+    assert result["active_document"]["source"].endswith("pm20520.pdf")
+    assert sent["body"]["query"] == query
+
+
+def test_generic_vnext_no_evidence_fails_closed_without_citation(monkeypatch):
+    payload = {
+        "schema": "jarvis.ii.rag_evidence.vnext.v1",
+        "status": "NO_VERIFIED_EVIDENCE",
+        "correlation_id": "test-vnext-none",
+        "answer": "I could not verify a wiring-schematic page in the engineering library for that request.",
+        "citations": [],
+        "rag_evidence": None,
+    }
+
+    class Response:
+        status = 200
+
+        def read(self):
+            return json.dumps(payload).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setenv(docroute.JARVIS_II_GENERIC_RAG_VNEXT_ENABLED_ENV, "1")
+    monkeypatch.setattr(docroute, "_load_jarvis_n8n_propose_token", lambda: "test-token")
+    monkeypatch.setattr(docroute.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
+
+    result = docroute.try_document_route("Find a wiring schematic for 9999-ZZ99", public_origin=ORIGIN)
+
+    assert result and result["handled"] is True
+    assert result["jarvis_ii_generic_rag_vnext"] is True
+    assert result["reply"] == payload["answer"]
+    assert result["spoken_reply"] == payload["answer"]
+    assert result["matches"] == []
+    assert result["active_document"] is None
+
+
 def test_normalize_corpus_url_never_emits_lan_and_absolutizes():
     abs_url = docroute.normalize_corpus_url(LAN, source=SOURCE, public_origin=ORIGIN)
     assert abs_url == (
@@ -90,6 +256,14 @@ def test_normalize_corpus_url_never_emits_lan_and_absolutizes():
     assert docroute.normalize_public_origin("http://192.168.0.15:8789") == ""
     assert docroute.normalize_public_origin("http://127.0.0.1:8787") == ""
     assert docroute.normalize_public_origin("http://localhost:9111") == ""
+
+
+def test_smedley_tailnet_origin_never_leaks_the_local_webui_port():
+    """VNext citations must use the public Tailnet HTTPS endpoint."""
+    assert (
+        docroute.normalize_public_origin("http://smedley.tail061f03.ts.net:8787")
+        == "https://smedley.tail061f03.ts.net"
+    )
 
 
 def test_normalize_corpus_url_idempotent_across_href_shapes():

@@ -10298,6 +10298,53 @@ def _request_base_url(handler) -> str:
     return f"{scheme}://{host}"
 
 
+def _request_browser_origin(handler) -> str:
+    """Return the origin that holds the user's current GUI session.
+
+    This intentionally does not substitute Smedley's configured public origin:
+    document links shown by Biggy must return through Biggy's own session.
+    """
+    from api.auth import _is_secure_context
+
+    scheme = "https" if _is_secure_context(handler) else "http"
+    host = str(handler.headers.get("Host") or "").strip()
+    return f"{scheme}://{host}" if host else ""
+
+
+_JARVIS_RAG_DOCUMENT_PREFIX = "/api/jarvis-ii/rag-document/"
+
+
+def _handle_jarvis_rag_document(handler, parsed) -> bool:
+    """Serve one authenticated, library-root-confined RAG citation PDF.
+
+    This does not proxy Smedley's production sidecar. A Biggy link remains in
+    Biggy's authenticated session while retrieval continues to verify evidence
+    freshly through VNext.
+    """
+    if not parsed.path.startswith(_JARVIS_RAG_DOCUMENT_PREFIX):
+        return False
+    try:
+        from api.smedley_document_route import library_relpath_from_source, library_root
+
+        requested = unquote(parsed.path[len(_JARVIS_RAG_DOCUMENT_PREFIX) :])
+        rel = library_relpath_from_source(requested)
+        root_text = library_root()
+        if not rel or not rel.lower().endswith(".pdf") or not rel.startswith("Vendor Data/") or not root_text:
+            return bad(handler, "document not available", 404)
+        root = Path(root_text).resolve()
+        target = (root / rel).resolve()
+        try:
+            target.relative_to(root)
+        except ValueError:
+            return bad(handler, "document not available", 404)
+        return _serve_file_bytes(
+            handler, target, "application/pdf", "inline", "no-store", anchor_root=root
+        )
+    except Exception:
+        logger.exception("Jarvis RAG document delivery failed")
+        return bad(handler, "document not available", 404)
+
+
 def _oidc_login_html(parsed) -> str:
     try:
         from api.auth_oidc import is_oidc_enabled
@@ -12123,6 +12170,10 @@ def handle_get(handler, parsed) -> bool:
     proxy_result = _handle_extension_sidecar_proxy(handler, parsed, "GET")
     if proxy_result is not False:
         return proxy_result
+
+    rag_document_result = _handle_jarvis_rag_document(handler, parsed)
+    if rag_document_result is not False:
+        return rag_document_result
 
     if parsed.path.startswith("/session/static/"):
         # Strip the leading "/session" so _serve_static() sees a path that
@@ -15633,6 +15684,9 @@ def handle_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/jarvis-ii/pa-travel":
         return _handle_jarvis_ii_pa_travel(handler, body)
+
+    if parsed.path == "/api/jarvis-ii/pa-place-resolve":
+        return _handle_jarvis_ii_pa_place_resolve(handler, body)
 
     if parsed.path == "/api/chat/start":
         return _handle_chat_start(handler, body, diag=diag)
@@ -22612,7 +22666,14 @@ def _handle_chat_start(handler, body, diag=None):
         _ask_jarvis_document_fast_path = str(
             os.environ.get("HERMES_WEBUI_ASK_JARVIS_DOCUMENT_FAST_PATH") or ""
         ).strip().lower() in {"1", "true", "yes", "on"}
-        if not attachments:
+        _jarvis_pa_core_enabled = str(
+            os.environ.get("HERMES_WEBUI_JARVIS_II_PA_CORE_ENABLED") or ""
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        # VNext document work uses the normal Ask-Jarvis two-stage handoff
+        # below: Biggy acknowledges immediately and the verified result replaces
+        # that pending turn in the background. Keep this direct legacy shortcut
+        # available only when the operator has not enabled that handoff.
+        if not attachments and not _ask_jarvis_document_fast_path and not _jarvis_pa_core_enabled:
             try:
                 from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj_document
                 from api.smedley_document_route import is_document_request, try_document_route
@@ -22620,7 +22681,7 @@ def _handle_chat_start(handler, body, diag=None):
                 jarvis_document = (
                     try_document_route(
                         msg,
-                        public_origin=_request_base_url(handler),
+                        public_origin=_request_browser_origin(handler),
                         allow_ask_jarvis=True,
                     )
                     if (
@@ -22637,6 +22698,7 @@ def _handle_chat_start(handler, body, diag=None):
                 if (
                     isinstance(jarvis_document, dict)
                     and jarvis_document.get("handled")
+                    and not jarvis_document.get("jarvis_ii_generic_rag_vnext")
                     and re.search(r"\b(?:wiring|schematic|connection\s+diagram|pinout)\b", msg, re.I)
                     and isinstance(jarvis_document.get("active_document"), dict)
                 ):
@@ -22728,6 +22790,7 @@ def _handle_chat_start(handler, body, diag=None):
                     is_ask_jarvis_command,
                     mint_correlation_id,
                     pending_visual_text,
+                    try_jarvis_ii_pa_core,
                     queue_ask_jarvis_smedley_tts,
                     queue_biggy_austin_ack,
                     timing_path_for,
@@ -22737,9 +22800,23 @@ def _handle_chat_start(handler, body, diag=None):
             except Exception:
                 logger.exception("ask_jarvis imports failed; falling through to ordinary chat")
             else:
-                _jarvis_followup_objective = _jarvis_travel_followup_objective(s, msg)
+                _jarvis_followup_objective = _jarvis_active_followup_objective(s, msg)
                 if is_ask_jarvis_command(msg) or _jarvis_followup_objective:
                     _jarvis_objective = _jarvis_followup_objective or msg
+                    _jarvis_document_vnext = False
+                    if (
+                        _ask_jarvis_document_fast_path
+                        and not _jarvis_pa_core_enabled
+                        and not _jarvis_followup_objective
+                    ):
+                        try:
+                            from api.smedley_document_route import is_document_request
+
+                            _jarvis_document_vnext = is_document_request(
+                                msg, allow_ask_jarvis=True
+                            )
+                        except Exception:
+                            logger.exception("Ask Jarvis VNext document classification failed")
                     _ask_jarvis_ingress_ts = time.time()
                     corr = mint_correlation_id()
                     tpath = timing_path_for(corr)
@@ -22846,6 +22923,9 @@ def _handle_chat_start(handler, body, diag=None):
                         correlation_id=corr,
                         ingress_ts=_ask_jarvis_ingress_ts,
                         timing_file=str(tpath),
+                        document_vnext=_jarvis_document_vnext,
+                        pa_core_enabled=_jarvis_pa_core_enabled,
+                        browser_origin=_request_browser_origin(handler),
                     ):
                         import threading
 
@@ -22853,11 +22933,46 @@ def _handle_chat_start(handler, body, diag=None):
                             try:
                                 from pathlib import Path as _Path
 
-                                ask_jarvis = try_ask_jarvis(
-                                    objective,
-                                    biggy_ingress_ts=ingress_ts,
-                                    correlation_id=correlation_id,
-                                )
+                                if document_vnext:
+                                    from api.smedley_document_route import try_document_route
+
+                                    routed = try_document_route(
+                                        objective,
+                                        public_origin=browser_origin,
+                                        allow_ask_jarvis=True,
+                                    )
+                                    ask_jarvis = {
+                                        **(routed if isinstance(routed, dict) else {}),
+                                        "handled": bool(
+                                            isinstance(routed, dict) and routed.get("handled")
+                                        ),
+                                        "spoken_text": (
+                                            str((routed or {}).get("spoken_reply") or "").strip()
+                                            if isinstance(routed, dict)
+                                            else ""
+                                        ),
+                                        "spoken_reply": (
+                                            str((routed or {}).get("spoken_reply") or "").strip()
+                                            if isinstance(routed, dict)
+                                            else ""
+                                        ),
+                                        "tts_voice_id": "dzRy05hNK3bab9ViJ0oU",
+                                        "tts_voice_profile": "jarvis_james_michael",
+                                        "transport": "jarvis_ii_generic_rag_vnext",
+                                    }
+                                elif pa_core_enabled:
+                                    ask_jarvis = try_jarvis_ii_pa_core(
+                                        objective,
+                                        biggy_ingress_ts=ingress_ts,
+                                        correlation_id=correlation_id,
+                                        session_id=session_id,
+                                    )
+                                else:
+                                    ask_jarvis = try_ask_jarvis(
+                                        objective,
+                                        biggy_ingress_ts=ingress_ts,
+                                        correlation_id=correlation_id,
+                                    )
                                 if not isinstance(ask_jarvis, dict) or not ask_jarvis.get("handled"):
                                     ask_jarvis = {
                                         "handled": True,
@@ -22898,6 +23013,9 @@ def _handle_chat_start(handler, body, diag=None):
                                     else None,
                                     "recommendation_view_model": ask_jarvis.get("recommendation_view_model")
                                     if isinstance(ask_jarvis.get("recommendation_view_model"), dict)
+                                    else None,
+                                    "trip_plan_view_model": ask_jarvis.get("trip_plan_view_model")
+                                    if isinstance(ask_jarvis.get("trip_plan_view_model"), dict)
                                     else None,
                                     "_correlation_id": correlation_id,
                                     "_receipt": ask_jarvis.get("receipt"),
@@ -23746,6 +23864,58 @@ def _return_smedley_fast_route(handler, s, msg, routed, ptt_owned_tts=False):
     )
 
 
+def _jarvis_active_followup_objective(session, message: str) -> str | None:
+    """Keep an unambiguous continuation in the active Jarvis task.
+
+    Biggy owns the chat shell, but a short reply to a completed Jarvis turn is
+    still part of Jarvis's task.  This deliberately recognizes continuation
+    language rather than every ordinary message: an explicit address to Biggy
+    or Smedley, or a new unrelated request, remains with the host assistant.
+    """
+    text = str(message or "").strip()
+    if not text or re.search(r"(?i)\b(?:biggy|smedley)\b", text):
+        return None
+
+    # Preserve the existing richer travel continuation, including its verified
+    # destination/date carry-forward behavior.
+    travel = _jarvis_travel_followup_objective(session, text)
+    if travel:
+        return travel
+
+    continuation = re.search(
+        r"(?i)^(?:"
+        r"(?:yes|yeah|yep|no|okay|ok|sure|continue|proceed)\b"
+        r"|(?:selection|option)\s*(?:[1-9]|one|two|three)\b"
+        r"|(?:take\s+(?:a\s+)?look|look\s+in|search|check|try|find|retrieve|pull|open|go\s+deeper|dig\s+deeper)\b"
+        r"|(?:the\s+(?:manual|document|folder|path|page|figure|schematic)\b)"
+        r")",
+        text,
+    )
+    if not continuation:
+        return None
+
+    for item in reversed(list(getattr(session, "messages", None) or [])):
+        if not isinstance(item, dict) or item.get("role") != "assistant":
+            continue
+        if item.get("ask_jarvis_pending"):
+            continue
+        is_jarvis = bool(
+            item.get("ask_jarvis_hard_bind")
+            or item.get("jarvis_response")
+            or str(item.get("assistant_identity") or "").lower() == "jarvis"
+        )
+        if not is_jarvis:
+            return None
+        return (
+            "Ask Jarvis: Continue the active Jarvis task. "
+            + "Owner follow-up: "
+            + text
+            + " Resolve references from this chat context, but make fresh approved "
+            + "tool calls and fresh evidence verification before stating results."
+        )
+    return None
+
+
 def _jarvis_travel_followup_objective(session, message: str) -> str | None:
     """Bind an unambiguous lodging follow-up to the prior Jarvis travel turn.
 
@@ -23801,9 +23971,11 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
         austin_voice_id,
         mint_correlation_id,
         pending_visual_text,
+        jarvis_ii_pa_core_enabled,
         queue_ask_jarvis_smedley_tts,
         queue_biggy_austin_ack,
         timing_path_for,
+        try_jarvis_ii_pa_core,
         try_ask_jarvis,
         wait_ack_playback_complete,
         wait_final_playback_complete,
@@ -23908,8 +24080,15 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
     except Exception:
         pass
 
-    ask_jarvis = try_ask_jarvis(
-        objective, biggy_ingress_ts=ingress_ts, correlation_id=corr
+    ask_jarvis = (
+        try_jarvis_ii_pa_core(
+            objective,
+            biggy_ingress_ts=ingress_ts,
+            correlation_id=corr,
+            session_id=str(getattr(s, "session_id", "") or ""),
+        )
+        if jarvis_ii_pa_core_enabled()
+        else try_ask_jarvis(objective, biggy_ingress_ts=ingress_ts, correlation_id=corr)
     )
     if not isinstance(ask_jarvis, dict) or not ask_jarvis.get("handled"):
         ask_jarvis = {
@@ -23949,6 +24128,9 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
         else None,
         "recommendation_view_model": ask_jarvis.get("recommendation_view_model")
         if isinstance(ask_jarvis.get("recommendation_view_model"), dict)
+        else None,
+        "trip_plan_view_model": ask_jarvis.get("trip_plan_view_model")
+        if isinstance(ask_jarvis.get("trip_plan_view_model"), dict)
         else None,
         "_correlation_id": corr,
         "_receipt": ask_jarvis.get("receipt"),
@@ -24059,6 +24241,7 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
             "map_view_model": final_msg.get("map_view_model"),
             "lodging_view_model": final_msg.get("lodging_view_model"),
             "recommendation_view_model": final_msg.get("recommendation_view_model"),
+            "trip_plan_view_model": final_msg.get("trip_plan_view_model"),
             "evidence_footer": evidence_footer or None,
             "title": getattr(sess, "title", None),
             "error": ask_jarvis.get("error"),
@@ -24075,7 +24258,14 @@ def _jarvis_ii_authenticated(handler) -> bool:
     """
     expected_tokens = {str(os.environ.get("GPT_BIGGY_PROPOSE_TOKEN") or "").strip()}
     token_file = str(os.environ.get("GPT_BIGGY_PROPOSE_TOKEN_FILE") or "").strip()
-    for candidate in (token_file, "/Users/rick/.jarvis-ptt/gpt-biggy-propose.token"):
+    # The current n8n PA deployment uses the hyphenated protected filename;
+    # retain the earlier dotted filename during the transition.  Only the
+    # values are compared in memory and neither is returned to a caller.
+    for candidate in (
+        token_file,
+        "/Users/rick/.jarvis-ptt/gpt-biggy-propose.token",
+        "/Users/rick/.jarvis-ptt/gpt-biggy-propose-token",
+    ):
         if not candidate:
             continue
         try:
@@ -24094,8 +24284,9 @@ def _handle_jarvis_ii_pa_context(handler, body):
     """Return bounded, read-only Biggy durable context to Jarvis II PA.
 
     This endpoint deliberately excludes browser transcripts, project files,
-    and memory writes.  Persistent-memory retention and write policy remain
-    owner decisions, so the PA may use this only as planning context.
+    and general memory writes. The owner-approved strategy-only learning
+    section contains no user content or cached answers and expires after 30
+    days; the PA may use it only as tool-selection context.
     """
     if not _jarvis_ii_authenticated(handler):
         logger.warning("Jarvis II PA context rejected auth")
@@ -24103,7 +24294,7 @@ def _handle_jarvis_ii_pa_context(handler, body):
     requested = body.get("sections") or ["memory", "user", "soul"]
     if not isinstance(requested, list):
         return j(handler, {"ok": False, "error": "sections must be a list"}, status=400)
-    allowed = {"memory": "MEMORY.md", "user": "USER.md", "soul": "SOUL.md"}
+    allowed = {"memory": "MEMORY.md", "user": "USER.md", "soul": "SOUL.md", "strategy": "strategy"}
     sections = [str(item).strip().lower() for item in requested]
     if not sections or any(item not in allowed for item in sections):
         return j(handler, {"ok": False, "error": "unsupported context section"}, status=400)
@@ -24117,6 +24308,11 @@ def _handle_jarvis_ii_pa_context(handler, body):
 
     context = {}
     for section in sections:
+        if section == "strategy":
+            from api.jarvis_pa_strategy_memory import strategy_context
+
+            context[section] = strategy_context()
+            continue
         path = paths[section]
         try:
             text = path.read_text(encoding="utf-8", errors="replace")[:24000]
@@ -24133,29 +24329,52 @@ def _handle_jarvis_ii_pa_context(handler, body):
             "ok": True,
             "schema": "jarvis.pa.durable_context.v1",
             "context": context,
-            "write_policy": "DISABLED_PENDING_OWNER_RETENTION_POLICY",
+            "write_policy": "STRATEGY_ONLY_30_DAY_OWNER_APPROVED",
             "retention": "Persistent retention is disabled until the owner approves a retention policy.",
         },
     )
 
 
 def _handle_jarvis_ii_pa_travel(handler, body):
-    """Resolve a destination and public lodging POIs for the PA, read-only."""
+    """Return read-only destination or trip-planning evidence for the PA."""
     if not _jarvis_ii_authenticated(handler):
         logger.warning("Jarvis II PA travel rejected auth")
         return j(handler, {"ok": False, "error": "authenticated Biggy ingress required"}, status=401)
     try:
-        from api.jarvis_pa_travel import resolve_travel
+        from api.jarvis_pa_travel import plan_trip, resolve_travel
 
-        result = resolve_travel(
-            destination=str(body.get("destination") or body.get("query") or ""),
-            include_lodging=bool(body.get("include_lodging", True)),
+        destination = str(body.get("destination") or body.get("query") or "")
+        origin = str(body.get("origin") or "").strip()
+        result = (
+            plan_trip(origin=origin, destination=destination)
+            if origin
+            else resolve_travel(
+                destination=destination,
+                include_lodging=bool(body.get("include_lodging", True)),
+            )
         )
         return j(handler, result, status=200 if result.get("ok") else 404)
     except ValueError as exc:
         return j(handler, {"ok": False, "error": str(exc)}, status=400)
     except Exception as exc:
         logger.exception("Jarvis II PA travel adapter failed")
+        return j(handler, {"ok": False, "error": type(exc).__name__}, status=502)
+
+
+def _handle_jarvis_ii_pa_place_resolve(handler, body):
+    """Return fresh Mapbox evidence for a named venue, plant, or attraction."""
+    if not _jarvis_ii_authenticated(handler):
+        logger.warning("Jarvis II PA place resolver rejected auth")
+        return j(handler, {"ok": False, "error": "authenticated Biggy ingress required"}, status=401)
+    try:
+        from api.jarvis_pa_travel import resolve_place
+
+        result = resolve_place(query=str(body.get("query") or body.get("destination") or ""))
+        return j(handler, result, status=200 if result.get("ok") else 404)
+    except ValueError as exc:
+        return j(handler, {"ok": False, "error": str(exc)}, status=400)
+    except Exception as exc:
+        logger.exception("Jarvis II PA place resolver failed")
         return j(handler, {"ok": False, "error": type(exc).__name__}, status=502)
 
 

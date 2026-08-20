@@ -30,7 +30,16 @@ def test_ingest_folder_picker_has_four_dependent_levels():
     assert "refreshSubfolders" in body
     assert "refreshLevel3" in body
     assert "refreshLevel4" in body
-    assert "subfolder.addEventListener('change',refreshLevel3)" in body
-    assert "level3.addEventListener('change',refreshLevel4)" in body
+    assert "subfolder.addEventListener('change',async()=>{await refreshLevel3();refreshNewFolderParent();})" in body
+    assert "level3.addEventListener('change',async()=>{await refreshLevel4();refreshNewFolderParent();})" in body
     assert "INGEST STATUS" in body
     assert "smedleyIngestQueue" in body
+
+
+def test_new_library_folder_uses_selected_folder_as_parent():
+    src = LIVE_EXT.read_text(encoding="utf-8")
+    body = extract_function(src, "makeRightRail")
+    assert 'id="smedleyNewFolderParent"' in body
+    assert "function refreshNewFolderParent()" in body
+    assert "const input=rail.querySelector('#smedleyNewFolderName'),leaf=input.value.trim(),parent=selectedLibraryFolder(),name=[parent,leaf].filter(Boolean).join('/')" in body
+    assert "CREATE IN ${parent.toUpperCase()}" in body

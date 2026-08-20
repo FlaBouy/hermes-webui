@@ -1,0 +1,1706 @@
+[
+  {
+    "createdAt": "2026-08-19T11:02:29.540Z",
+    "updatedAt": "2026-08-20T15:02:30.105Z",
+    "id": "cD6uUqpzXQl3n3iU",
+    "name": "Jarvis II \u2014 PA Core POC",
+    "active": true,
+    "isArchived": false,
+    "nodes": [
+      {
+        "parameters": {
+          "httpMethod": "POST",
+          "path": "jarvis-ii-pa",
+          "responseMode": "responseNode",
+          "options": {}
+        },
+        "id": "pa_1",
+        "name": "Jarvis II PA Ingress",
+        "type": "n8n-nodes-base.webhook",
+        "typeVersion": 2,
+        "position": [
+          0,
+          0
+        ],
+        "webhookId": "1a44247f-521f-462e-b33f-b9058b519e9a"
+      },
+      {
+        "parameters": {
+          "inputSource": "passthrough"
+        },
+        "id": "pa_12",
+        "name": "PA Controlled Test Ingress",
+        "type": "n8n-nodes-base.executeWorkflowTrigger",
+        "typeVersion": 1.1,
+        "position": [
+          -256,
+          -208
+        ]
+      },
+      {
+        "parameters": {
+          "assignments": {
+            "assignments": [
+              {
+                "id": "fixture-objective",
+                "name": "objective",
+                "value": "Remember that I prefer black coffee for future conversations.",
+                "type": "string"
+              },
+              {
+                "id": "fixture-authority",
+                "name": "authority",
+                "value": "owner_test",
+                "type": "string"
+              },
+              {
+                "id": "fixture-source",
+                "name": "source",
+                "value": "controlled_test",
+                "type": "string"
+              },
+              {
+                "id": "fixture-requester",
+                "name": "requester",
+                "value": "biggy",
+                "type": "string"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "pa_13",
+        "name": "Controlled Travel Fixture",
+        "type": "n8n-nodes-base.set",
+        "typeVersion": 3.4,
+        "position": [
+          0,
+          -208
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const uuid=()=>('xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx').replace(/[xy]/g,c=>{const r=Math.floor(Math.random()*16);return(c==='x'?r:(r&3|8)).toString(16)}); const b=$json.body&&typeof $json.body==='object'?$json.body:$json; const h=$json.headers&&typeof $json.headers==='object'?$json.headers:{}; const expected=String($env.GPT_BIGGY_PROPOSE_TOKEN||'').trim(); const supplied=String(h.authorization||h.Authorization||'').replace(/^Bearer\\s+/i,'').trim(); const objective=String(b.objective||b.conversation_text||'').trim(); const correlationId=String(b.correlation_id||uuid()); const idempotencyKey=String(b.idempotency_key||''); const sessionId=String(b.session_id||'').trim(); const conversationContext=Array.isArray(b.conversation_context)?b.conversation_context.slice(-10):[]; const authorized=Boolean(expected)&&supplied===expected; const valid=authorized&&Boolean(objective)&&String(b.authority||'').startsWith('owner_'); return [{json:{valid,correlationId,idempotencyKey,sessionId,conversationContext,objective,source:String(b.source||'biggy'),mode:String(b.mode||'POC'),principal:String(b.requester||'biggy'),auditChain:[{stage:'ingress',status:valid?'accepted':(authorized?'rejected':'unauthorized')}]}}];"
+        },
+        "id": "pa_2",
+        "name": "Validate PA Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          224,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "leftValue": "={{ $json.valid }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "pa_3",
+        "name": "Request Valid?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          448,
+          0
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "return [{json:{correlationId:$json.correlationId,operationId:null,status:'INVALID_REQUEST',spokenText:'I need an authorized request before I can proceed.',answer:'Request rejected before planning.',citations:[],auditChain:$json.auditChain}}];"
+        },
+        "id": "pa_4",
+        "name": "Invalid PA Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          672,
+          640
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://host.docker.internal:8790/api/jarvis-ii/pa-context",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "={{ 'Bearer ' + $env.GPT_BIGGY_PROPOSE_TOKEN }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({sections:['memory','user','soul','strategy']}) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 10000
+          }
+        },
+        "id": "pa_8",
+        "name": "Load Durable Context",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          672,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "promptType": "define",
+          "text": "={{ 'You are Jarvis II, the governed local 120B decision agent. A continuation such as yes, dig deeper, pull that figure, or the previous manual may use conversation memory only to recover the target. It must call the required approved tool again and perform fresh evidence verification before stating a manual, part, page, schematic, citation, or technical fact. Conversation memory is not evidence and cannot supply an answer on its own. Conversation context: '+JSON.stringify($('Validate PA Request').first().json.conversationContext||[])+'. Owner request: '+$('Validate PA Request').first().json.objective+'. Strategy context: '+JSON.stringify($json.body?.context?.strategy||{})+'. Strategy hints may select only an approved tool and never replace a fresh tool call or fresh evidence verification. For engineering manual, schematic, wiring, datasheet, vendor-part, or technical-library evidence, first call exactly Jarvis II RAG Delegation. Do not call research for engineering. Do not state technical facts, page numbers, citations, or results until verified evidence returns; otherwise state only that it could not be verified. For trip, route, lodging, fuel, meals, or entertainment: extract origin and destination; use maps and lodging_poi. If origin is absent, ask for it and do not claim a route. Return JSON only with intent, required_tools, origin, destination, evidence_required, memory_action, requires_approval, spoken_summary, web_sources, and rag_citations. Durable strategy writes are automatic and strategy-only; never request or write user memory. For public research use Jarvis II Firecrawl Research; calendar use Jarvis II Calendar Read; mail use Jarvis II Gmail Read; weather use Weather Underground. Keep spoken_summary natural and short.' }}",
+          "options": {}
+        },
+        "id": "pa_14",
+        "name": "Jarvis II Decision Agent",
+        "type": "@n8n/n8n-nodes-langchain.agent",
+        "typeVersion": 2.2,
+        "position": [
+          864,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "model": {
+            "__rl": true,
+            "value": "openai/gpt-oss-120b",
+            "mode": "id"
+          },
+          "options": {
+            "temperature": 0.1
+          }
+        },
+        "id": "pa_15",
+        "name": "LM Studio 120B Decision Model",
+        "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+        "typeVersion": 1.2,
+        "position": [
+          752,
+          304
+        ],
+        "credentials": {
+          "openAiApi": {
+            "id": "i6yAFAV96zNuqzAr",
+            "name": "Jarvis LM Studio gpt-oss-120b"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const context = ($json.body && typeof $json.body === 'object' && $json.body.context) || {};\nconst request = $('Validate PA Request').first().json;\nconst conversationContext = Array.isArray(request.conversationContext) ? request.conversationContext.slice(-10) : [];\nconst schema = { type:'object', additionalProperties:false, properties:{ intent:{type:'string'}, required_tools:{type:'array',items:{type:'string'}}, origin:{type:'string'}, destination:{type:'string'}, evidence_required:{type:'boolean'}, memory_action:{type:'string'}, requires_approval:{type:'boolean'}, spoken_summary:{type:'string'} }, required:['intent','required_tools','origin','destination','evidence_required','memory_action','requires_approval','spoken_summary'] };\nconst system = 'You are Jarvis II PA planner. Return only the provided JSON schema. For engineering manuals, schematics, wiring, datasheets, vendor-part, or technical-library evidence, required_tools must contain rag_core. For travel, route, lodging, fuel, meals, or entertainment, use maps and lodging_poi. For calendar, schedule, conflict, or availability requests, use calendar_read. The default travel origin is Lynn Haven, Florida. Override it only if the owner explicitly provides another starting point. A named venue, plant site, attraction, or event destination may be given without an address, city, or state. Never invent a destination: it must be verified by the approved destination-evidence tool before routing. Never claim a tool ran. Durable memory writes are forbidden. Short-term conversation context is a volatile, same-chat target reference only; it may recover the subject of an explicit follow-up such as yes, dig deeper, or pull that figure, but it is never evidence. Never use it to state facts, manual titles, page numbers, citations, or results. Always call the approved tool and perform fresh verification. Durable strategy context may select only an approved tool and can never cache or answer a request. Durable context: '+JSON.stringify(context)+'. Short-term conversation context: '+JSON.stringify(conversationContext);\nreturn [{json:{lm_payload:{model:'openai/gpt-oss-120b',temperature:0.1,response_format:{type:'json_schema',json_schema:{name:'jarvis_pa_plan',schema}},messages:[{role:'system',content:system},{role:'user',content:String(request.objective||'')}]}}}];"
+        },
+        "id": "pa_16",
+        "name": "Build 120B Plan Request",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1152,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://host.docker.internal:1234/v1/chat/completions",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.lm_payload) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 90000
+          }
+        },
+        "id": "pa_5",
+        "name": "Local 120B Plan",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1152,
+          -112
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const uuid=()=>('xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx').replace(/[xy]/g,c=>{const r=Math.floor(Math.random()*16);return (c==='x'?r:((r&3)|8)).toString(16)});\nconst req=$('Validate PA Request').first().json; const body=$json.body||{}; let plan={}; try{plan=JSON.parse(body.choices?.[0]?.message?.content||'{}')}catch(e){}\nconst rawTools=Array.isArray(plan.required_tools)?plan.required_tools:[]; const canonical=x=>{const t=String(x||'').toLowerCase(); if(/firecrawl|public_web_research|\\bresearch\\b/.test(t))return 'research'; if(/gmail/.test(t))return 'gmail_read'; if(/calendar/.test(t))return 'calendar_read'; if(/weather/.test(t))return 'weather'; if(/lodging/.test(t))return 'lodging_poi'; if(/map/.test(t))return 'maps'; if(/rag/.test(t))return 'rag_core'; return String(x||'')};\nconst requested=rawTools.map(canonical).filter(x=>['rag_core','weather','maps','lodging_poi','calendar_read','gmail_read','research'].includes(String(x))); const objective=String(req.objective||''); const shortTermTurns=Array.isArray(req.conversationContext)?req.conversationContext.slice(-10):[]; const followUp=/^(?:yes|yeah|yep|please|selection\\s*\\d+|option\\s*\\d+)\\b|\\b(?:dig\\s+deeper|pull\\s+(?:that|the)\\s+(?:figure|page|manual|schematic)|previous\\s+(?:manual|figure|page|schematic)|take\\s+a\\s+look)\\b/i.test(objective.trim()); const priorRagTurn=followUp?[...shortTermTurns].reverse().find(turn=>turn&&Array.isArray(turn.tools)&&turn.tools.includes('rag_core')&&String(turn.objective||'').trim()):null; const recoveredTarget=priorRagTurn?String(priorRagTurn.objective).trim().slice(0,500):''; const effectiveRagObjective=recoveredTarget?(recoveredTarget+' Follow-up request: '+objective).slice(0,700):objective;\nconst ragRequested=requested.includes('rag_core')||/\\b(schematic|wiring|manual|datasheet|part\\s*(number|no\\.?|#)|1756[-\\s]?[a-z0-9]+|honeywell|allen[-\\s]?bradley|tdc3000|control(edge|logix))\\b/i.test(objective); if(ragRequested&&!requested.includes('rag_core'))requested.push('rag_core');\nconst tripRequested=requested.includes('maps')||requested.includes('lodging_poi')||/\\b(route|drive|trip|travel|lodging|hotel|fuel|gas|restaurant|eat|dining|meal|entertainment|museum|cinema|theatre|venue|plant\\s+site|attraction|sight)\\b/i.test(objective); if(tripRequested&&!requested.some(x=>x==='maps'||x==='lodging_poi'))requested.push('maps','lodging_poi');\nconst calendarRequested=requested.includes('calendar_read')||/\\b(calendar|schedule|conflict|availability)\\b/i.test(objective); if(calendarRequested&&!requested.includes('calendar_read'))requested.push('calendar_read'); const weatherRequested=requested.includes('weather')||/\\b(weather|forecast|radar|myradar|storm|wildfire|hurricane|tornado)\\b/i.test(objective); const researchRequested=requested.includes('research')||/\\b(research|verify|source lookup)\\b/i.test(objective); const mailRequested=requested.includes('gmail_read')||/\\b(email|emails|inbox|mail|message search)\\b/i.test(objective);\nconst eventDestination=tripRequested&&/\\b(?:game|match|vs\\.?|concert|festival|race|tournament)\\b/i.test(objective); const explicitOrigin=/\\b(?:from|leaving\\s+from|starting\\s+(?:from|in|at))\\s+[^,.!?]+/i.test(objective); const origin=tripRequested?(explicitOrigin?String(plan.origin||'').trim()||'Lynn Haven, Florida':'Lynn Haven, Florida'):''; const plannedDestination=String(plan.destination||'').trim(); const destination=ragRequested?effectiveRagObjective:(eventDestination?'':plannedDestination); const destinationQuery=tripRequested?(eventDestination?objective:(plannedDestination||objective)):'';\nconst memoryAction=String(plan.memory_action||'read_none'); const memoryWrite=memoryAction.includes('write')||/\\b(remember|store|save|retain|lasting preference|durable memory)\\b/i.test(objective); const operationId=uuid(); const status=memoryWrite?'MEMORY_WRITE_REQUIRES_OWNER_POLICY':researchRequested?'RESEARCH_EVIDENCE_REQUIRED':(weatherRequested||calendarRequested||mailRequested||tripRequested)?'TOOL_PENDING':'PLANNED';\nconst spoken=memoryWrite?'Durable memory is read-only until you approve its retention and write policy.':tripRequested?'I am verifying the destination and checking the approved Mapbox travel sources now.':weatherRequested?String(plan.spoken_summary||'Weather information is available from the selected Weather Underground source.')+' MyRadar is ready if you want the full visual view.':calendarRequested?'I am checking your calendar for the requested date.':String(plan.spoken_summary||'I have a plan ready.');\nreturn [{json:{schemaVersion:1,correlationId:req.correlationId,operationId,status,intent:String(plan.intent||'unknown'),origin,destination,destinationQuery,destinationResearchRequired:eventDestination,requestedTools:requested,evidenceRequired:Boolean(plan.evidence_required),requiresApproval:Boolean(plan.requires_approval)||memoryWrite,memory:{action:memoryAction,writeAllowed:false},spokenText:spoken,answer:{plan,evidence:null,notice:'Tool results, if any, are assembled separately from the planner.'},citations:[],auditChain:[...req.auditChain,{stage:'short_term_context',status:recoveredTarget?'target_recovered':'not_used',turns:shortTermTurns.length},{stage:'local_120b_plan',status:'completed',model:'openai/gpt-oss-120b'},{stage:'policy',status:'enforced'}]}}];"
+        },
+        "id": "pa_6",
+        "name": "Governed PA Response",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1344,
+          80
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "pa-travel-tool-requested",
+                "leftValue": "={{ (($json.requestedTools || []).some((tool) => tool === 'maps' || tool === 'lodging_poi') && String($json.origin || '').trim() && String($json.destination || '').trim()) ? 'TRAVEL' : 'NOT_TRAVEL' }}",
+                "rightValue": "TRAVEL",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "caseSensitive": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "pa_9",
+        "name": "Travel Tool Requested?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          2688,
+          176
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://host.docker.internal:8790/api/jarvis-ii/pa-travel",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "={{ 'Bearer ' + $env.GPT_BIGGY_PROPOSE_TOKEN }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({origin:$json.origin,destination:$json.destination,include_lodging:true}) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 70000
+          }
+        },
+        "id": "pa_10",
+        "name": "Retrieve Travel Evidence",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2928,
+          176
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const base=$('Travel Tool Requested?').first().json; const evidence=$json.body||{}; const verifiedPlace=base.destinationEvidence?.place||null; const models=Array.isArray(evidence.recommendation_view_models)?evidence.recommendation_view_models:[]; const lodging=models.find(v=>v&&v.category==='lodging')||null; const destination=verifiedPlace?.label||evidence.destination?.label||base.destination; const spokenDestination=String(base.destinationEvidence?.query||destination).replace(/\\s+/g,' ').trim(); const origin=evidence.origin?.label||base.origin; const route=evidence.map_view_model?.route||{}; const miles=typeof route.distance_m==='number'?Math.round(route.distance_m*0.000621371*10)/10:null; const ready=Boolean(evidence.ok&&evidence.map_view_model); const categories=models.filter(v=>v&&v.available&&Array.isArray(v.options)&&v.options.length).map(v=>String(v.category)); const cal=base.calendar_evidence; const calNote=cal?(cal.event_count?' I found '+cal.event_count+' calendar event'+(cal.event_count===1?'':'s')+' in that date window.':' Your calendar is clear in that date window.') : ''; const venueNote=verifiedPlace?'I verified the destination as '+spokenDestination+'. ':''; const spoken=ready?(venueNote+'I mapped the Mapbox drive from '+origin+' to '+spokenDestination+(miles!==null?' \u2014 about '+miles+' miles.':'')+(categories.length?' I put public '+categories.join(', ')+' options on the screen.':' The route is on the screen. The public listings provider did not return current lodging, meal, entertainment, or fuel listings.')+calNote+' I do not have live availability, reservations, or booking access.'):'I could not verify public Mapbox trip-planning evidence for that route.'; const publicCitations=(Array.isArray(base.citations)?base.citations:[]).filter(c=>c&&c.source_host!=='Google Calendar'); const mapView=ready?{...evidence.map_view_model,destination:verifiedPlace?{...(evidence.map_view_model.destination||{}),...verifiedPlace,label:destination}:evidence.map_view_model.destination}:null; return [{json:{...base,status:ready?'COMPLETED':'NO_TRAVEL_EVIDENCE',spokenText:spoken,answer:ready?{...(base.answer||{}),origin,destination,route,notice:evidence.notice,trip_categories:categories}:{...(base.answer||{}),notice:'No verified trip-planning evidence.'},map_view_model:mapView,recommendation_view_model:lodging,trip_plan_view_model:ready?{schema:'jarvis.trip_plan_view_model.v1',emitted_by:'Jarvis II PA Tool',categories:models}:null,citations:ready?[...publicCitations,{title:'Mapbox trip planning',url:'https://www.mapbox.com/',source_host:'Mapbox'}]:[],auditChain:[...(Array.isArray(base.auditChain)?base.auditChain:[]),{stage:'trip_planning_evidence',status:ready?'completed':'not_found',source:evidence.source||null}]}}];"
+        },
+        "id": "pa_11",
+        "name": "Render Travel Evidence",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3168,
+          176
+        ]
+      },
+      {
+        "parameters": {
+          "respondWith": "json",
+          "responseBody": "={{ JSON.stringify($json) }}",
+          "options": {
+            "responseCode": 200
+          }
+        },
+        "id": "pa_7",
+        "name": "Return PA Response",
+        "type": "n8n-nodes-base.respondToWebhook",
+        "typeVersion": 1.1,
+        "position": [
+          2176,
+          624
+        ]
+      },
+      {
+        "parameters": {
+          "description": "Read-only Weather Underground / The Weather Company PWS current conditions. Input may be a ZIP/postal key or a PWS station ID. If absent, use the owner-approved default ZIP 32444. Returns current observations only; it never returns forecasts or alerts, never writes memory, and never performs actions.",
+          "jsCode": "const DEFAULT_LOCATION = '32444:US';\nconst apiKey = String(($env && $env.TWC_WEATHER_API_KEY) || '');\nif (!apiKey) return JSON.stringify({schema:'jarvis.weather_briefing.v1',outcome:'error',error:{code:'MISSING_TWC_KEY'},durable_memory_write:false});\nconst raw = query && typeof query === 'object' ? String(query.location || query.stationId || '').trim() : String(query || '').trim();\nlet location = raw || DEFAULT_LOCATION;\nlet stationId = /^[A-Z]{1,3}[A-Z0-9]+$/i.test(location) && /[A-Z]/i.test(location) && !/^\\d{5}/.test(location) ? location : '';\nconst get = (url, qs) => helpers.httpRequest({method:'GET',url,qs,json:true});\nlet label = null;\nif (!stationId) {\n  if (/^\\d{5}$/.test(location)) location += ':US';\n  const point = await get('https://api.weather.com/v3/location/point',{postalKey:location,language:'en-US',format:'json',apiKey});\n  const place = (point && point.location) || {};\n  label = place.displayName || place.city || place.neighborhood || null;\n  stationId = place.pwsId || place.pwsID || '';\n  if (!stationId && place.latitude != null && place.longitude != null) {\n    const near = await get('https://api.weather.com/v3/location/near',{geocode:String(place.latitude)+','+String(place.longitude),product:'pws',format:'json',apiKey});\n    const ids = near && near.location && (near.location.stationId || near.location.stationID);\n    if (Array.isArray(ids) && ids.length) stationId = String(ids[0]);\n  }\n}\nif (!stationId) return JSON.stringify({schema:'jarvis.weather_briefing.v1',outcome:'error',error:{code:'WEATHER_STATION_RESOLVE_FAILED'},location_echo:location,durable_memory_write:false});\nconst response = await get('https://api.weather.com/v2/pws/observations/current',{stationId,format:'json',units:'e',numericPrecision:'decimal',apiKey});\nconst obs = response && Array.isArray(response.observations) ? response.observations[0] : null;\nif (!obs) return JSON.stringify({schema:'jarvis.weather_briefing.v1',outcome:'error',error:{code:'WEATHER_UPSTREAM_EMPTY'},location_echo:location,durable_memory_write:false});\nconst units = obs.imperial || {};\nconst temp = Number.isFinite(Number(units.temp)) ? Math.round(Number(units.temp)) : null;\nconst wind = Number.isFinite(Number(units.windSpeed)) ? Math.round(Number(units.windSpeed)) : null;\nconst humidity = Number.isFinite(Number(obs.humidity)) ? Math.round(Number(obs.humidity)) : null;\nconst locationLabel = obs.neighborhood || label || stationId;\nconst phrases = [];\nif (temp != null) phrases.push('It is '+temp+' degrees');\nif (humidity != null) phrases.push('humidity is '+humidity+' percent');\nif (wind != null) phrases.push('wind is '+wind+' miles per hour');\nreturn JSON.stringify({schema:'jarvis.weather_briefing.v1',outcome:'ok',side_effect:'none',durable_memory_write:false,location_echo:location,source:{provider:'weather_underground_twc',host:'api.weather.com',products:['v2-pws-observations-current']},currents:{station_id:obs.stationID||obs.stationId||stationId,location:locationLabel,temp_f:temp,humidity_percent:humidity,wind_mph:wind,wind_direction:obs.winddir||null,observed_at:obs.obsTimeLocal||obs.obsTimeUtc||null},forecast:null,alerts:[],spoken:phrases.length ? locationLabel+': '+phrases.join(', ')+'.' : 'Current conditions are available from '+locationLabel+'.'});",
+          "specifyInputSchema": true,
+          "jsonSchemaExample": "{\n  \"location\": \"\"\n}"
+        },
+        "id": "pa_17",
+        "name": "Weather Underground Current Conditions",
+        "type": "@n8n/n8n-nodes-langchain.toolCode",
+        "typeVersion": 1.2,
+        "position": [
+          848,
+          464
+        ]
+      },
+      {
+        "parameters": {
+          "description": "Read-only five-day Weather Underground / The Weather Company forecast. Input may be a ZIP or postal key; if omitted, uses owner-approved ZIP 32444. Returns only the entitled daily five-day forecast. It never returns alerts, never writes memory, and never performs actions.",
+          "jsCode": "const DEFAULT_LOCATION = '32444:US';\nconst apiKey = String(($env && $env.TWC_WEATHER_API_KEY) || '');\nif (!apiKey) return JSON.stringify({schema:'jarvis.weather_briefing.v1',outcome:'error',error:{code:'MISSING_TWC_KEY'},durable_memory_write:false});\nconst raw = query && typeof query === 'object' ? String(query.location || '').trim() : String(query || '').trim();\nlet postalKey = raw || DEFAULT_LOCATION;\nif (/^\\d{5}$/.test(postalKey)) postalKey += ':US';\nconst get = (url, qs) => helpers.httpRequest({method:'GET',url,qs,json:true});\nconst point = await get('https://api.weather.com/v3/location/point',{postalKey,language:'en-US',format:'json',apiKey});\nconst location = (point && point.location) || {};\nif (location.latitude == null || location.longitude == null) return JSON.stringify({schema:'jarvis.weather_briefing.v1',outcome:'error',error:{code:'WEATHER_LOCATION_RESOLVE_FAILED'},location_echo:postalKey,durable_memory_write:false});\nconst geocode = String(location.latitude)+','+String(location.longitude);\nconst forecast = await get('https://api.weather.com/v3/wx/forecast/daily/5day',{geocode,units:'e',language:'en-US',format:'json',apiKey});\nconst dayNames = Array.isArray(forecast?.dayOfWeek) ? forecast.dayOfWeek : [];\nconst narratives = Array.isArray(forecast?.narrative) ? forecast.narrative : [];\nconst highs = Array.isArray(forecast?.temperatureMax) ? forecast.temperatureMax : [];\nconst lows = Array.isArray(forecast?.temperatureMin) ? forecast.temperatureMin : [];\nconst periods = dayNames.slice(0,5).map((day,index) => ({day:String(day),summary:String(narratives[index] || '').slice(0,280) || null,high_f:Number.isFinite(Number(highs[index])) ? Math.round(Number(highs[index])) : null,low_f:Number.isFinite(Number(lows[index])) ? Math.round(Number(lows[index])) : null}));\nif (!periods.length) return JSON.stringify({schema:'jarvis.weather_briefing.v1',outcome:'error',error:{code:'WEATHER_FORECAST_EMPTY'},location_echo:postalKey,durable_memory_write:false});\nconst first = periods[0];\nconst firstPhrase = [first.day, first.high_f != null ? 'high near '+first.high_f+' degrees' : null, first.low_f != null ? 'low near '+first.low_f+' degrees' : null, first.summary].filter(Boolean).join(', ');\nreturn JSON.stringify({schema:'jarvis.weather_briefing.v1',outcome:'ok',side_effect:'none',durable_memory_write:false,location_echo:postalKey,source:{provider:'weather_underground_twc',host:'api.weather.com',products:['v3-wx-forecast-daily-5day']},currents:null,forecast:{periods},alerts:[],spoken:firstPhrase ? 'For '+(location.displayName || location.city || postalKey)+', '+firstPhrase+'.' : 'Five-day forecast is available.'});",
+          "specifyInputSchema": true,
+          "jsonSchemaExample": "{\n  \"location\": \"\"\n}"
+        },
+        "id": "pa_18",
+        "name": "Weather Underground Five-Day Forecast",
+        "type": "@n8n/n8n-nodes-langchain.toolCode",
+        "typeVersion": 1.2,
+        "position": [
+          1040,
+          464
+        ]
+      },
+      {
+        "parameters": {
+          "description": "Read-only primary Google Calendar lookup. Use only for schedule, availability, or conflict questions. Return concise event facts from the bounded requested time window. Never create, update, delete, or move events; never write memory.",
+          "workflowId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "pPRdrWBRJCIhga7g"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "time_min": "={{ $fromAI('time_min', 'ISO-8601 start of the requested calendar window', 'string') }}",
+              "time_max": "={{ $fromAI('time_max', 'ISO-8601 end of the requested calendar window', 'string') }}",
+              "max_results": "={{ $fromAI('max_results', 'Maximum events 1 through 10', 'number', 5) }}"
+            },
+            "schema": [
+              {
+                "id": "time_min",
+                "displayName": "time_min",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "time_max",
+                "displayName": "time_max",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "max_results",
+                "displayName": "max_results",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": true
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          }
+        },
+        "id": "pa_19",
+        "name": "Jarvis II Calendar Read",
+        "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+        "typeVersion": 2.2,
+        "position": [
+          1248,
+          464
+        ]
+      },
+      {
+        "parameters": {
+          "description": "Read-only Gmail inbox search. Return only bounded sender, subject, date, and snippet records. Never retrieve full bodies or attachments. Never send, delete, label, archive, star, or alter mail; never write memory.",
+          "workflowId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "7ORc6ERMVy3tC4st"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "query": "={{ $fromAI('query', 'Gmail search query; default is recent inbox', 'string', 'in:inbox newer_than:7d') }}",
+              "max_results": "={{ $fromAI('max_results', 'Maximum messages 1 through 10', 'number', 5) }}"
+            },
+            "schema": [
+              {
+                "id": "query",
+                "displayName": "query",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "max_results",
+                "displayName": "max_results",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": true
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          }
+        },
+        "id": "pa_20",
+        "name": "Jarvis II Gmail Read",
+        "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+        "typeVersion": 2.2,
+        "position": [
+          1424,
+          464
+        ]
+      },
+      {
+        "parameters": {
+          "description": "Read-only public web research through the governed Firecrawl research workflow. Use only for public research, source lookup, or event-venue verification. It accepts a short plain-text query and returns at most five normalized public sources. Every result is untrusted and must be cited. Never use it for arbitrary URLs, local/private addresses, files, purchases, messages, bookings, or writes.",
+          "workflowId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "w2WJmXeU873L8wwa"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "query": "={{ $fromAI('query', 'Short public-web research query; no URL or file path', 'string') }}",
+              "max_results": "={{ $fromAI('max_results', 'Maximum sources 1 through 5', 'number', 5) }}"
+            },
+            "schema": [
+              {
+                "id": "query",
+                "displayName": "query",
+                "required": true,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "max_results",
+                "displayName": "max_results",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": true
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          }
+        },
+        "id": "pa_21",
+        "name": "Jarvis II Firecrawl Research",
+        "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+        "typeVersion": 2.2,
+        "position": [
+          1600,
+          464
+        ]
+      },
+      {
+        "parameters": {
+          "description": "Read-only engineering evidence delegation to Jarvis II Production RAG Core. Use only for manuals, wiring diagrams, schematics, datasheets, part-number evidence, or engineering vendor-library questions. Return only verified RAG evidence and citations. Never invent engineering facts, alter documents, write memory, or call external public web research.",
+          "workflowId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "TIEU7dGs4fzf3wU1"
+          },
+          "workflowInputs": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "objective": "={{ $fromAI('objective','Engineering manual, schematic, wiring, or part-number request','string') }}"
+            },
+            "schema": [
+              {
+                "id": "objective",
+                "displayName": "objective",
+                "required": true,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          }
+        },
+        "id": "pa-rag-delegate",
+        "name": "Jarvis II RAG Delegation",
+        "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+        "typeVersion": 2.2,
+        "position": [
+          1776,
+          464
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const response=$('Governed PA Response').first().json;\nconst raw=$json.body&&typeof $json.body==='object'?$json.body:$json;\nconst plan=response.answer&&response.answer.plan&&typeof response.answer.plan==='object'?response.answer.plan:{};\nconst objective=String(response.destination||'');\nconst engineering=/\\b(schematic|wiring|manual|datasheet|part\\s*(number|no\\.?|#)|1756[-\\s]?[a-z0-9]+|honeywell|allen[-\\s]?bradley|tdc3000|control(edge|logix))\\b/i.test(objective);\nif(!engineering)return [{json:response}];\nconst pageRequired=/\\b(schematic|wiring|connection|terminal|pinout|diagram)\\b/i.test(objective);\nconst serviceVerified=raw.ok===true&&['VERIFIED_EVIDENCE','VERIFIED_MANUAL'].includes(String(raw.status||''))&&Boolean(raw.source)&&Boolean(raw.url);\nconst directCitations=serviceVerified?[{source:raw.source,url:raw.url,page_hint:Number(raw.pages?.[0]?.pdf_page)||null,excerpt:String(raw.pages?.[0]?.excerpt||raw.excerpt||'')}]:[];\nconst rawCitations=Array.isArray(raw.citations)?raw.citations:Array.isArray(plan.rag_citations)&&plan.rag_citations.length?plan.rag_citations:directCitations;\nconst citations=rawCitations.map(c=>({source:String(c&&c.source||'').slice(0,240),url:String(c&&c.url||''),page_hint:Number(c&&((c.pdf_page??c.page_hint)))||null,excerpt:String(c&&c.excerpt||'').slice(0,1200)})).filter(c=>c.source&&c.url.startsWith('/api/jarvis-ii/rag-document/')&&(!pageRequired||c.page_hint));\nconst verified=serviceVerified&&citations.length>0;\nconst title=String(raw.source||'').split('/').pop()||'the verified engineering document';\nconst spoken=verified?(pageRequired?'I found verified wiring evidence in '+title+', PDF page '+citations[0].page_hint+'.':'I found the verified manual '+title+'.'):'I could not verify the requested engineering evidence in the library.';\nreturn [{json:{...response,status:verified?'COMPLETED':'NO_VERIFIED_EVIDENCE',spokenText:spoken,citations,answer:{...(response.answer||{}),evidence:verified?{provider:'jarvis_ii_generic_rag_core_vnext',citations}:null},auditChain:[...(Array.isArray(response.auditChain)?response.auditChain:[]),{stage:'rag_evidence',status:verified?'verified_service_completed':'missing_or_unverified'}]}}];"
+        },
+        "id": "pa-rag-evidence-assembly",
+        "name": "Assemble Verified RAG Evidence",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2032,
+          -240
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "pa-rag-evidence-requested-condition",
+                "leftValue": "={{ ($json.requestedTools || []).includes('rag_core') ? 'RAG' : 'NO_RAG' }}",
+                "rightValue": "RAG",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "caseSensitive": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "pa-rag-evidence-requested",
+        "name": "RAG Evidence Requested?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          1536,
+          -32
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://host.docker.internal:5014/resolve",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Accept",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ query: $('Governed PA Response').first().json.destination }) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 60000
+          }
+        },
+        "id": "pa-rag-evidence-retrieve",
+        "name": "Retrieve Verified RAG Evidence",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1728,
+          -240
+        ]
+      },
+      {
+        "id": "pa_calendar_if",
+        "name": "Calendar Tool Requested?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          1728,
+          176
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "calendar-read-requested",
+                "leftValue": "={{ ($json.requestedTools || []).includes('calendar_read') ? 'CALENDAR' : 'NO_CALENDAR' }}",
+                "rightValue": "CALENDAR",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "caseSensitive": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "pa_calendar_window",
+        "name": "Prepare Calendar Window",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1968,
+          80
+        ],
+        "parameters": {
+          "jsCode": "const base=$json; const objective=String(base.destination||''); const month=objective.match(/\\b(january|february|march|april|may|june|july|august|september|october|november|december)\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s*(\\d{4}))?/i); let start=new Date(); if(month){const names=['january','february','march','april','may','june','july','august','september','october','november','december']; const year=Number(month[3]||start.getFullYear()); start=new Date(Date.UTC(year,names.indexOf(month[1].toLowerCase()),Number(month[2]),0,0,0));} else {start=new Date(Date.UTC(start.getUTCFullYear(),start.getUTCMonth(),start.getUTCDate(),0,0,0));} const end=new Date(start.getTime()+24*60*60*1000); return [{json:{...base,time_min:start.toISOString(),time_max:end.toISOString(),max_results:10}}];"
+        }
+      },
+      {
+        "id": "pa_calendar_read",
+        "name": "Retrieve Calendar Evidence",
+        "type": "n8n-nodes-base.executeWorkflow",
+        "typeVersion": 1,
+        "position": [
+          2208,
+          80
+        ],
+        "parameters": {
+          "operation": "call_workflow",
+          "source": "database",
+          "workflowId": "pPRdrWBRJCIhga7g",
+          "mode": "each",
+          "options": {}
+        }
+      },
+      {
+        "id": "pa_calendar_merge",
+        "name": "Merge Calendar Evidence",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2448,
+          80
+        ],
+        "parameters": {
+          "jsCode": "const base=$('Prepare Calendar Window').first().json; const calendar=$json||{}; const events=Array.isArray(calendar.events)?calendar.events:[]; const calendarSpeech=String(calendar.spoken||'I could not verify your calendar for that window.'); const trip=Array.isArray(base.requestedTools)&&base.requestedTools.some(t=>t==='maps'||t==='lodging_poi'); return [{json:{...base,status:trip?base.status:'COMPLETED',spokenText:trip?base.spokenText:calendarSpeech,calendar_evidence:{outcome:calendar.outcome||'unavailable',window:calendar.window||null,event_count:events.length,events,spoken:calendarSpeech},answer:{...(base.answer||{}),calendar:{outcome:calendar.outcome||'unavailable',event_count:events.length}},citations:[...(Array.isArray(base.citations)?base.citations:[]),{title:'Google Calendar read-only evidence',url:'https://calendar.google.com/',source_host:'Google Calendar'}],auditChain:[...(Array.isArray(base.auditChain)?base.auditChain:[]),{stage:'calendar_read',status:calendar.outcome||'unavailable',event_count:events.length}]}}];"
+        }
+      },
+      {
+        "id": "pa_destination_needed",
+        "name": "Destination Evidence Required?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          2688,
+          48
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "destination-needed",
+                "leftValue": "={{ (($json.requestedTools || []).some((tool) => tool === 'maps' || tool === 'lodging_poi') && String($json.destinationQuery || '').trim()) ? 'DESTINATION' : 'NO_DESTINATION' }}",
+                "rightValue": "DESTINATION",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "caseSensitive": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "pa_destination_research_needed",
+        "name": "Public Destination Research Required?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          2928,
+          48
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "public-destination-research",
+                "leftValue": "={{ $json.destinationResearchRequired ? 'RESEARCH' : 'DIRECT' }}",
+                "rightValue": "RESEARCH",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "caseSensitive": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "pa_destination_direct",
+        "name": "Resolve Named Destination",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          2928,
+          -16
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "http://host.docker.internal:8790/api/jarvis-ii/pa-travel",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "={{ 'Bearer ' + $env.GPT_BIGGY_PROPOSE_TOKEN }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({destination:$json.destinationQuery,include_lodging:false}) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 30000
+          }
+        }
+      },
+      {
+        "id": "pa_destination_direct_ok",
+        "name": "Named Destination Resolved?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          3168,
+          -16
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "place-resolved",
+                "leftValue": "={{ ($json.body && $json.body.ok === true && $json.body.destination && $json.body.destination.label) ? 'RESOLVED' : 'NOT_RESOLVED' }}",
+                "rightValue": "RESOLVED",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "caseSensitive": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        }
+      },
+      {
+        "id": "pa_destination_direct_assemble",
+        "name": "Assemble Named Destination",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3408,
+          -112
+        ],
+        "parameters": {
+          "jsCode": "const base=$('Public Destination Research Required?').first().json; const evidence=$json.body||{}; const place=evidence.destination||{}; const ok=evidence.ok===true&&typeof place.label==='string'&&place.label.trim(); return [{json:{...base,status:ok?'DESTINATION_VERIFIED':'NO_VERIFIED_DESTINATION',destination:ok?place.label:'',destinationEvidence:ok?{provider:'mapbox_geocoding_v6',query:evidence.query,place}:null,citations:ok?[...(Array.isArray(base.citations)?base.citations:[]),{title:'Mapbox verified destination: '+place.label,url:'https://www.mapbox.com/',source_host:'Mapbox'}]:base.citations,auditChain:[...(Array.isArray(base.auditChain)?base.auditChain:[]),{stage:'destination_evidence',status:ok?'direct_mapbox_verified':'not_found',source:'Mapbox Geocoding v6'}]}}];"
+        }
+      },
+      {
+        "id": "pa_destination_research_build",
+        "name": "Build Destination Research",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3408,
+          96
+        ],
+        "parameters": {
+          "jsCode": "const base=$('Merge Calendar Evidence').first().json;\nconst objective=String($('Validate PA Request').first().json.objective||'').replace(/\\s+/g,' ').trim();\nconst date=objective.match(/\\b(january|february|march|april|may|june|july|august|september|october|november|december)\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s*(\\d{4}))?/i);\nconst teams=objective.match(/\\b([A-Z][A-Za-z-]{1,40})\\s+(?:vs\\.?|versus)\\s+([A-Z][A-Za-z-]{1,40})\\b/);\nconst dateText=date ? date[1]+' '+date[2]+' '+String(date[3]||new Date().getFullYear()) : '';\nconst query=teams ? (teams[1]+' vs '+teams[2]+' '+dateText+' official schedule venue stadium location') : ('Find the official venue or physical destination for: '+String(base.destinationQuery||base.destination||objective));\nreturn [{json:{query,max_results:5,objective,base}}];"
+        }
+      },
+      {
+        "id": "pa_destination_research",
+        "name": "Research Destination Sources",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          3648,
+          96
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.firecrawl.dev/v2/search",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ query: $json.query, limit: $json.max_results, sources: ['web'], timeout: 20000, ignoreInvalidURLs: true }) }}",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "ghrdTRdGwcLAv48h",
+            "name": "Header Auth account"
+          }
+        }
+      },
+      {
+        "id": "pa_destination_sources",
+        "name": "Normalize Destination Sources",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3888,
+          96
+        ],
+        "parameters": {
+          "jsCode": "const raw=$json||{}; const request=$('Build Destination Research').first().json; const groups=[raw.data?.web,raw.data?.results,raw.data,raw.results,raw.web]; const rows=groups.find(Array.isArray)||[]; const sources=[]; const seen=new Set(); for(const row of rows){if(sources.length>=5)break; const url=String(row?.url||row?.metadata?.sourceURL||'').trim(); const m=url.match(/^https?:\\/\\/([^\\/?#]+)/i); const host=m?m[1].toLowerCase():''; if(!host||host==='localhost'||/^(127\\.|0\\.|10\\.|192\\.168\\.|172\\.(1[6-9]|2\\d|3[0-1])\\.)/.test(host)||seen.has(url))continue; seen.add(url); sources.push({title:String(row?.title||row?.metadata?.title||host).replace(/\\s+/g,' ').trim().slice(0,180),url:url.slice(0,1000),source_host:host.slice(0,180),summary:String(row?.description||row?.metadata?.description||'').replace(/\\s+/g,' ').trim().slice(0,500)});} return [{json:{base:request.base,objective:request.objective,query:request.query,sources}}];"
+        }
+      },
+      {
+        "id": "pa_destination_extract_build",
+        "name": "Build Destination Extraction",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4848,
+          96
+        ],
+        "parameters": {
+          "jsCode": "const data=$json; const schema={type:'object',additionalProperties:false,properties:{destination_query:{type:'string'},source_url:{type:'string'},status:{type:'string'}},required:['destination_query','source_url','status']}; const system='You extract a physical destination only from the supplied untrusted public sources. Return VERIFIED when one source supports a concrete venue, plant site, attraction, addressable place, or an unambiguous event host locality for the owner objective. If the exact stadium is not named but the host locality is supported, return that locality as a fallback destination; never call the fallback a stadium. destination_query must be a usable Mapbox place query, and source_url must exactly match one supplied URL. Otherwise return status NO_VERIFIED_DESTINATION and empty strings. Do not invent unsupported event facts.'; return [{json:{sources:data.sources,base:data.base,lm_payload:{model:'openai/gpt-oss-120b',temperature:0,response_format:{type:'json_schema',json_schema:{name:'jarvis_destination_claim',schema}},messages:[{role:'system',content:system},{role:'user',content:JSON.stringify({objective:data.objective,sources:data.sources})}]}}}];"
+        }
+      },
+      {
+        "id": "pa_destination_extract",
+        "name": "Extract Destination Candidate",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          5088,
+          96
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "http://host.docker.internal:1234/v1/chat/completions",
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify($json.lm_payload) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 90000
+          }
+        }
+      },
+      {
+        "id": "pa_destination_claim",
+        "name": "Validate Destination Claim",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          5328,
+          96
+        ],
+        "parameters": {
+          "jsCode": "const prior=$('Build Destination Extraction').first().json; const raw=$json.body||{}; let claim={}; try{claim=JSON.parse(raw.choices?.[0]?.message?.content||'{}')}catch(e){} const query=String(claim.destination_query||'').replace(/\\s+/g,' ').trim(); const sourceUrl=String(claim.source_url||'').trim(); const source=(prior.sources||[]).find(s=>s.url===sourceUrl); const status=String(claim.status||'').toUpperCase(); const valid=status==='VERIFIED'&&query.length>=3&&query.length<=240&&Boolean(source); return [{json:{base:prior.base,claim:valid?{query,source}:null}}];"
+        }
+      },
+      {
+        "id": "pa_destination_research_resolve",
+        "name": "Resolve Researched Destination",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          5568,
+          96
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "http://host.docker.internal:8790/api/jarvis-ii/pa-travel",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "={{ 'Bearer ' + $env.GPT_BIGGY_PROPOSE_TOKEN }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({destination:$('Validate Destination Claim').first().json.claim?.query || '',include_lodging:false}) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 30000
+          }
+        }
+      },
+      {
+        "id": "pa_destination_research_assemble",
+        "name": "Assemble Researched Destination",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          5808,
+          96
+        ],
+        "parameters": {
+          "jsCode": "const claim=$('Validate Destination Claim').first().json.claim; const evidence=$json.body||{}; const base=$('Validate Destination Claim').first().json.base; const place=evidence.destination||{}; const ok=Boolean(claim&&evidence.ok===true&&typeof place.label==='string'&&place.label.trim()); const citation=ok?{title:'Destination source: '+claim.source.title,url:claim.source.url,source_host:claim.source.source_host}:null; return [{json:{...base,status:ok?'DESTINATION_VERIFIED':'NO_VERIFIED_DESTINATION',destination:ok?place.label:'',spokenText:ok?base.spokenText:'I could not verify that destination well enough to plan a route. Please give me another name or a little more detail.',destinationEvidence:ok?{provider:'firecrawl_source_plus_mapbox',query:claim.query,place,source:claim.source}:null,citations:ok?[...(Array.isArray(base.citations)?base.citations:[]),citation,{title:'Mapbox verified destination: '+place.label,url:'https://www.mapbox.com/',source_host:'Mapbox'}]:base.citations,auditChain:[...(Array.isArray(base.auditChain)?base.auditChain:[]),{stage:'destination_evidence',status:ok?'public_source_and_mapbox_verified':'not_found',source:ok?claim.source.source_host:'Firecrawl/Mapbox'}]}}];"
+        }
+      },
+      {
+        "id": "pa_destination_official_build",
+        "name": "Build Official Destination Search",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4128,
+          -16
+        ],
+        "parameters": {
+          "jsCode": "const data=$json; const bad=/(facebook|instagram|tiktok|x\\.com|twitter|reddit|seatgeek|stubhub|ticketmaster|expedia|booking)/i; const official=/(athletic|athletics|tigers|university|college|\\.edu$|\\.gov$|official)/i; const candidates=(data.sources||[]).filter(s=>s&&s.source_host&&!bad.test(s.source_host)).sort((a,b)=>(official.test(b.source_host)?1:0)-(official.test(a.source_host)?1:0)); const host=candidates.find(s=>official.test(s.source_host))?.source_host||''; const query=host ? ('site:'+host+' '+String(data.query||'')) : String(data.query||''); return [{json:{...data,official_host:host,official_query:query}}];"
+        }
+      },
+      {
+        "id": "pa_destination_official_research",
+        "name": "Research Official Destination Sources",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          4368,
+          -16
+        ],
+        "parameters": {
+          "method": "POST",
+          "url": "https://api.firecrawl.dev/v2/search",
+          "authentication": "genericCredentialType",
+          "genericAuthType": "httpHeaderAuth",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              }
+            ]
+          },
+          "sendBody": true,
+          "contentType": "json",
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({ query: $json.official_query, limit: 10, sources: ['web'], timeout: 20000, ignoreInvalidURLs: true }) }}",
+          "options": {
+            "timeout": 30000
+          }
+        },
+        "credentials": {
+          "httpHeaderAuth": {
+            "id": "ghrdTRdGwcLAv48h",
+            "name": "Header Auth account"
+          }
+        }
+      },
+      {
+        "id": "pa_destination_official_combine",
+        "name": "Combine Authoritative Destination Sources",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          4608,
+          -16
+        ],
+        "parameters": {
+          "jsCode": "const raw=$json||{}; const base=$('Build Official Destination Search').first().json; const groups=[raw.data?.web,raw.data?.results,raw.data,raw.results,raw.web]; const rows=groups.find(Array.isArray)||[]; const bad=/(facebook|instagram|tiktok|x\\.com|twitter|reddit|seatgeek|stubhub|ticketmaster|expedia|booking)/i; const official=/(athletic|athletics|tigers|university|college|\\.edu$|\\.gov$|official)/i; const all=[...(base.sources||[])]; const seen=new Set(all.map(s=>s.url)); for(const row of rows){const url=String(row?.url||row?.metadata?.sourceURL||'').trim(); const m=url.match(/^https?:\\/\\/([^\\/?#]+)/i); const host=m?m[1].toLowerCase():''; if(!host||bad.test(host)||seen.has(url))continue; seen.add(url); all.push({title:String(row?.title||row?.metadata?.title||host).replace(/\\s+/g,' ').trim().slice(0,180),url:url.slice(0,1000),source_host:host.slice(0,180),summary:String(row?.description||row?.metadata?.description||'').replace(/\\s+/g,' ').trim().slice(0,600)});} const score=s=>(official.test(s.source_host)?100:0)+(/schedule|location|stadium|venue|football/i.test(s.title+' '+s.summary)?20:0); all.sort((a,b)=>score(b)-score(a)); return [{json:{base:base.base,objective:base.objective,sources:all.slice(0,8)}}];"
+        }
+      }
+    ],
+    "connections": {
+      "Jarvis II PA Ingress": {
+        "main": [
+          [
+            {
+              "node": "Validate PA Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "PA Controlled Test Ingress": {
+        "main": [
+          [
+            {
+              "node": "Controlled Travel Fixture",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Controlled Travel Fixture": {
+        "main": [
+          [
+            {
+              "node": "Validate PA Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Validate PA Request": {
+        "main": [
+          [
+            {
+              "node": "Request Valid?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Request Valid?": {
+        "main": [
+          [
+            {
+              "node": "Load Durable Context",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Invalid PA Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Load Durable Context": {
+        "main": [
+          [
+            {
+              "node": "Build 120B Plan Request",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Jarvis II Decision Agent": {
+        "main": [
+          [
+            {
+              "node": "Normalize Agent Decision",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "LM Studio 120B Decision Model": {
+        "ai_languageModel": [
+          [
+            {
+              "node": "Jarvis II Decision Agent",
+              "type": "ai_languageModel",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Invalid PA Request": {
+        "main": [
+          [
+            {
+              "node": "Return PA Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Local 120B Plan": {
+        "main": [
+          [
+            {
+              "node": "Governed PA Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Governed PA Response": {
+        "main": [
+          [
+            {
+              "node": "RAG Evidence Requested?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Travel Tool Requested?": {
+        "main": [
+          [
+            {
+              "node": "Retrieve Travel Evidence",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Return PA Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Retrieve Travel Evidence": {
+        "main": [
+          [
+            {
+              "node": "Render Travel Evidence",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Render Travel Evidence": {
+        "main": [
+          [
+            {
+              "node": "Return PA Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Weather Underground Current Conditions": {
+        "ai_tool": [
+          [
+            {
+              "node": "Jarvis II Decision Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Weather Underground Five-Day Forecast": {
+        "ai_tool": [
+          [
+            {
+              "node": "Jarvis II Decision Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Jarvis II Calendar Read": {
+        "ai_tool": [
+          [
+            {
+              "node": "Jarvis II Decision Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Jarvis II Gmail Read": {
+        "ai_tool": [
+          [
+            {
+              "node": "Jarvis II Decision Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Jarvis II Firecrawl Research": {
+        "ai_tool": [
+          [
+            {
+              "node": "Jarvis II Decision Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Jarvis II RAG Delegation": {
+        "ai_tool": [
+          [
+            {
+              "node": "Jarvis II Decision Agent",
+              "type": "ai_tool",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Assemble Verified RAG Evidence": {
+        "main": [
+          [
+            {
+              "node": "Calendar Tool Requested?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "RAG Evidence Requested?": {
+        "main": [
+          [
+            {
+              "node": "Retrieve Verified RAG Evidence",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Assemble Verified RAG Evidence",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Retrieve Verified RAG Evidence": {
+        "main": [
+          [
+            {
+              "node": "Assemble Verified RAG Evidence",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build 120B Plan Request": {
+        "main": [
+          [
+            {
+              "node": "Local 120B Plan",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Calendar Tool Requested?": {
+        "main": [
+          [
+            {
+              "node": "Prepare Calendar Window",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Destination Evidence Required?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare Calendar Window": {
+        "main": [
+          [
+            {
+              "node": "Retrieve Calendar Evidence",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Retrieve Calendar Evidence": {
+        "main": [
+          [
+            {
+              "node": "Merge Calendar Evidence",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Merge Calendar Evidence": {
+        "main": [
+          [
+            {
+              "node": "Destination Evidence Required?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Destination Evidence Required?": {
+        "main": [
+          [
+            {
+              "node": "Public Destination Research Required?",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Travel Tool Requested?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Public Destination Research Required?": {
+        "main": [
+          [
+            {
+              "node": "Build Destination Research",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Resolve Named Destination",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Resolve Named Destination": {
+        "main": [
+          [
+            {
+              "node": "Named Destination Resolved?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Named Destination Resolved?": {
+        "main": [
+          [
+            {
+              "node": "Assemble Named Destination",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Build Destination Research",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Assemble Named Destination": {
+        "main": [
+          [
+            {
+              "node": "Travel Tool Requested?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Destination Research": {
+        "main": [
+          [
+            {
+              "node": "Research Destination Sources",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Research Destination Sources": {
+        "main": [
+          [
+            {
+              "node": "Normalize Destination Sources",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Normalize Destination Sources": {
+        "main": [
+          [
+            {
+              "node": "Build Official Destination Search",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Destination Extraction": {
+        "main": [
+          [
+            {
+              "node": "Extract Destination Candidate",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract Destination Candidate": {
+        "main": [
+          [
+            {
+              "node": "Validate Destination Claim",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Validate Destination Claim": {
+        "main": [
+          [
+            {
+              "node": "Resolve Researched Destination",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Resolve Researched Destination": {
+        "main": [
+          [
+            {
+              "node": "Assemble Researched Destination",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Assemble Researched Destination": {
+        "main": [
+          [
+            {
+              "node": "Travel Tool Requested?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Official Destination Search": {
+        "main": [
+          [
+            {
+              "node": "Research Official Destination Sources",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Research Official Destination Sources": {
+        "main": [
+          [
+            {
+              "node": "Combine Authoritative Destination Sources",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Combine Authoritative Destination Sources": {
+        "main": [
+          [
+            {
+              "node": "Build Destination Extraction",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "settings": {
+      "executionOrder": "v1"
+    },
+    "staticData": null,
+    "meta": null,
+    "pinData": {},
+    "versionId": "1c60f451588a8aead29d0dc0ced80483    ",
+    "triggerCount": 1,
+    "tags": [],
+    "shared": [
+      {
+        "createdAt": "2026-08-19T11:02:29.540Z",
+        "updatedAt": "2026-08-19T11:02:29.540Z",
+        "role": "workflow:owner",
+        "workflowId": "cD6uUqpzXQl3n3iU",
+        "projectId": "quysTLhPYIkOk9pH",
+        "project": {
+          "createdAt": "2026-08-07T13:32:29.312Z",
+          "updatedAt": "2026-08-07T13:45:31.375Z",
+          "id": "quysTLhPYIkOk9pH",
+          "name": "Rick Messer <flabouy@gmail.com>",
+          "type": "personal",
+          "icon": null,
+          "description": null
+        }
+      }
+    ]
+  }
+]

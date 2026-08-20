@@ -1870,7 +1870,7 @@ async function send(){
     }
     if(typeof updateSendBtn==='function') updateSendBtn();
 
-    const _ajApplyFinalVisual = (mvm, lvm, rvm)=>{
+    const _ajApplyFinalVisual = (mvm, lvm, rvm, tpm)=>{
       if(_ajCorr) window.__askJarvisActiveCorrelation = _ajCorr;
       const _render=()=>{
         try{
@@ -1888,6 +1888,8 @@ async function send(){
             }
             if(rvm&&typeof rvm==='object'&&typeof window.__biggyRenderRecommendationViewModel==='function'){
               recInfo = window.__biggyRenderRecommendationViewModel(rvm) || recInfo;
+            }else if(tpm&&typeof tpm==='object'&&typeof window.__biggyRenderTripPlanViewModel==='function'){
+              recInfo = window.__biggyRenderTripPlanViewModel(tpm) || recInfo;
             }else if(lvm&&typeof lvm==='object'&&typeof window.__biggyRenderLodgingViewModel==='function'){
               recInfo = window.__biggyRenderLodgingViewModel(lvm) || recInfo;
             }
@@ -1955,7 +1957,7 @@ async function send(){
           if(finalMsg){
             // Always hand off from live S.messages — pending→final refresh can
             // populate map/lodging after the first poll snapshot.
-            _ajApplyFinalVisual(finalMsg.map_view_model, finalMsg.lodging_view_model, finalMsg.recommendation_view_model);
+            _ajApplyFinalVisual(finalMsg.map_view_model, finalMsg.lodging_view_model, finalMsg.recommendation_view_model, finalMsg.trip_plan_view_model);
             // Server queues James Michael once — skip client sink (no duplicate audio).
           }else if(typeof window.__biggyHandoffTravelVisualsFromMessages==='function'){
             try{ window.__biggyHandoffTravelVisualsFromMessages(); }catch(_){ }
@@ -2000,13 +2002,14 @@ async function send(){
       if(typeof loadSession==='function'){
         await loadSession(activeSid,{force:true,externalRefreshReason:'ask-jarvis-hard-bind'});
         // Prove same-turn map_view_model survives loadSession / message-shape drops.
-        if(((startData.map_view_model&&typeof startData.map_view_model==='object')||(startData.lodging_view_model&&typeof startData.lodging_view_model==='object')||(startData.recommendation_view_model&&typeof startData.recommendation_view_model==='object'))&&Array.isArray(S.messages)){
+        if(((startData.map_view_model&&typeof startData.map_view_model==='object')||(startData.lodging_view_model&&typeof startData.lodging_view_model==='object')||(startData.recommendation_view_model&&typeof startData.recommendation_view_model==='object')||(startData.trip_plan_view_model&&typeof startData.trip_plan_view_model==='object'))&&Array.isArray(S.messages)){
           for(let i=S.messages.length-1;i>=0;i--){
             const m=S.messages[i];
             if(m&&m.role==='assistant'){
               if(startData.map_view_model&&!m.map_view_model) m.map_view_model=startData.map_view_model;
               if(startData.lodging_view_model&&!m.lodging_view_model) m.lodging_view_model=startData.lodging_view_model;
               if(startData.recommendation_view_model&&!m.recommendation_view_model) m.recommendation_view_model=startData.recommendation_view_model;
+              if(startData.trip_plan_view_model&&!m.trip_plan_view_model) m.trip_plan_view_model=startData.trip_plan_view_model;
               if(startData.correlation_id&&!m._correlation_id) m._correlation_id=String(startData.correlation_id);
               break;
             }
@@ -2024,6 +2027,7 @@ async function send(){
         if(startData.map_view_model&&typeof startData.map_view_model==='object') asst.map_view_model=startData.map_view_model;
         if(startData.lodging_view_model&&typeof startData.lodging_view_model==='object') asst.lodging_view_model=startData.lodging_view_model;
         if(startData.recommendation_view_model&&typeof startData.recommendation_view_model==='object') asst.recommendation_view_model=startData.recommendation_view_model;
+        if(startData.trip_plan_view_model&&typeof startData.trip_plan_view_model==='object') asst.trip_plan_view_model=startData.trip_plan_view_model;
         if(Array.isArray(S.messages)) S.messages.push(asst);
         if(typeof renderMessages==='function') renderMessages();
       }
@@ -2031,7 +2035,8 @@ async function send(){
       const _mvm=startData.map_view_model;
       const _lvm=startData.lodging_view_model;
       const _rvm=startData.recommendation_view_model;
-      _ajApplyFinalVisual(_mvm, _lvm, _rvm);
+      const _tpm=startData.trip_plan_view_model;
+      _ajApplyFinalVisual(_mvm, _lvm, _rvm, _tpm);
       const _ajTotalMs = Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - _ajt0);
       try{
         const clientTiming = {

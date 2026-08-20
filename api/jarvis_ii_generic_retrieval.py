@@ -21,11 +21,53 @@ _CATALOG_TERM = re.compile(
     r"(?<![A-Za-z0-9])[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+(?![A-Za-z0-9])"
 )
 _WIRING_TERMS = re.compile(r"(?:wiring|schematic|connection|terminal|pinout|diagram)", re.I)
+_MANUAL_REQUEST_TERMS = re.compile(
+    r"(?:manual|installation\s+(?:manual|guide)|user\s+guide|hardware\s+guide|"
+    r"specification(?:s)?|documentation)",
+    re.I,
+)
 _DIAGRAM_EVIDENCE = re.compile(
     r"(?:wiring\s*diagrams?|schematic|connection\s*diagram|"
     r"terminal\s*assignment|terminal\s*diagram|diagram)",
     re.I,
 )
+_QUERY_WORD = re.compile(r"[A-Za-z]{4,}")
+_VENDOR_QUERY_WORD = re.compile(r"[A-Za-z]{2,}")
+_MANUAL_QUERY_WORD = re.compile(r"[A-Za-z][A-Za-z0-9]{2,}")
+_MANUAL_QUERY_STOP_WORDS = {
+    "ask", "have", "jarvis", "find", "need", "with", "that", "this", "the", "for", "and",
+    "manual", "guide", "system", "vendor", "data", "folder", "under",
+    "from", "documentation",
+}
+
+
+def _source_vendor_tokens(source: object) -> set[str]:
+    """Return the first vendor-folder words below ``Vendor Data``.
+
+    This is corpus metadata, not a vendor map: the resolver learns the available
+    vendor labels from the candidates returned for the current request.
+    """
+    parts = [part.strip() for part in str(source or "").replace("\\", "/").split("/")]
+    for index, part in enumerate(parts[:-1]):
+        if part.lower() == "vendor data":
+            words = [word.lower() for word in _VENDOR_QUERY_WORD.findall(parts[index + 1])]
+            # Vendor aliases are derived from the current corpus folder label.
+            # For example, a folder named "Allen Bradley" contributes its
+            # generic initialism "ab"; no vendor-name mapping is maintained.
+            tokens = {word for word in words if len(word) >= 4}
+            if len(words) >= 2:
+                tokens.add("".join(word[0] for word in words))
+            return tokens
+    return set()
+
+
+def _query_vendor_tokens(query: object, candidates: Iterable[dict[str, Any]]) -> set[str]:
+    """Find request words that match a vendor label in this candidate set."""
+    request_words = {word.lower() for word in _VENDOR_QUERY_WORD.findall(str(query or ""))}
+    candidate_vendor_words: set[str] = set()
+    for candidate in candidates:
+        candidate_vendor_words.update(_source_vendor_tokens(candidate.get("source")))
+    return request_words & candidate_vendor_words
 
 
 def catalog_terms(query: object) -> list[str]:
@@ -57,8 +99,10 @@ def source_url(source: object) -> str:
     path = str(source or "").replace("\\", "/").lstrip("/")
     if not path:
         return ""
-    route = "doc" if os.path.splitext(path)[1].lower() == ".pdf" else "preview"
-    return f"/api/extensions/smedley-engineering/sidecar/{route}/{quote(path)}"
+    # This endpoint is served by the GUI that produced the answer. It is
+    # intentionally separate from Smedley's production sidecar so a Biggy
+    # citation remains in Biggy's authenticated browser session.
+    return f"/api/jarvis-ii/rag-document/{quote(path)}"
 
 
 def _contains_term(text: object, term: str) -> bool:
@@ -97,6 +141,124 @@ def exact_catalog_candidates(
             candidate["matched_catalog_term"] = term
             candidates.append(candidate)
     return candidates
+
+
+def manual_query_terms(query: object) -> list[str]:
+    """Return generic corpus terms for a named-manual request.
+
+    This derives terms from the current request; it intentionally has no
+    vendor, document-number, or folder mapping.
+    """
+    words = [
+        word
+        for word in _MANUAL_QUERY_WORD.findall(str(query or "").lower())
+        if word not in _MANUAL_QUERY_STOP_WORDS
+    ]
+    return list(dict.fromkeys(words))[:8]
+
+
+def manual_candidates(
+    query: object,
+    *,
+    scroll: Callable[[str], Iterable[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """Collect manual candidates from the corpus using request-derived terms."""
+    grouped: dict[str, dict[str, Any]] = {}
+    for term in manual_query_terms(query):
+        for payload in scroll(term):
+            if not isinstance(payload, dict):
+                continue
+            source = str(payload.get("source") or "").replace("\\", "/")
+            text = str(payload.get("text") or payload.get("snippet") or "")
+            if not source or document_kind(source) != "manual":
+                continue
+            candidate = grouped.setdefault(
+                source,
+                {"source": source, "snippets": [], "matched_terms": set()},
+            )
+            candidate["matched_terms"].add(term)
+            if text:
+                candidate["snippets"].append(text)
+    return list(grouped.values())
+
+
+def _manual_search_roots(library_root: str, query_terms: Iterable[str]) -> list[str]:
+    """Narrow an on-disk fallback using the library's current vendor folders."""
+    vendor_root = os.path.join(library_root, "Vendor Data")
+    terms = {term.lower() for term in query_terms}
+    if not os.path.isdir(vendor_root):
+        return [library_root]
+    roots = [
+        os.path.join(vendor_root, entry)
+        for entry in os.listdir(vendor_root)
+        if os.path.isdir(os.path.join(vendor_root, entry))
+        and terms.intersection(word.lower() for word in _QUERY_WORD.findall(entry))
+    ]
+    return roots or [library_root]
+
+
+def filesystem_manual_candidates(
+    query: object,
+    *,
+    library_root: str,
+    page_reader: Callable[[str], list[str]] | None = None,
+    maximum_candidates: int = 48,
+) -> list[dict[str, Any]]:
+    """Verify likely manual PDFs by current folder metadata and title pages.
+
+    This is a generic recovery path for an incompletely indexed corpus. It
+    narrows from vendor folders derived from the request, then requires both
+    request/path and request/title evidence before returning a document.
+    """
+    terms = manual_query_terms(query)
+    reader = page_reader or _pdf_page_texts
+    candidates: list[dict[str, Any]] = []
+    for root in _manual_search_roots(library_root, terms):
+        for directory, _folders, files in os.walk(root):
+            for name in files:
+                if not name.lower().endswith(".pdf"):
+                    continue
+                path = os.path.join(directory, name)
+                relative = os.path.relpath(path, library_root).replace("\\", "/")
+                path_matches = [term for term in terms if term in relative.lower()]
+                if len(path_matches) < 2:
+                    continue
+                candidates.append({"path": path, "source": relative, "path_matches": path_matches})
+                if len(candidates) >= maximum_candidates:
+                    break
+            if len(candidates) >= maximum_candidates:
+                break
+        if len(candidates) >= maximum_candidates:
+            break
+
+    verified: list[dict[str, Any]] = []
+    for candidate in candidates:
+        try:
+            path = candidate["path"]
+            sidecars = [path + ".ocr.txt", os.path.splitext(path)[0] + ".ocr.txt"]
+            title_text = ""
+            for sidecar in dict.fromkeys(sidecars):
+                if os.path.isfile(sidecar):
+                    with open(sidecar, "r", encoding="utf-8", errors="ignore") as handle:
+                        title_text = handle.read(24_000)
+                    if title_text.strip():
+                        break
+            if not title_text.strip():
+                title_text = " ".join(reader(path)[:3])
+        except Exception:
+            continue
+        title_matches = [term for term in terms if term in title_text.lower()]
+        if len(title_matches) < 2:
+            continue
+        verified.append(
+            {
+                "source": candidate["source"],
+                "matched_terms": sorted(set(candidate["path_matches"] + title_matches)),
+                "evidence_score": len(candidate["path_matches"]) * 100 + len(title_matches) * 100,
+                "excerpt": re.sub(r"\s+", " ", title_text).strip()[:900],
+            }
+        )
+    return verified
 
 
 def _pdf_page_texts(path: str) -> list[str]:
@@ -172,11 +334,18 @@ def resolve_wiring_request(
     if not _WIRING_TERMS.search(str(query or "")) or not terms:
         return {"ok": False, "status": "UNSUPPORTED_REQUEST", "evidence": []}
 
+    candidates = exact_catalog_candidates(query, scroll=scroll)
+    requested_vendor = _query_vendor_tokens(query, candidates)
     verified: list[dict[str, Any]] = []
     inspected: set[str] = set()
-    for candidate in exact_catalog_candidates(query, scroll=scroll):
+    for candidate in candidates:
         source = str(candidate.get("source") or "")
         if document_kind(source) != "manual":
+            continue
+        # When the request explicitly names a vendor that appears in the
+        # current corpus candidates, never let an exact part-number mention in
+        # another vendor's manual win the page-ranking race.
+        if requested_vendor and not (requested_vendor & _source_vendor_tokens(source)):
             continue
         term = str(candidate.get("matched_catalog_term") or "")
         if source in inspected:
@@ -221,4 +390,86 @@ def resolve_wiring_request(
         "query": str(query or "").strip(),
         "catalog_terms": terms,
         "evidence": [],
+    }
+
+
+def resolve_manual_request(
+    query: object,
+    *,
+    scroll: Callable[[str], Iterable[dict[str, Any]]],
+    library_root: str,
+    page_reader: Callable[[str], list[str]] = _pdf_page_texts,
+    maximum_sources: int = 6,
+) -> dict[str, Any]:
+    """Verify a requested manual exists in the current corpus and library.
+
+    A manual lookup verifies the document, not a page-level technical claim.
+    Page, wiring, and schematic answers continue to use ``resolve_wiring_request``.
+    """
+    if not _MANUAL_REQUEST_TERMS.search(str(query or "")):
+        return {"ok": False, "status": "UNSUPPORTED_REQUEST", "evidence": []}
+    terms = manual_query_terms(query)
+    if not terms:
+        return {"ok": False, "status": "NO_VERIFIED_EVIDENCE", "evidence": []}
+
+    candidates = manual_candidates(query, scroll=scroll)
+    requested_vendor = _query_vendor_tokens(query, candidates)
+    verified: list[dict[str, Any]] = []
+    for candidate in candidates:
+        source = str(candidate["source"])
+        if requested_vendor and not (requested_vendor & _source_vendor_tokens(source)):
+            continue
+        path = os.path.join(library_root, source.lstrip("/"))
+        if not os.path.isfile(path):
+            continue
+        matched_terms = sorted(candidate["matched_terms"])
+        snippet = " ".join(str(value) for value in candidate["snippets"])
+        # Corpus retrieval plus an on-disk manual is the evidence threshold for
+        # document discovery. It never represents an index workbook as a manual.
+        if len(matched_terms) < 2:
+            continue
+        score = len(matched_terms) * 100 + sum(
+            10 for term in matched_terms if term.lower() in source.lower()
+        )
+        verified.append(
+            {
+                "source": source,
+                "matched_terms": matched_terms,
+                "evidence_score": score,
+                "excerpt": re.sub(r"\s+", " ", snippet).strip()[:900],
+            }
+        )
+        if len(verified) >= maximum_sources:
+            break
+    # The corpus can be incomplete or contain generic vendor passages. Compare
+    # its candidates with independently verified PDF-title evidence instead of
+    # treating the first corpus hit as authoritative.
+    verified.extend(
+        filesystem_manual_candidates(
+            query,
+            library_root=library_root,
+            page_reader=page_reader,
+            maximum_candidates=maximum_sources * 8,
+        )
+    )
+    if not verified:
+        return {
+            "ok": False,
+            "status": "NO_VERIFIED_EVIDENCE",
+            "query": str(query or "").strip(),
+            "query_terms": terms,
+            "evidence": [],
+        }
+    verified.sort(key=lambda item: int(item["evidence_score"]), reverse=True)
+    best = verified[0]
+    return {
+        "ok": True,
+        "status": "VERIFIED_MANUAL",
+        "query": str(query or "").strip(),
+        "source": best["source"],
+        "url": source_url(best["source"]),
+        "document_kind": "manual",
+        "matched_terms": best["matched_terms"],
+        "excerpt": best["excerpt"],
+        "retrieval": "request_terms_corpus_then_on_disk_manual_verification",
     }

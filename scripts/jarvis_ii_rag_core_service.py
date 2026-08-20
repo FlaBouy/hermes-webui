@@ -23,7 +23,10 @@ if ROOT not in sys.path:
 if RAG_BUILD not in sys.path:
     sys.path.insert(0, RAG_BUILD)
 
-from api.jarvis_ii_generic_retrieval import resolve_wiring_request  # noqa: E402
+from api.jarvis_ii_generic_retrieval import (  # noqa: E402
+    resolve_manual_request,
+    resolve_wiring_request,
+)
 from jarvis_rag_poc import COLLECTION, LIB_ROOT, qd  # noqa: E402
 
 PORT = int(os.environ.get("JARVIS_II_RAG_CORE_PORT", "5014"))
@@ -63,6 +66,13 @@ def resolve(payload: object) -> tuple[int, dict[str, Any]]:
         library_root=LIB_ROOT,
         maximum_sources=6,
     )
+    if result.get("status") == "UNSUPPORTED_REQUEST":
+        result = resolve_manual_request(
+            query,
+            scroll=corpus_scroll,
+            library_root=LIB_ROOT,
+            maximum_sources=6,
+        )
     result["schema"] = "jarvis.ii.rag_core.vnext.v1"
     result["collection"] = COLLECTION
     return HTTPStatus.OK, result

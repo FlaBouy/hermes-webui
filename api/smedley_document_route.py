@@ -159,6 +159,9 @@ _DOCUMENT_REQUEST_RES = (
 # gateway.  The gateway is the sole caller of the local RAG service.
 DEFAULT_RAG_RETRIEVE_URL = "http://127.0.0.1:5680/webhook/jarvis-ii-rag-retrieve"
 RAG_RETRIEVE_URL_ENV = "HERMES_WEBUI_SMEDLEY_RAG_RETRIEVE_URL"
+JARVIS_II_GENERIC_RAG_VNEXT_ENABLED_ENV = "HERMES_WEBUI_GENERIC_RAG_VNEXT_ENABLED"
+JARVIS_II_GENERIC_RAG_VNEXT_URL_ENV = "HERMES_WEBUI_GENERIC_RAG_VNEXT_URL"
+DEFAULT_JARVIS_II_GENERIC_RAG_VNEXT_URL = "http://127.0.0.1:5680/webhook/jarvis-ii-rag-vnext"
 DEFAULT_JARVIS_N8N_BRIEFING_URL = (
     "http://192.168.0.15:5680/webhook/jarvis-pa-biggy-briefing"
 )
@@ -415,6 +418,13 @@ def _coerce_public_origin_candidate(raw: object) -> str:
         return ""
     host = (parts.hostname or "").lower()
     port = parts.port
+    # The public Smedley Tailnet endpoint terminates TLS at the normal HTTPS
+    # port.  ``:8787`` is only the local WebUI listener; preserving it in a
+    # browser-facing citation makes an otherwise-valid document link fail.
+    # Normalize this known public host defensively even if an old launchd
+    # environment still carries the local listener port.
+    if host == "smedley.tail061f03.ts.net":
+        return "https://smedley.tail061f03.ts.net"
     # Never emit loopback / localhost absolute links (break when opened via TD).
     if host in {"127.0.0.1", "localhost", "::1"}:
         return ""
@@ -1257,6 +1267,106 @@ def sanitize_for_spoken_output(text: object) -> str:
 
 def rag_retrieve_url() -> str:
     return (os.environ.get(RAG_RETRIEVE_URL_ENV) or DEFAULT_RAG_RETRIEVE_URL).strip()
+
+
+def jarvis_ii_generic_rag_vnext_enabled() -> bool:
+    """Return whether the independently verified VNext wiring resolver is selected."""
+    return str(os.environ.get(JARVIS_II_GENERIC_RAG_VNEXT_ENABLED_ENV) or "").strip().lower() in {
+        "1", "true", "yes", "on"
+    }
+
+
+def _jarvis_ii_generic_rag_vnext_url() -> str:
+    return (os.environ.get(JARVIS_II_GENERIC_RAG_VNEXT_URL_ENV) or DEFAULT_JARVIS_II_GENERIC_RAG_VNEXT_URL).strip()
+
+
+def _is_generic_vnext_engineering_request(query: object) -> bool:
+    """Return whether the verified VNext engineering-evidence contract applies."""
+    return bool(re.search(
+        r"\b(?:wiring|schematic|connection\s+diagram|terminal\s+diagram|pinout|manual|datasheet|technical[-\s]library|engineering[-\s]library)\b",
+        str(query or ""),
+        re.IGNORECASE,
+    ))
+
+
+def try_jarvis_ii_generic_rag_vnext(query: object, *, public_origin: object = "") -> Optional[dict[str, Any]]:
+    """Call VNext for a verified engineering request, or return ``None`` when disabled.
+
+    Once enabled this path fails closed: malformed or unavailable VNext output
+    never falls through into the legacy index-first resolver.
+    """
+    if not (jarvis_ii_generic_rag_vnext_enabled() and _is_generic_vnext_engineering_request(query)):
+        return None
+    msg = str(query or "").strip()
+    origin = normalize_public_origin(public_origin)
+    token = _load_jarvis_n8n_propose_token()
+    if not token:
+        reply = "The verified engineering-evidence service is not authenticated, so I will not guess."
+        return {"handled": True, "query": msg, "reply": reply, "spoken_reply": reply, "matches": [], "error": "vnext_auth_unavailable", "jarvis_ii_generic_rag_vnext": True}
+
+    correlation_id = f"generic-rag-vnext-{os.urandom(8).hex()}"
+    request = urllib.request.Request(
+        _jarvis_ii_generic_rag_vnext_url(),
+        data=json.dumps({"query": msg, "correlation_id": correlation_id, "caller": "smedley-document-route"}).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Accept": "application/json", "Authorization": f"Bearer {token}"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=65) as response:
+            raw = response.read()
+            http_status = int(getattr(response, "status", 200) or 200)
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Jarvis II Generic RAG VNext call failed: %s", type(exc).__name__)
+        reply = "I could not reach the verified engineering-evidence service, so I will not guess."
+        return {"handled": True, "query": msg, "reply": reply, "spoken_reply": reply, "matches": [], "error": f"vnext_{type(exc).__name__}", "jarvis_ii_generic_rag_vnext": True}
+
+    if not isinstance(payload, dict) or payload.get("schema") != "jarvis.ii.rag_evidence.vnext.v1":
+        reply = "The verified engineering-evidence service returned an invalid response, so I will not guess."
+        return {"handled": True, "query": msg, "reply": reply, "spoken_reply": reply, "matches": [], "error": f"vnext_invalid_contract_{http_status}", "jarvis_ii_generic_rag_vnext": True}
+
+    answer = str(payload.get("answer") or payload.get("spoken_text") or "").strip()
+    if payload.get("status") == "NO_VERIFIED_EVIDENCE":
+        reply = answer or "I could not verify engineering-library evidence for that request."
+        return {"handled": True, "query": msg, "reply": reply, "spoken_reply": reply, "matches": [], "active_document": None, "error": None, "jarvis_ii_generic_rag_vnext": True, "correlation_id": payload.get("correlation_id") or correlation_id, "rag_evidence": None}
+
+    citations = payload.get("citations")
+    citation = citations[0] if isinstance(citations, list) and citations else None
+    if payload.get("status") != "COMPLETED" or not isinstance(citation, dict) or not answer:
+        reply = "I could not verify engineering-library evidence for that request."
+        return {"handled": True, "query": msg, "reply": reply, "spoken_reply": reply, "matches": [], "error": "vnext_unverified_contract", "jarvis_ii_generic_rag_vnext": True}
+
+    # A VNext wrapper may see a loopback Host while serving the local GUI.
+    # Never expose that loopback URL to a user: retain only its route and bind
+    # it to this adapter's configured public origin.
+    citation_url = str(citation.get("url") or "").strip()
+    try:
+        citation_parts = urllib.parse.urlsplit(citation_url)
+        if citation_parts.scheme in {"http", "https"} and not _coerce_public_origin_candidate(citation_url):
+            citation_url = citation_parts.path + (("?" + citation_parts.query) if citation_parts.query else "") + (("#" + citation_parts.fragment) if citation_parts.fragment else "")
+    except Exception:
+        pass
+    link_origin = _coerce_public_origin_candidate(public_origin)
+    if not link_origin:
+        link_origin = origin
+    if citation_url.startswith("/") and link_origin:
+        citation_url = urllib.parse.urljoin(link_origin.rstrip("/") + "/", citation_url.lstrip("/"))
+    source = str(citation.get("source") or "").strip()
+    page = citation.get("pdf_page")
+    is_wiring_page = isinstance(page, int)
+    if not (citation_url and source):
+        reply = "I could not verify a usable engineering-library citation for that request."
+        return {"handled": True, "query": msg, "reply": reply, "spoken_reply": reply, "matches": [], "error": "vnext_incomplete_citation", "jarvis_ii_generic_rag_vnext": True}
+
+    link_label = "Open wiring page" if is_wiring_page else "Open manual"
+    reply = f"{answer}\n\n[{link_label}]({citation_url})"
+    active_document = {
+        "source": source,
+        "url": citation_url,
+        "title": source.rsplit("/", 1)[-1],
+        "document_kind": "manual",
+    }
+    return {"handled": True, "query": msg, "reply": reply, "spoken_reply": answer, "matches": [{"source": source, "url": citation_url, "page": page}], "active_document": active_document, "error": None, "jarvis_ii_generic_rag_vnext": True, "correlation_id": payload.get("correlation_id") or correlation_id, "rag_evidence": payload.get("rag_evidence")}
 
 
 def retrieve_documents(
@@ -3243,6 +3353,12 @@ def try_document_route(
     if not is_document_request(msg, allow_ask_jarvis=allow_ask_jarvis):
         return None
     origin = normalize_public_origin(public_origin)
+    # VNext citations must return to the GUI that owns the active browser
+    # session. Preserve the caller's raw origin here; legacy retrieval below
+    # retains its existing normalized Smedley-public-origin behavior.
+    vnext = try_jarvis_ii_generic_rag_vnext(msg, public_origin=public_origin)
+    if vnext is not None:
+        return vnext
     try:
         retrieval_query = project_spec_lookup_query(msg) if is_specification_number_request(msg) else msg
         payload = retrieve_documents(retrieval_query, topk=topk, public_origin=origin)

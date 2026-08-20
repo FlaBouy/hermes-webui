@@ -14,6 +14,23 @@ from __future__ import annotations
 from api.ask_jarvis_route import is_ask_jarvis_command
 
 
+def _jarvis_session_for_followup_tests():
+    from types import SimpleNamespace
+
+    return SimpleNamespace(
+        messages=[
+            {"role": "user", "content": "Ask Jarvis for the PM20-520 manual."},
+            {
+                "role": "assistant",
+                "content": "**Jarvis:** I could not verify that page yet.",
+                "assistant_identity": "jarvis",
+                "ask_jarvis_hard_bind": True,
+                "ask_jarvis_pending": False,
+            },
+        ]
+    )
+
+
 def test_leading_ask_jarvis_colon_matches():
     assert is_ask_jarvis_command("Ask Jarvis: get me a map route to Tallahassee, FL")
 
@@ -37,6 +54,41 @@ def test_need_jarvis_for_matches():
 def test_unrelated_mention_of_jarvis_does_not_match():
     assert not is_ask_jarvis_command(
         "That is untrue. Jarvis has been providing maps for a week now."
+    )
+
+
+def test_jarvis_manual_location_followup_stays_hard_bound():
+    from api.routes import _jarvis_active_followup_objective
+
+    objective = _jarvis_active_followup_objective(
+        _jarvis_session_for_followup_tests(),
+        "Take a look in the Vendor Data folder under Honeywell - TDC3000",
+    )
+
+    assert objective is not None
+    assert objective.startswith("Ask Jarvis:")
+    assert "Honeywell - TDC3000" in objective
+
+
+def test_jarvis_numbered_selection_stays_hard_bound():
+    from api.routes import _jarvis_active_followup_objective
+
+    objective = _jarvis_active_followup_objective(
+        _jarvis_session_for_followup_tests(), "Selection 1"
+    )
+
+    assert objective is not None
+    assert "Selection 1" in objective
+
+
+def test_explicit_biggy_address_releases_jarvis_followup_binding():
+    from api.routes import _jarvis_active_followup_objective
+
+    assert (
+        _jarvis_active_followup_objective(
+            _jarvis_session_for_followup_tests(), "Hey Biggy, change subjects."
+        )
+        is None
     )
 
 
@@ -70,6 +122,72 @@ def test_ask_jarvis_reply_is_attributed_in_chat_bubble(monkeypatch):
     assert result is not None
     assert result["reply"].startswith("**Jarvis:**")
     assert "Tallahassee" in result["reply"]
+
+
+def test_pa_core_carries_biggy_session_id_for_short_term_memory(monkeypatch):
+    """A follow-up must retain its chat identity, never a request correlation."""
+    import json
+
+    import api.ask_jarvis_route as ajr
+    import api.jarvis_pa_conversation_memory as conversation_memory
+    import api.jarvis_pa_strategy_memory as strategy_memory
+
+    captured = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"status":"COMPLETED","spokenText":"I found the manual.","citations":[]}'
+
+    def _urlopen(request, timeout):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return _Response()
+
+    monkeypatch.setenv("GPT_BIGGY_PROPOSE_TOKEN", "test-token")
+    monkeypatch.setattr(ajr.urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(strategy_memory, "record_outcome", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        conversation_memory,
+        "recent_context",
+        lambda _session_id: [{"objective": "Prior manual request", "status": "COMPLETED", "summary": "Prior turn", "tools": ["rag_core"]}],
+    )
+    monkeypatch.setattr(conversation_memory, "record_turn", lambda *_args, **_kwargs: None)
+
+    result = ajr.try_jarvis_ii_pa_core(
+        "Find the 1756-IB32 manual.",
+        correlation_id="request-123",
+        session_id="biggy-chat-456",
+    )
+
+    assert result["ok"] is True
+    assert captured["payload"]["session_id"] == "biggy-chat-456"
+    assert captured["payload"]["correlation_id"] == "request-123"
+    assert captured["payload"]["conversation_context"][0]["objective"] == "Prior manual request"
+
+
+def test_short_term_pa_context_is_bounded_and_session_scoped():
+    """The continuity window is transient and cannot cross from one Biggy chat to another."""
+    from api.jarvis_pa_conversation_memory import record_turn, recent_context
+
+    session_id = "test-short-term-pa-context"
+    for number in range(12):
+        record_turn(
+            session_id,
+            objective=f"Manual request {number}",
+            status="PLANNED",
+            spoken_summary="Checking the library.",
+            tools=["rag_core"],
+        )
+
+    turns = recent_context(session_id)
+    assert len(turns) == 10
+    assert turns[0]["objective"] == "Manual request 2"
+    assert recent_context("another-biggy-chat") == []
 
 
 def test_jarvis_identity_and_server_tts_guard_are_durable():

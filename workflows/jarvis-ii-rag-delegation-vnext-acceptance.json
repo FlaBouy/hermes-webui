@@ -1,0 +1,43 @@
+{
+  "id": "JarvisIIRAGVNextAccept1",
+  "name": "Jarvis II — RAG Delegation VNext Acceptance",
+  "active": false,
+  "settings": { "executionOrder": "v1" },
+  "nodes": [
+    { "id": "accept-1", "name": "Start Acceptance", "type": "n8n-nodes-base.manualTrigger", "typeVersion": 1, "position": [0, 0], "parameters": {} },
+    {
+      "id": "accept-2",
+      "name": "Verified IB32 Fixture",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [280, 0],
+      "parameters": {
+        "assignments": { "assignments": [{ "id": "fixture-objective", "name": "objective", "value": "Ask Jarvis for a wiring schematic for an Allen-Bradley 1756-IB32.", "type": "string" }] },
+        "options": {}
+      }
+    },
+    {
+      "id": "accept-3",
+      "name": "Run PA RAG Delegation",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1,
+      "position": [560, 0],
+      "parameters": { "operation": "call_workflow", "source": "database", "workflowId": "TIEU7dGs4fzf3wU1", "mode": "each", "options": {} }
+    },
+    {
+      "id": "accept-4",
+      "name": "Assert VNext Evidence Contract",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [840, 0],
+      "parameters": {
+        "jsCode": "const j=$json; const citation=Array.isArray(j.citations)?j.citations[0]||{}:{}; const ok=j.schema==='jarvis.rag_delegation.v2'&&j.outcome==='ok'&&j.provider==='jarvis_ii_generic_rag_core_vnext'&&String(citation.source||'').toLowerCase().includes('1756-um058')&&Number(citation.page_hint)===102&&String(citation.url||'').includes('/api/jarvis-ii/rag-document/'); if(!ok)throw new Error('VNEXT_RAG_DELEGATION_ACCEPTANCE_FAILED'); return [{json:{status:'PASS',schema:j.schema,provider:j.provider,spoken:j.spoken,citation}}];"
+      }
+    }
+  ],
+  "connections": {
+    "Start Acceptance": { "main": [[{ "node": "Verified IB32 Fixture", "type": "main", "index": 0 }]] },
+    "Verified IB32 Fixture": { "main": [[{ "node": "Run PA RAG Delegation", "type": "main", "index": 0 }]] },
+    "Run PA RAG Delegation": { "main": [[{ "node": "Assert VNext Evidence Contract", "type": "main", "index": 0 }]] }
+  }
+}
