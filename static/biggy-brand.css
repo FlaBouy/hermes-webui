@@ -3,39 +3,69 @@
 body.biggy-brand > .app-titlebar{display:none!important}
 
 .biggy-brand-header{
-  position:relative;z-index:6;
-  height:72px;min-height:72px;
-  border-bottom:2px solid #8b0000;background:#0d1117;
+  position:relative;z-index:6;overflow:visible;
+  height:116px;min-height:116px;
+  border:0;background:transparent;
   color:#e6edf3;box-sizing:border-box;
 }
-.biggy-brand-cluster{
-  position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  display:flex;align-items:center;justify-content:center;gap:14px;
-  max-width:calc(100% - 430px);
+/* Jarvis V6 reactor — verbatim transplant of the real V6 presence unit from
+   brain-jarvis/viewer/3d.html (#j-orb / #j-state / #j-brain-chip), native
+   204x204, unscaled, unrestyled. It is a sibling of the header (inserted
+   immediately after it), not a descendant, so its lower portion can render
+   past the header's own box, over the workspace — the header was made tall
+   enough (150px) to hold the reactor's own footprint instead of shrinking
+   the reactor to fit the old (82px) header height. Only the positioning
+   scheme changed from the original (viewport-fixed, docked right) to
+   wrapper-relative + horizontally centered over the header/workspace seam;
+   every id, class, and style value below is copied unmodified from 3d.html. */
+.biggy-jarvis-transplant{
+  position:absolute;left:50%;top:0;transform:translateX(-50%);
+  width:204px;height:280px;z-index:10;pointer-events:none;
 }
-.biggy-brand-ega{
-  height:56px;width:auto;display:block;mix-blend-mode:screen;
-  filter:brightness(1.1) contrast(1.05);flex:0 0 auto
+#j-orb{
+  position:absolute;left:50%;top:38px;transform:translateX(-50%);
+  width:204px;height:204px;pointer-events:none;display:block;
+  --hud:#62dbff; --hud2:#2f9fd0; --accent:#f4a93a; --glow:rgba(70,200,255,.5); --beat:0;
 }
-.biggy-brand-heading{
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  min-width:0;text-align:center;
+#j-state{
+  position:absolute;left:50%;top:250px;transform:translateX(-50%);width:204px;text-align:center;
+  font-family:'SF Mono',ui-monospace,monospace;font-size:13px;font-weight:700;letter-spacing:.24em;color:#5a6b62;text-transform:uppercase;
+  text-shadow:0 0 14px rgba(52,211,153,.25);transition:color .25s;
 }
-.biggy-brand-title{
-  font-size:17px;font-weight:800;letter-spacing:.10em;text-transform:uppercase;color:#e6b800;
-  text-shadow:0 0 20px rgba(230,184,0,.5),0 1px 4px rgba(0,0,0,.95);white-space:nowrap
-}
-.biggy-brand-subtitle{
-  font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:#7d8590;margin-top:3px;
-  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:min(420px,46vw)
-}
-.biggy-brand-controls{
-  position:absolute;left:14px;top:50%;transform:translateY(-50%);
-  display:flex;align-items:center;gap:8px;z-index:2;
-}
+#j-state .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:currentColor;margin-right:8px;vertical-align:1px;
+  box-shadow:0 0 8px currentColor;}
+#j-state.pulse .dot{animation:jstate-pulse 1.1s ease-in-out infinite;}
+@keyframes jstate-pulse{0%,100%{opacity:.35;transform:scale(.8);}50%{opacity:1;transform:scale(1.15);}}
+#j-brain{position:static;width:auto;text-align:right;}
+#j-brain-chip{display:inline-block;font-family:'SF Mono',ui-monospace,monospace;font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#34d399;border:1px solid rgba(52,211,153,.42);border-radius:999px;padding:5px 14px;background:rgba(10,22,18,.72);backdrop-filter:blur(6px);}
+#j-orb svg{width:100%;height:100%;overflow:visible;display:block;}
+#j-orb .glow{filter:drop-shadow(0 0 3px var(--glow));}
+#j-orb .rot{transform-box:view-box;transform-origin:100px 100px;}
+#j-orb .s-hud{stroke:var(--hud);fill:none;}
+#j-orb .s-hud2{stroke:var(--hud2);fill:none;}
+#j-orb .s-accent{stroke:var(--accent);fill:none;}
+#j-orb .dot{fill:var(--accent);opacity:.8;}
+#j-orb .rot-a{animation:hudCCW 64s linear infinite;} #j-orb .rot-b{animation:hudCW 26s linear infinite;}
+#j-orb .rot-c{animation:hudCW 16s linear infinite;} #j-orb .rot-d{animation:hudCCW 19s linear infinite;}
+#j-orb .rot-core{animation:hudCW 36s linear infinite;} #j-orb .rot-radar{animation:hudCW 6s linear infinite;}
+@keyframes hudCW{to{transform:rotate(360deg);}} @keyframes hudCCW{to{transform:rotate(-360deg);}}
+#j-orb .core-disc{fill:url(#hudCore);}
+#j-orb .core-glow{fill:var(--hud);filter:blur(5px);opacity:calc(0.06 + var(--beat)*0.72);}
+#j-orb .core-lobe{fill:var(--hud);opacity:calc(var(--beat)*0.32);}
+#j-orb .core-rim{stroke:var(--hud);fill:none;opacity:calc(0.4 + var(--beat)*0.5);}
+#j-orb .hud-label{fill:#ecfffb;font-family:ui-monospace,'SF Mono',monospace;font-weight:700;font-size:13.5px;letter-spacing:1.4px;
+  filter:drop-shadow(0 0 calc(1.5px + var(--beat)*9px) var(--hud));}
+#j-orb.is-listen{--hud:#79f0ff;--glow:rgba(120,235,255,.72);}
+#j-orb.is-think{--hud:#9cccdd;--accent:#ffd06a;--glow:rgba(244,169,58,.5);}
+#j-orb.is-speak{--hud:#7dffd9;--glow:rgba(60,230,170,.8);}
+/* Additions beyond the standalone V6 page, which never needs to depict its
+   own orb as offline/erroring — same colour-only, no-pulse convention. */
+#j-orb.is-offline{--hud:#3d4450;--hud2:#2a2f38;--accent:#5a6b62;--glow:rgba(80,90,100,.22);filter:grayscale(.5) brightness(.72);}
+#j-orb.is-error{--hud:#ff8a80;--hud2:#c94f47;--accent:#ffb199;--glow:rgba(255,90,80,.6);}
+.biggy-brand-controls{display:flex;flex-direction:row;align-items:center;gap:7px;}
 .biggy-brand-controls button{
-  flex:0 0 auto;cursor:pointer;
-  padding:5px 10px;border:1px solid #30363d;border-radius:4px;
+  min-width:72px;height:28px;flex:0 0 auto;cursor:pointer;
+  padding:5px 9px;border:1px solid #30363d;border-radius:5px;
   background:#21262d;color:#7d8590;
   font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
   letter-spacing:.07em;text-transform:uppercase;
@@ -56,9 +86,9 @@ body.biggy-brand > .app-titlebar{display:none!important}
   text-shadow:0 1px 2px rgba(0,0,0,.85);
 }
 .biggy-brand-status{
-  position:absolute;right:14px;top:50%;transform:translateY(-50%);
+  position:absolute;left:50%;top:8px;transform:translateX(-50%);
   display:flex;flex-direction:column;align-items:flex-end;justify-content:center;
-  width:190px;max-width:calc(50% - 140px);
+  width:auto;max-width:calc(100% - 32px);
   pointer-events:none;
 }
 .biggy-brand-meta{
@@ -73,16 +103,43 @@ body.biggy-brand > .app-titlebar{display:none!important}
 
 #mainChat.biggy-brand-iwo{
   position:relative;
-  background-image:linear-gradient(rgba(13,17,23,.30),rgba(13,17,23,.46)),url('/static/iwo.jpg');
-  background-size:cover;background-position:center;background-repeat:no-repeat
+  background:#04050a;
 }
 #mainChat.biggy-brand-iwo .messages-shell,
 #mainChat.biggy-brand-iwo .messages{background:transparent!important}
 #mainChat.biggy-brand-iwo #emptyState{display:none!important}
 #mainChat.biggy-brand-iwo .empty-logo,
 #mainChat.biggy-brand-iwo .empty-logo svg{display:none!important}
-#mainChat.biggy-brand-iwo .composer-wrap{background:rgba(13,17,23,.82)}
+#mainChat.biggy-brand-iwo .composer-wrap{background:rgba(13,17,23,.82);pointer-events:auto}
 #mainChat.biggy-brand-iwo #profileChipWrap{display:none!important}
+.biggy-composer-controls{display:flex;align-items:center;gap:7px;flex:0 0 auto;margin-left:6px;pointer-events:auto}
+
+/* Jarvis V6 3D graph/galaxy — occupies the full center canvas behind the
+   conversation surface, replacing the static Iwo background image. Iframe
+   points at Biggy's own same-origin, narrow, fixed proxy route (never port
+   4719 directly); see api/jarvis_v6_world.py. */
+.biggy-v6-world{
+  position:absolute;inset:0;width:100%;height:100%;
+  border:0;z-index:0;background:#04050a;
+  pointer-events:auto;
+}
+.biggy-v6-world-fallback{
+  position:absolute;inset:0;width:100%;height:100%;z-index:0;
+  display:none;align-items:center;justify-content:center;
+  background:radial-gradient(ellipse at 50% 40%,#0f151b 0%,#05070a 70%);
+  font-family:ui-monospace,'SF Mono',monospace;
+  color:#5a6b62;pointer-events:none;
+}
+.biggy-v6-world-fallback.is-active{display:flex}
+.biggy-v6-world-fallback .msg{
+  text-align:center;font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+  border:1px solid rgba(52,211,153,.25);border-radius:12px;padding:18px 26px;
+  background:rgba(10,22,18,.5);
+}
+.biggy-v6-world-fallback .msg small{
+  display:block;margin-top:6px;font-size:9px;opacity:.65;
+  letter-spacing:.04em;text-transform:none;
+}
 
 /* Readable chat contrast over Iwo */
 #mainChat.biggy-brand-iwo .msg-row[data-role="assistant"] .msg-body,
@@ -94,16 +151,9 @@ body.biggy-brand > .app-titlebar{display:none!important}
 
 
 @media(max-width:1100px){
-  .biggy-brand-title{font-size:14px}
-  .biggy-brand-cluster{max-width:calc(100% - 390px);gap:12px}
   .biggy-brand-status{width:160px}
 }
 @media(max-width:760px){
-  .biggy-brand-header{height:58px;min-height:58px}
-  .biggy-brand-cluster{gap:8px;max-width:calc(100% - 200px)}
-  .biggy-brand-ega{height:40px}
-  .biggy-brand-title{font-size:11px;letter-spacing:.08em}
-  .biggy-brand-subtitle{display:none}
   .biggy-brand-controls{left:8px;gap:6px}
   .biggy-brand-controls button{padding:4px 7px;font-size:8px}
   .biggy-brand-status{right:8px;width:100px}
@@ -115,8 +165,9 @@ body.biggy-brand > .app-titlebar{display:none!important}
 #mainChat.biggy-brand-iwo .biggy-travel-center-panel-slot{display:none!important}
 #mainChat.biggy-brand-iwo .biggy-travel-dock{
   position:absolute;
-  /* Align open panel + rail under brand header border (72px header incl. 2px rule). */
-  top:72px;
+  /* The category rail lives in Hermes's right workspace panel; this is only
+     the on-demand content surface that opens over the galaxy. */
+  top:116px;
   /* Default: clear workspace-panel-edge-toggle (fixed right:~10px, 34px wide, z-index 120).
      That control otherwise sits on the vertical category rail and obscures Fuel. */
   right:64px;
@@ -125,7 +176,7 @@ body.biggy-brand > .app-titlebar{display:none!important}
   display:flex;
   flex-direction:row;
   align-items:stretch;
-  max-height:calc(100% - 72px - 120px);
+  max-height:calc(100% - 116px - 120px);
   pointer-events:auto;
   background:transparent;
   border:0;
@@ -137,11 +188,12 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo .biggy-travel-dock{
   right:8px;
 }
 #mainChat.biggy-brand-iwo .biggy-travel-dock.has-lodging{
-  max-height:calc(100% - 72px - 100px);
+  max-height:calc(100% - 150px - 100px);
 }
 #mainChat.biggy-brand-iwo .biggy-travel-dock[hidden]{display:none!important}
 
-/* Persistent vertical category rail (always visible when dock mounted). */
+/* Category rail: mounted at the top level of Hermes's collapsible right
+   workspace panel, not as imported V6 chrome over the graph. */
 #mainChat.biggy-brand-iwo .biggy-category-rail{
   order:2;
   flex:0 0 48px;
@@ -182,6 +234,53 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo .biggy-travel-dock{
 #mainChat.biggy-brand-iwo .biggy-category-rail-btn.is-active{
   color:#f0c14b;background:rgba(26,18,0,.85);
   box-shadow:inset 0 0 0 1px rgba(176,136,46,.55);
+}
+.rightpanel .biggy-category-rail{
+  display:flex;flex-wrap:wrap;gap:5px;padding:8px;
+  border-bottom:1px solid rgba(148,163,184,.22);
+  background:rgba(13,17,23,.94);
+}
+.rightpanel .biggy-category-rail-btn{
+  appearance:none;flex:1 0 calc(50% - 4px);min-width:0;
+  border:1px solid rgba(148,163,184,.25);border-radius:5px;
+  background:rgba(15,23,32,.72);color:#94a3b8;
+  padding:7px 5px;cursor:pointer;
+  font:700 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+  letter-spacing:.05em;text-transform:uppercase;
+}
+.rightpanel .biggy-category-rail-btn:hover{color:#e2e8f0;border-color:rgba(148,163,184,.48)}
+.rightpanel .biggy-category-rail-btn.is-active{color:#f0c14b;border-color:rgba(176,136,46,.65);background:rgba(26,18,0,.85)}
+/* The PA category rail is the exposed top layer of the collapsed right
+   sidebar — deliberately visible like Hermes's left navigation rail. */
+#mainChat.biggy-brand-iwo > .biggy-category-rail{
+  /* Mirror the left Hermes rail: a flush, full-height edge rather than a
+     floating card over the galaxy.  The top slot is reserved for its toggle. */
+  position:absolute;top:0;right:0;bottom:0;z-index:119;
+  width:48px;max-height:none;box-sizing:border-box;
+  padding:52px 0 8px;gap:0;
+  background:#0d0f0d;border:0;border-left:1px solid rgba(148,163,184,.22);
+  border-radius:0;overflow:hidden;
+}
+html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo > .biggy-category-rail{right:0}
+#mainChat.biggy-brand-iwo > .biggy-category-rail .biggy-category-rail-btn{
+  width:48px;min-height:54px;padding:9px 3px;border-radius:0;
+  border-bottom:1px solid rgba(148,163,184,.09);
+}
+#mainChat.biggy-brand-iwo > .biggy-category-rail .biggy-category-rail-btn:hover{background:rgba(51,65,85,.32)}
+#mainChat.biggy-brand-iwo > .biggy-category-rail .biggy-category-rail-btn.is-active{
+  box-shadow:inset 3px 0 0 rgba(176,136,46,.9),inset 0 0 0 1px rgba(176,136,46,.38);
+}
+/* Keep the workspace chevron in the top-right command position, above the
+   exposed PA rail rather than stranded at mid-screen. */
+#btnWorkspacePanelEdgeToggle{top:8px!important;right:7px!important;bottom:auto!important;z-index:122!important}
+#mainChat.biggy-brand-iwo > .biggy-category-rail .biggy-utility-control.ok{
+  color:#55c96b;border-color:#2f7d42;background:#0d1a10;
+}
+#mainChat.biggy-brand-iwo > .biggy-category-rail .biggy-utility-control.active{
+  color:#f0c14b;border-color:#6e3b1e;background:#1a1208;
+}
+#mainChat.biggy-brand-iwo > .biggy-category-rail .biggy-utility-control.down{
+  color:#f06b64;border-color:#8b3030;background:#1a0d0d;
 }
 
 /* Open panel (+50% vs prior 360px → 540px default). */
@@ -273,8 +372,8 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo .biggy-travel-dock{
 }
 @media(max-width:1100px){
   #mainChat.biggy-brand-iwo .biggy-travel-dock{
-    top:72px;
-    max-height:calc(100% - 72px - 110px);
+    top:116px;
+    max-height:calc(100% - 116px - 110px);
     right:64px;
   }
   html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo .biggy-travel-dock{

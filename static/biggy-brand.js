@@ -13,7 +13,13 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260811-1225-route-voice-fix';
+  const BUILD_ID = '20260821-1225-unbroken-galaxy';
+  const V6_HEALTH_PATH = '/api/biggy/v6/health';
+  const V6_CHAT_PATH = '/api/biggy/v6/chat';
+  const V6_WORLD_PATH = '/api/biggy/v6/world';
+  const ORB_STATES = Object.freeze([
+    'offline', 'online', 'thinking', 'speaking', 'tool-running', 'error',
+  ]);
   const SESSION_STORAGE_KEY = `hermes-gui-session:${GUI_ID}`;
   const DIAG_FLAG_KEY = `hermes-gui-debug:${GUI_ID}`;
   try {
@@ -475,6 +481,20 @@
     }
   }
 
+  // Keep cockpit controls in the persistent right-hand cockpit rail, clear of
+  // both Jarvis's visual field and the normal message composer.
+  function moveCockpitControlsToRightRail(header) {
+    const controls = header && header.querySelector('.biggy-brand-controls');
+    const mainChat = document.getElementById('mainChat');
+    if (!controls || !mainChat || controls.parentElement && controls.parentElement.classList.contains('biggy-right-cockpit-controls')) return;
+    document.querySelectorAll('.biggy-right-cockpit-controls').forEach((node) => node.remove());
+    const wrap = el('div', 'biggy-right-cockpit-controls');
+    wrap.setAttribute('aria-label', 'Biggy cockpit controls');
+    controls.remove();
+    wrap.appendChild(controls);
+    mainChat.appendChild(wrap);
+  }
+
   function forceChromeLabels() {
     const title = document.getElementById('appTitlebarTitle');
     if (title && title.textContent.trim() !== BRAND) title.textContent = BRAND;
@@ -874,7 +894,7 @@
       if (!event.altKey) return;
       const target = event.target;
       if (!(target instanceof Element)) return;
-      if (!target.closest('.biggy-brand-title, .biggy-brand-heading, #biggyIdentity')) return;
+      if (!target.closest('.biggy-jarvis-transplant, #biggyIdentity')) return;
       clicks += 1;
       clearTimeout(timer);
       timer = setTimeout(() => { clicks = 0; }, 900);
@@ -1122,6 +1142,12 @@
     diagnosticsEnabledDefault: false,
     guiId: GUI_ID,
     profileId: PROFILE_ID,
+    // Later Ask Jarvis voice path routes here. This slice does not replace Austin.
+    askJarvisV6Voice: Object.freeze({
+      enabled: false,
+      route: 'austin',
+      note: 'Voice seam only — Austin remains the Biggy default.',
+    }),
   });
   try {
     Object.defineProperty(window, '__BIGGY_FEATURES__', {
@@ -1140,27 +1166,389 @@
     ).forEach((node) => node.remove());
   }
 
+  let jarvisOrbFlight = false;
+  let jarvisHealthTimer = null;
+
+  // Mirrors V6's own STATE_STYLE table (3d.html) — label, css color, pulse —
+  // extended with offline/tool-running/error, which the standalone V6 orb
+  // never needs to represent (it's only ever reachable when V6 is up).
+  const REACTOR_STATE_STYLE = Object.freeze({
+    offline: ['OFFLINE', '#ff6b6b', 0],
+    online: ['ONLINE', '#34d399', 0],
+    thinking: ['THINKING', '#ffd06a', 1],
+    speaking: ['SPEAKING', '#7dffd9', 1],
+    'tool-running': ['TOOL RUNNING', '#caa6ff', 1],
+    error: ['ERROR', '#ff6b6b', 1],
+  });
+  // Maps bridge states onto V6's own is-listen/is-think/is-speak orb
+  // classes (colour-only, no pulsing — same rule V6 itself follows) plus
+  // two additions (is-offline/is-error) for states V6's own orb never has
+  // to render.
+  const REACTOR_ORB_CLASS = Object.freeze({
+    offline: 'is-offline',
+    online: '',
+    thinking: 'is-think',
+    speaking: 'is-speak',
+    'tool-running': 'is-think',
+    error: 'is-error',
+  });
+
+  function setJarvisOrbState(state, detail) {
+    const next = ORB_STATES.includes(state) ? state : 'error';
+    const orb = document.getElementById('j-orb');
+    if (!orb) return;
+    orb.className = REACTOR_ORB_CLASS[next] || '';
+    const label = detail ? `${next}: ${detail}` : next;
+    orb.setAttribute('title', `Jarvis V6 ${label}`);
+    orb.setAttribute('aria-label', `Jarvis V6 ${label}`);
+    const st = document.getElementById('j-state');
+    const stTxt = document.getElementById('j-state-txt');
+    if (st && stTxt) {
+      const [text, color, pulse] = REACTOR_STATE_STYLE[next];
+      stTxt.textContent = text;
+      st.style.color = color;
+      st.classList.toggle('pulse', !!pulse);
+    }
+  }
+
+  function formatReactorModel(model) {
+    const raw = String(model || '').trim();
+    if (!raw) return '';
+    return raw.split('/').pop() || raw;
+  }
+
+  function setReactorModelChip(model) {
+    const chip = document.getElementById('j-brain-chip');
+    if (!chip) return;
+    const short = formatReactorModel(model);
+    chip.textContent = short ? `\u25c6 ${short}` : '\u2014';
+    chip.title = model ? String(model) : '';
+  }
+
+  function buildReactorHud() {
+    const NS = 'http://www.w3.org/2000/svg';
+    const C = 100;
+    const ticks = document.getElementById('hud-ticks');
+    const dots = document.getElementById('hud-dots');
+    const spokes = document.getElementById('hud-spokes');
+    if (!ticks || ticks.childNodes.length) return;
+    const line = (g, a, r1, r2) => {
+      const rad = (a * Math.PI) / 180;
+      const l = document.createElementNS(NS, 'line');
+      l.setAttribute('x1', (C + r1 * Math.cos(rad)).toFixed(2));
+      l.setAttribute('y1', (C + r1 * Math.sin(rad)).toFixed(2));
+      l.setAttribute('x2', (C + r2 * Math.cos(rad)).toFixed(2));
+      l.setAttribute('y2', (C + r2 * Math.sin(rad)).toFixed(2));
+      g.appendChild(l);
+    };
+    for (let i = 0; i < 72; i += 1) line(ticks, i * 5, i % 6 === 0 ? 84 : 89, 96);
+    for (let i = 0; i < 12; i += 1) line(spokes, i * 30, 13, 22);
+    for (let i = 0; i < 5; i += 1) {
+      const rad = ((-66 + i * 20) * Math.PI) / 180;
+      const d = document.createElementNS(NS, 'circle');
+      d.setAttribute('cx', (C + 74 * Math.cos(rad)).toFixed(2));
+      d.setAttribute('cy', (C + 74 * Math.sin(rad)).toFixed(2));
+      d.setAttribute('r', '1.7');
+      d.setAttribute('class', 'dot');
+      dots.appendChild(d);
+    }
+  }
+
+  function collectBiggyContext() {
+    const ctx = {
+      project_id: '',
+      display_name: '',
+      workspace_name: '',
+      synopsis: '',
+    };
+    try {
+      const pid = (typeof _activeProject !== 'undefined') ? _activeProject : '';
+      const none = (typeof NO_PROJECT_FILTER !== 'undefined') ? NO_PROJECT_FILTER : '__none__';
+      if (pid && pid !== none) {
+        ctx.project_id = String(pid);
+        const projects = (typeof _allProjects !== 'undefined' && Array.isArray(_allProjects))
+          ? _allProjects : [];
+        const hit = projects.find((p) => p && p.project_id === pid);
+        if (hit && hit.name) ctx.display_name = String(hit.name);
+      }
+    } catch (_) {}
+    try {
+      const wsNode = document.getElementById('workspaceName')
+        || document.getElementById('titlebarWorkspace')
+        || document.querySelector('.workspace-name, .ws-name');
+      if (wsNode && wsNode.textContent) ctx.workspace_name = String(wsNode.textContent).trim();
+      if (!ctx.workspace_name && typeof S !== 'undefined' && S && S.session) {
+        ctx.workspace_name = String(S.session.cwd || S.session.workspace || '').trim();
+      }
+      if (!ctx.workspace_name) ctx.workspace_name = 'biggy';
+    } catch (_) {}
+    try {
+      const syn = document.querySelector('[data-testid="project-synopsis"], .project-synopsis, #projectSynopsis');
+      if (syn && syn.textContent) ctx.synopsis = String(syn.textContent).trim().slice(0, 500);
+    } catch (_) {}
+    return ctx;
+  }
+
+  async function jsonPost(path, body) {
+    const options = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {}),
+    };
+    if (typeof window.api === 'function') return window.api(path, options);
+    const response = await fetch(path, { ...options, cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`);
+    }
+    return response.json();
+  }
+
+  function appendJarvisV6Turn(question, answer, ok, errorText) {
+    const userLine = String(question || '').trim();
+    const reply = ok
+      ? String(answer || '').trim()
+      : (`**Jarvis V6 unavailable:** ${String(errorText || 'request failed')}`);
+    try {
+      if (typeof S !== 'undefined' && S && Array.isArray(S.messages)) {
+        S.messages.push({ role: 'user', content: userLine, jarvis_v6: true });
+        S.messages.push({
+          role: 'assistant',
+          content: reply,
+          assistant_identity: 'jarvis',
+          jarvis_response: true,
+          jarvis_v6: true,
+        });
+        if (typeof renderMessages === 'function') renderMessages();
+        labelJarvisResponses(document);
+        return;
+      }
+    } catch (_) {}
+    const note = document.getElementById('biggyHeaderNote');
+    if (note) note.textContent = reply.slice(0, 180);
+  }
+
+  async function pollJarvisV6Health() {
+    if (jarvisOrbFlight) return;
+    try {
+      const data = await jsonGet(V6_HEALTH_PATH);
+      const state = String((data && data.state) || (data && data.online ? 'online' : 'offline'));
+      const detail = data && (data.model || data.error) ? String(data.model || data.error) : '';
+      setJarvisOrbState(ORB_STATES.includes(state) ? state : 'error', detail);
+      setReactorModelChip(data && data.model);
+    } catch (err) {
+      setJarvisOrbState('error', String(err && err.message || err));
+      setReactorModelChip('');
+    }
+  }
+
+  async function askJarvisV6(raw) {
+    const question = String(raw || '').trim();
+    const note = document.getElementById('biggyHeaderNote');
+    if (!question) {
+      if (note) note.textContent = 'Type a question, then Ask Jarvis.';
+      return;
+    }
+    jarvisOrbFlight = true;
+    setJarvisOrbState('thinking', 'request in flight');
+    if (note) note.textContent = 'Jarvis V6 thinking…';
+    try {
+      const data = await jsonPost(V6_CHAT_PATH, {
+        message: question,
+        session: `biggy-v6-${currentHermesSessionId() || 'local'}`,
+        context: collectBiggyContext(),
+      });
+      if (data && data.ok) {
+        setJarvisOrbState('online', 'reply received');
+        appendJarvisV6Turn(question, data.answer, true);
+        if (note) note.textContent = '';
+      } else {
+        const state = String((data && data.state) || 'error');
+        setJarvisOrbState(state === 'offline' ? 'offline' : 'error', data && data.error);
+        appendJarvisV6Turn(question, '', false, (data && data.error) || 'Jarvis V6 request failed');
+        if (note) note.textContent = String((data && data.error) || 'Jarvis V6 error');
+      }
+    } catch (err) {
+      setJarvisOrbState('error', String(err && err.message || err));
+      appendJarvisV6Turn(question, '', false, err && err.message || err);
+      if (note) note.textContent = String(err && err.message || err);
+    } finally {
+      jarvisOrbFlight = false;
+    }
+  }
+
+  function installJarvisV6Bridge(header) {
+    if (!header || header.dataset.jarvisV6Bound === '1') return;
+    header.dataset.jarvisV6Bound = '1';
+    const prompt = header.querySelector('#biggyAskJarvisPrompt');
+    const btn = header.querySelector('#biggyAskJarvis');
+    const submit = () => {
+      const typed = prompt && prompt.value ? String(prompt.value) : '';
+      const composer = document.getElementById('msg');
+      const fallback = composer && !composer.isContentEditable
+        ? String(composer.value || '')
+        : String((composer && composer.textContent) || '');
+      const question = typed.trim() || fallback.trim();
+      if (prompt) prompt.value = '';
+      askJarvisV6(question);
+    };
+    if (btn) {
+      btn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        submit();
+      });
+    }
+    if (prompt) {
+      prompt.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' && !ev.shiftKey) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          submit();
+        }
+      });
+    }
+    pollJarvisV6Health();
+    if (jarvisHealthTimer) clearInterval(jarvisHealthTimer);
+    jarvisHealthTimer = setInterval(() => { pollJarvisV6Health().catch(() => {}); }, 5000);
+  }
+
+  // Jarvis V6 3D graph/galaxy — replaces the static Iwo background image.
+  // Loaded from Biggy's own same-origin, fixed, read-only proxy route
+  // (never a direct browser request to the standalone V6 service port);
+  // see api/jarvis_v6_world.py. Falls back to a clean placeholder if WebGL
+  // is unsupported or the embedded scene fails to initialize (e.g. no
+  // network access to the Three.js CDN the V6 viewer's importmap points at).
+  function hasWebGLSupport() {
+    try {
+      const canvas = document.createElement('canvas');
+      return !!(window.WebGLRenderingContext
+        && (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function showV6WorldFallback(fallback, reasonText) {
+    if (!fallback) return;
+    const reason = fallback.querySelector('#biggyV6WorldFallbackReason');
+    if (reason) reason.textContent = reasonText;
+    fallback.classList.add('is-active');
+  }
+
+  function installBiggyV6World(mainChat) {
+    if (!mainChat) return;
+    mainChat.querySelectorAll('.biggy-v6-world, .biggy-v6-world-fallback')
+      .forEach((node) => node.remove());
+
+    const fallback = el('div', 'biggy-v6-world-fallback');
+    fallback.setAttribute('data-testid', 'biggy-v6-world-fallback');
+    fallback.innerHTML = '<div class="msg">3D world unavailable'
+      + '<small id="biggyV6WorldFallbackReason">\u2014</small></div>';
+    mainChat.appendChild(fallback);
+
+    if (!hasWebGLSupport()) {
+      showV6WorldFallback(fallback, 'WebGL not supported in this browser');
+      return;
+    }
+
+    const iframe = el('iframe', 'biggy-v6-world');
+    iframe.id = 'biggyV6World';
+    iframe.setAttribute('data-testid', 'biggy-v6-world');
+    iframe.setAttribute('title', 'Jarvis V6 \u2014 3D memory graph');
+    iframe.setAttribute('referrerpolicy', 'no-referrer');
+    iframe.src = `${V6_WORLD_PATH}?v=${encodeURIComponent(BUILD_ID)}`;
+    iframe.addEventListener('error', () => {
+      showV6WorldFallback(fallback, 'local V6 viewer unreachable');
+      iframe.remove();
+    });
+    iframe.addEventListener('load', () => {
+      // Biggy owns the surrounding cockpit.  Keep the native V6 renderer and
+      // graph interactions, but remove the standalone viewer's sidebar,
+      // prompt, inbox, reactor, and rails from the embedded surface.
+      try {
+        const frameDoc = iframe.contentDocument;
+        if (frameDoc && !frameDoc.getElementById('biggy-world-chrome-reset')) {
+          const reset = frameDoc.createElement('style');
+          reset.id = 'biggy-world-chrome-reset';
+          reset.textContent = [
+            'aside,#collapse,#legend,#hud,#brand,#hint,#j-inbox,#j-tasks,#j-orb,#j-state,#j-status,#j-brain,#jarvis,.foot{display:none!important}',
+            'body{overflow:hidden!important} #g{left:0!important;width:100vw!important}',
+          ].join('');
+          frameDoc.head.appendChild(reset);
+        }
+      } catch (_) {}
+      // The graph module exposes window.__os only after it finishes
+      // building the ForceGraph3D scene; if that never appears (WebGL
+      // context creation failed inside the frame, or the Three.js CDN
+      // import couldn't be reached), surface the fallback instead of a
+      // silently blank canvas.
+      setTimeout(() => {
+        let booted = false;
+        try {
+          booted = !!(iframe.contentWindow && iframe.contentWindow.__os);
+        } catch (_) {
+          booted = false;
+        }
+        if (!booted) {
+          showV6WorldFallback(fallback, 'graph failed to initialize (check network access)');
+        }
+      }, 4000);
+    });
+    mainChat.appendChild(iframe);
+  }
+
   function makeHeader() {
     const header = el('div', 'biggy-brand-header');
     header.innerHTML =
-      `<div class="biggy-brand-cluster">` +
-      `<img class="biggy-brand-ega" src="/static/ega.jpg" alt="EGA">` +
-      `<div class="biggy-brand-heading">` +
-      `<div class="biggy-brand-title">BIGGY</div>` +
-      `<div class="biggy-brand-subtitle" id="biggyBrandSubtitle">${esc(ROLE)}</div>` +
-      `</div>` +
-      `<img class="biggy-brand-ega" src="/static/ega.jpg" alt="EGA">` +
-      `</div>` +
       `<div class="biggy-brand-controls">` +
       `<button id="biggyPtt" type="button" data-testid="biggy-ptt" title="Foot-pedal PTT status">● PTT</button>` +
       `<button id="biggyAudioRoute" type="button" data-testid="biggy-audio-route" title="Toggle headset / room audio">ROOM</button>` +
       `<button id="biggyOpenSmedley" type="button" data-testid="biggy-open-smedley" title="Open Smedley GUI (RAG + electrical tools)">SMEDLEY</button>` +
-      `<div id="biggyHeaderNote" class="biggy-brand-header-note"></div>` +
       `</div>` +
-      `<div class="biggy-brand-status" aria-label="Biggy identity">` +
-      `<div class="biggy-brand-meta" id="biggyBrandMeta">PROFILE biggy</div>` +
+      `<div class="biggy-brand-status" aria-label="Jarvis V6 model">` +
+      `<div id="j-brain"><span id="j-brain-chip" data-testid="biggy-jarvis-model">—</span></div>` +
       `</div>`;
     return header;
+  }
+
+  // Jarvis V6 reactor — a verbatim transplant of the real V6 presence unit
+  // from brain-jarvis/viewer/3d.html (#j-orb / #j-state / #j-brain-chip),
+  // native 204x204, unmodified markup/classes/ids. Only the outer wrapper's
+  // positioning differs (centered over the header/workspace seam here
+  // instead of viewport-right-docked as in the standalone V6 page); see the
+  // matching CSS block in biggy-brand.css for the ported (but unscaled)
+  // styling. This is inserted as a sibling of the header so it can overlap
+  // the header/workspace boundary without being clipped by the header box.
+  function makeReactorDock() {
+    const dock = el('div', 'biggy-jarvis-transplant');
+    dock.id = 'biggyJarvisTransplant';
+    dock.setAttribute('data-testid', 'biggy-reactor-dock');
+    dock.innerHTML =
+      `<div id="j-orb" data-testid="biggy-jarvis-orb" role="status" aria-live="polite" aria-label="Jarvis V6 offline">` +
+      `<svg viewBox="0 0 200 200" aria-hidden="true">` +
+      `<defs><radialGradient id="hudCore" cx="50%" cy="45%" r="62%">` +
+      `<stop offset="0%" stop-color="#0e413c"/><stop offset="70%" stop-color="#0b302d"/>` +
+      `<stop offset="100%" stop-color="#082825"/>` +
+      `</radialGradient></defs>` +
+      `<g class="hud-pulse glow">` +
+      `<g class="rot rot-a"><g id="hud-ticks" class="s-hud" stroke-width="0.9"></g></g>` +
+      `<circle class="rot rot-b s-hud" cx="100" cy="100" r="86" stroke-width="3.4" stroke-dasharray="48 30" stroke-linecap="round"/>` +
+      `<circle class="s-hud2" cx="100" cy="100" r="79" stroke-width="1" opacity="0.45"/>` +
+      `<circle class="rot rot-c s-accent" cx="100" cy="100" r="70" stroke-width="4.2" stroke-dasharray="122 318" stroke-linecap="round"/>` +
+      `<circle class="rot rot-d s-hud" cx="100" cy="100" r="55" stroke-width="1.2" stroke-dasharray="2 6" opacity="0.7"/>` +
+      `<circle class="s-hud2" cx="100" cy="100" r="40" stroke-width="1" opacity="0.4"/>` +
+      `<g class="rot rot-core s-hud2" id="hud-spokes" stroke-width="0.9" opacity="0.5"></g>` +
+      `<g class="rot rot-radar"><line class="s-hud" x1="100" y1="100" x2="100" y2="53" stroke-width="1.6" opacity="0.6"/></g>` +
+      `<g id="hud-dots"></g>` +
+      `<circle class="core-glow" cx="100" cy="100" r="37"/>` +
+      `<circle class="core-disc" cx="100" cy="100" r="32"/>` +
+      `<circle class="core-lobe" cx="100" cy="100" r="32"/>` +
+      `<circle class="core-rim" cx="100" cy="100" r="32" stroke-width="1.2"/>` +
+      `<text class="hud-label" x="100" y="103.5" text-anchor="middle">J.A.R.V.I.S.</text>` +
+      `</g>` +
+      `</svg>` +
+      `</div>` +
+      `<div id="j-state" data-testid="biggy-jarvis-state"><span class="dot"></span><span id="j-state-txt">OFFLINE</span></div>`;
+    return dock;
   }
 
   function installSmedleyButton(header) {
@@ -1245,7 +1633,10 @@
     // Persistent category rail + docked open panel in unused landing space.
     // Never shrinks conversation viewport; never displaces brand header/composer.
     let dlg = document.getElementById('biggyTravelMapDialog');
-    if (dlg) return dlg;
+    if (dlg) {
+      mountTravelRailInWorkspace(dlg);
+      return dlg;
+    }
     const mainChat = document.getElementById('mainChat');
     if (!mainChat) return null;
     const legacy = document.getElementById('biggyTravelCenterPanelSlot');
@@ -1291,6 +1682,7 @@
       `</div>` +
       `</div>`;
     mainChat.appendChild(dlg);
+    mountTravelRailInWorkspace(dlg);
 
     const setCollapsed = (collapsed) => {
       dlg.classList.toggle('is-collapsed', !!collapsed);
@@ -1301,11 +1693,15 @@
       }
     };
     dlg.__biggySetCollapsed = setCollapsed;
+    const categoryButtons = () => {
+      const rail = document.getElementById('biggyCategoryRail');
+      return rail ? rail.querySelectorAll('.biggy-category-rail-btn[data-category]') : [];
+    };
 
     const setActiveCategory = (category, { open = true } = {}) => {
       const key = mapRecCategoryToRail(category);
       dlg.setAttribute('data-active-category', key);
-      dlg.querySelectorAll('.biggy-category-rail-btn').forEach((btn) => {
+      categoryButtons().forEach((btn) => {
         const on = btn.getAttribute('data-category') === key;
         btn.classList.toggle('is-active', on);
         btn.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -1339,7 +1735,7 @@
     };
     dlg.__biggySetActiveCategory = setActiveCategory;
 
-    dlg.querySelectorAll('.biggy-category-rail-btn').forEach((btn) => {
+    categoryButtons().forEach((btn) => {
       btn.addEventListener('click', (ev) => {
         ev.preventDefault();
         const key = btn.getAttribute('data-category') || 'travel';
@@ -1396,6 +1792,24 @@
     }
     setActiveCategory('travel', { open: false });
     return dlg;
+  }
+
+  // Categories are Biggy-level navigation.  Keep this rail exposed as the top
+  // layer of the collapsed right sidebar, mirroring Hermes's left navigation;
+  // category content itself continues to open only on demand.
+  function mountTravelRailInWorkspace(dlg) {
+    const rail = dlg && dlg.querySelector('#biggyCategoryRail');
+    const mainChat = document.getElementById('mainChat');
+    if (!rail || !mainChat) return;
+    if (rail.parentElement !== mainChat) mainChat.appendChild(rail);
+    const controls = document.querySelector('.biggy-right-cockpit-controls .biggy-brand-controls');
+    if (!controls) return;
+    const buttons = [...controls.querySelectorAll('button')];
+    buttons.reverse().forEach((button) => {
+      button.classList.add('biggy-category-rail-btn', 'biggy-utility-control');
+      rail.insertBefore(button, rail.firstChild);
+    });
+    controls.parentElement && controls.parentElement.remove();
   }
 
   function hideTravelMap() {
@@ -1875,11 +2289,20 @@
     document.body.classList.add(BODY_CLASS);
     mainChat.classList.add(IWO_CLASS);
     document.querySelectorAll('.biggy-brand-header').forEach((node) => node.remove());
+    document.querySelectorAll('.biggy-jarvis-transplant').forEach((node) => node.remove());
+    document.querySelectorAll('.biggy-composer-controls').forEach((node) => node.remove());
+    document.querySelectorAll('.biggy-right-cockpit-controls').forEach((node) => node.remove());
     pttInstalled = false;
+    installBiggyV6World(mainChat);
     const header = makeHeader();
     mainChat.insertBefore(header, mainChat.firstChild);
+    const reactorDock = makeReactorDock();
+    header.insertAdjacentElement('afterend', reactorDock);
+    buildReactorHud();
     installPttBridge(header);
     installSmedleyButton(header);
+    moveCockpitControlsToRightRail(header);
+    installJarvisV6Bridge(header);
     purgeOwnerAckArtifacts();
     installBiggyVoiceLabels();
     installSmedleyAudioPolicy();

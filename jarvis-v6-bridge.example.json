@@ -1,0 +1,5 @@
+{
+  "base_url": "http://127.0.0.1:4719",
+  "health_timeout_s": 3,
+  "chat_timeout_s": 120
+}

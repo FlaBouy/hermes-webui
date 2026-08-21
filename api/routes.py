@@ -12165,6 +12165,57 @@ def _render_index_shell_base() -> str:
     return base
 
 
+def _handle_biggy_v6_world_asset(handler, parsed) -> bool:
+    """Serve the read-only, same-origin V6 3D graph viewer embed.
+
+    Fixed allowlist only (3d.html / graph-data.js / logo.png), read directly
+    from the local V6 POC's built viewer directory on disk — no live request
+    to the V6 service on port 4719. This route intentionally sends its own
+    scoped CSP/X-Frame-Options instead of api.helpers._security_headers(),
+    because that shared policy sets X-Frame-Options: DENY and
+    frame-ancestors 'none', which would block Biggy from framing its own
+    embed. See api/jarvis_v6_world.py for the full rationale.
+    """
+    try:
+        from api.jarvis_v6_world import WORLD_CSP, serve_asset
+    except Exception:
+        logger.exception("jarvis v6 world module failed to import")
+        return j(handler, {"error": "V6 world embed unavailable"}, status=500)
+
+    if parsed.path == "/api/biggy/v6/world":
+        name = "3d.html"
+    else:
+        name = parsed.path[len("/api/biggy/v6/world/"):].strip()
+
+    try:
+        body, content_type, status = serve_asset(name)
+    except Exception:
+        logger.exception("jarvis v6 world asset serve failed: %s", name)
+        return j(handler, {"error": "V6 world embed failed"}, status=500)
+
+    handler.send_response(status)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Length", str(len(body)))
+    handler.send_header("Cache-Control", "no-store")
+    handler.send_header("X-Content-Type-Options", "nosniff")
+    # Deliberately SAMEORIGIN (not the app-wide DENY) — only Biggy's own
+    # page may frame this, matching frame-ancestors 'self' below.
+    handler.send_header("X-Frame-Options", "SAMEORIGIN")
+    handler.send_header("Content-Security-Policy", WORLD_CSP)
+    try:
+        from api.helpers import flush_pending_auth_cookies
+
+        flush_pending_auth_cookies(handler)
+    except Exception:
+        pass
+    handler.end_headers()
+    try:
+        handler.wfile.write(body)
+    except Exception:
+        pass
+    return True
+
+
 def handle_get(handler, parsed) -> bool:
     """Handle all GET routes. Returns True if handled, False for 404."""
     proxy_result = _handle_extension_sidecar_proxy(handler, parsed, "GET")
@@ -12683,6 +12734,29 @@ def handle_get(handler, parsed) -> bool:
 
     if parsed.path == "/api/realtime/status":
         return _handle_realtime_voice_status(handler)
+
+    if parsed.path in ("/api/biggy/v6/health", "/api/biggy/v6/status"):
+        try:
+            from api.jarvis_v6_bridge import JarvisBridge
+
+            payload, status = JarvisBridge().health()
+            return j(handler, payload, status=status)
+        except Exception:
+            logger.exception("jarvis v6 health bridge failed")
+            return j(
+                handler,
+                {
+                    "schema": "biggy.jarvis_v6_health.v1",
+                    "service": "jarvis-v6",
+                    "state": "error",
+                    "online": False,
+                    "error": "Jarvis V6 health bridge failed",
+                },
+                status=500,
+            )
+
+    if parsed.path == "/api/biggy/v6/world" or parsed.path.startswith("/api/biggy/v6/world/"):
+        return _handle_biggy_v6_world_asset(handler, parsed)
 
     if parsed.path == "/api/biggy/mapbox-public-config":
         try:
@@ -14306,6 +14380,34 @@ def handle_post(handler, parsed) -> bool:
         if diag:
             diag.finish()
         return proxy_result
+
+    if parsed.path == "/api/biggy/v6/chat":
+        try:
+            body = _read_json_request_body(handler, max_bytes=64 * 1024)
+        except ValueError as exc:
+            return bad(handler, _sanitize_error(exc), 400)
+        message = str(body.get("message") or body.get("question") or "").strip()
+        session = str(body.get("session") or "").strip() or None
+        context = body.get("context") if isinstance(body.get("context"), dict) else None
+        try:
+            from api.jarvis_v6_bridge import JarvisBridge
+
+            payload, status = JarvisBridge().chat(
+                message, session=session, context=context
+            )
+            return j(handler, payload, status=status)
+        except Exception:
+            logger.exception("jarvis v6 chat bridge failed")
+            return j(
+                handler,
+                {
+                    "ok": False,
+                    "state": "error",
+                    "error": "Jarvis V6 chat bridge failed",
+                    "answer": None,
+                },
+                status=500,
+            )
 
     if parsed.path == "/api/shutdown":
         return _handle_shutdown(handler)

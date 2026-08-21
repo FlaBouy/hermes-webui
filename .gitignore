@@ -73,6 +73,16 @@ graphify-out/
 
 .venv/
 
+# Local-only Jarvis V6 bridge config (never commit keys or config.json)
+jarvis-v6-bridge.local.json
+jarvis-v6-bridge.json
+**/config.json
+!**/config.json.example
+
+# Local-only Jarvis V6 world-viewer config (points at the local POC checkout)
+jarvis-v6-world.local.json
+jarvis-v6-world.json
+
 # Dev-only lint tooling (ESLint runtime-error guard) — see TESTING.md
 node_modules/
 package-lock.json
