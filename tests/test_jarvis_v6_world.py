@@ -63,6 +63,7 @@ def test_3d_html_gets_chrome_suppressed_and_based(tmp_path, monkeypatch):
     assert "#j-orb" in text and "display:none!important" in text
     assert "#jarvis" in text
     assert "#j-inbox" in text and "#j-tasks" in text
+    assert "biggy-rag-trace-runtime" in text
     # The transplant markers themselves are untouched (still present, just hidden by CSS).
     assert '<div id="j-orb"></div>' in text
 
@@ -73,10 +74,25 @@ def test_graph_data_js_served_verbatim(tmp_path, monkeypatch):
     (viewer / "3d.html").write_text("<html><head></head><body></body></html>", encoding="utf-8")
     (viewer / "graph-data.js").write_text("const GRAPH = {\"nodes\":[]};", encoding="utf-8")
     monkeypatch.setattr(world, "load_world_config", lambda: {"viewer_dir": str(viewer)})
+    monkeypatch.setattr(world, "resolve_rag_ingest_ledger", lambda: None)
     body, content_type, status = world.serve_asset("graph-data.js")
     assert status == 200
     assert body == b'const GRAPH = {"nodes":[]};'
     assert "javascript" in content_type
+
+
+def test_rag_pool_graph_uses_ingestion_ledger_for_folder_and_document_paths(tmp_path):
+    ledger = tmp_path / "ingest_ledger.json"
+    ledger.write_text(
+        '{"files":{"a":{"source":"Vendor Data/Allen Bradley/1756/manual.pdf",'
+        '"phase":"indexed","updated_at":"2026-08-21T12:00:00Z"}}}',
+        encoding="utf-8",
+    )
+    graph = world._build_rag_pool_graph(ledger)
+    ids = {node["id"] for node in graph["nodes"]}
+    assert "root:rag-pool" in ids
+    assert "dir:Vendor Data/Allen Bradley/1756" in ids
+    assert "doc:Vendor Data/Allen Bradley/1756/manual.pdf" in ids
 
 
 def test_world_csp_allows_same_origin_framing_and_esm_cdn():

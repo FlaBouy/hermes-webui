@@ -17,6 +17,7 @@
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
   const V6_WORLD_PATH = '/api/biggy/v6/world';
+  const V6_WORLD_STATUS_PATH = '/api/biggy/v6/world/status';
   const ORB_STATES = Object.freeze([
     'offline', 'online', 'thinking', 'speaking', 'tool-running', 'error',
   ]);
@@ -52,6 +53,9 @@
   };
   let identityTimer = null;
   let diagTimer = null;
+  let ragWorldTimer = null;
+  let ragTraceObserverInstalled = false;
+  let ragTraceStatusListenerInstalled = false;
   let started = false;
   let pttInstalled = false;
   let sessionEnsurePromise = null;
@@ -1434,6 +1438,72 @@
     fallback.classList.add('is-active');
   }
 
+  function postRagTrace(trace) {
+    const frame = document.getElementById('biggyV6World');
+    try {
+      if (frame && frame.contentWindow) {
+        frame.contentWindow.postMessage({ type: 'biggy-rag-trace', trace }, window.location.origin);
+      }
+    } catch (_) {}
+  }
+
+  function traceFromRagPayload(payload) {
+    if (!payload || typeof payload !== 'object') return;
+    const receipt = payload.retrieval_receipt && typeof payload.retrieval_receipt === 'object'
+      ? payload.retrieval_receipt : null;
+    const active = payload.active_document && typeof payload.active_document === 'object'
+      ? payload.active_document : null;
+    const source = String((receipt && receipt.source) || (active && active.source) || '').trim();
+    // A green route is earned only by a concrete retrieval receipt.  A red
+    // segment needs a concrete file path as well; we never invent one for a
+    // no-match answer because that would falsely accuse a document branch.
+    if (receipt && source) {
+      postRagTrace({ state: payload.error ? 'failed' : 'complete', source });
+    } else if (payload.document_route && payload.error && source) {
+      postRagTrace({ state: 'failed', source });
+    }
+  }
+
+  function installRagTraceObserver() {
+    if (ragTraceObserverInstalled || typeof window.fetch !== 'function') return;
+    ragTraceObserverInstalled = true;
+    const nativeFetch = window.fetch.bind(window);
+    window.fetch = async (...args) => {
+      const response = await nativeFetch(...args);
+      try {
+        const request = String(args[0] && (args[0].url || args[0]) || '');
+        if (/\/api\/(?:chat|ask-jarvis|biggy\/v6\/chat)/.test(request)) {
+          response.clone().json().then(traceFromRagPayload).catch(() => {});
+        }
+      } catch (_) {}
+      return response;
+    };
+    if (!ragTraceStatusListenerInstalled) {
+      ragTraceStatusListenerInstalled = true;
+      window.addEventListener('message', (event) => {
+        if (event.origin !== window.location.origin) return;
+        const data = event.data || {};
+        if (data.type !== 'biggy-rag-trace-applied') return;
+        const frame = document.getElementById('biggyV6World');
+        if (frame) frame.dataset.ragTrace = JSON.stringify(data.trace || {});
+      });
+    }
+  }
+
+  async function pollRagWorldState() {
+    try {
+      const response = await fetch(V6_WORLD_STATUS_PATH, { cache: 'no-store' });
+      if (!response.ok) return;
+      const status = await response.json();
+      const phase = String(status && status.phase || '').toLowerCase();
+      const state = String(status && status.state || '').toLowerCase();
+      const file = String(status && status.last_file || '').trim();
+      if (file && (state === 'error' || phase === 'failed' || phase === 'quarantined')) {
+        postRagTrace({ state: 'failed', source: file, reason: status.last_error || phase });
+      }
+    } catch (_) {}
+  }
+
   function installBiggyV6World(mainChat) {
     if (!mainChat) return;
     mainChat.querySelectorAll('.biggy-v6-world, .biggy-v6-world-fallback')
@@ -1492,6 +1562,9 @@
           showV6WorldFallback(fallback, 'graph failed to initialize (check network access)');
         }
       }, 4000);
+      // The ingest watcher is authoritative for a path that failed before it
+      // could be retrieved.  Polling it here paints only that known bad edge.
+      pollRagWorldState().catch(() => {});
     });
     mainChat.appendChild(iframe);
   }
@@ -2303,6 +2376,7 @@
     installSmedleyButton(header);
     moveCockpitControlsToRightRail(header);
     installJarvisV6Bridge(header);
+    installRagTraceObserver();
     purgeOwnerAckArtifacts();
     installBiggyVoiceLabels();
     installSmedleyAudioPolicy();
@@ -2339,6 +2413,8 @@
     }, 15000);
     if (diagTimer) clearInterval(diagTimer);
     diagTimer = setInterval(() => refreshGuiDiagnostics(), 3000);
+    if (ragWorldTimer) clearInterval(ragWorldTimer);
+    ragWorldTimer = setInterval(() => { pollRagWorldState().catch(() => {}); }, 5000);
   }
 
   function start() {

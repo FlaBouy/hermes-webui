@@ -12755,6 +12755,15 @@ def handle_get(handler, parsed) -> bool:
                 status=500,
             )
 
+    if parsed.path == "/api/biggy/v6/world/status":
+        try:
+            from api.jarvis_v6_world import ingest_status
+
+            return j(handler, ingest_status(), status=200)
+        except Exception:
+            logger.exception("jarvis v6 world status failed")
+            return j(handler, {"ok": False, "state": "error"}, status=200)
+
     if parsed.path == "/api/biggy/v6/world" or parsed.path.startswith("/api/biggy/v6/world/"):
         return _handle_biggy_v6_world_asset(handler, parsed)
 
