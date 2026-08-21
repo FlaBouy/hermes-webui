@@ -64,6 +64,7 @@ def test_3d_html_gets_chrome_suppressed_and_based(tmp_path, monkeypatch):
     assert "#jarvis" in text
     assert "#j-inbox" in text and "#j-tasks" in text
     assert "biggy-rag-trace-runtime" in text
+    assert "installGalaxyNavigation" in text
     # The transplant markers themselves are untouched (still present, just hidden by CSS).
     assert '<div id="j-orb"></div>' in text
 
@@ -95,6 +96,21 @@ def test_rag_pool_graph_uses_ingestion_ledger_for_folder_and_document_paths(tmp_
     assert "doc:Vendor Data/Allen Bradley/1756/manual.pdf" in ids
 
 
+def test_rag_navigation_is_ledger_scoped_and_never_traverses(tmp_path, monkeypatch):
+    root = tmp_path / "Library"
+    document = root / "Vendor Data/Allen Bradley/manual.pdf"
+    document.parent.mkdir(parents=True)
+    document.write_bytes(b"%PDF-test")
+    ledger = tmp_path / "ingest_ledger.json"
+    ledger.write_text('{"files":{"a":{"source":"Vendor Data/Allen Bradley/manual.pdf"}}}', encoding="utf-8")
+    monkeypatch.setattr(world, "resolve_rag_ingest_ledger", lambda: ledger)
+    monkeypatch.setattr(world, "resolve_rag_library_root", lambda: root)
+    assert world.rag_folder_entries("Vendor Data") == [{"name": "Allen Bradley", "path": "Vendor Data/Allen Bradley", "kind": "folder"}]
+    assert world.rag_folder_entries("../private") is None
+    assert world.resolve_rag_document("Vendor Data/Allen Bradley/manual.pdf")[1] == document.resolve()
+    assert world.resolve_rag_document("../private.pdf") is None
+
+
 def test_world_csp_allows_same_origin_framing_and_esm_cdn():
     assert "frame-ancestors 'self'" in world.WORLD_CSP
     assert "https://esm.sh" in world.WORLD_CSP
@@ -103,6 +119,8 @@ def test_world_csp_allows_same_origin_framing_and_esm_cdn():
 def test_browser_source_never_calls_v6_port_directly():
     assert "4719" not in BIGGY_JS
     assert "/api/biggy/v6/world" in BIGGY_JS
+    assert "syncGalaxyCanvasSize" in BIGGY_JS
+    assert "new ResizeObserver" not in BIGGY_JS
 
 
 def test_routes_wire_world_endpoint():
@@ -111,6 +129,8 @@ def test_routes_wire_world_endpoint():
     # Must not reuse the shared DENY/frame-ancestors-none security headers,
     # which would prevent the same-origin iframe from ever loading.
     assert "X-Frame-Options" in ROUTES
+    assert "/api/biggy/rag-browse" in ROUTES
+    assert "/api/biggy/rag-file" in ROUTES
 
 
 def test_iwo_background_image_removed_from_css():

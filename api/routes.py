@@ -10312,6 +10312,53 @@ def _request_browser_origin(handler) -> str:
 
 
 _JARVIS_RAG_DOCUMENT_PREFIX = "/api/jarvis-ii/rag-document/"
+_BIGGY_RAG_BROWSE_PATH = "/api/biggy/rag-browse"
+_BIGGY_RAG_FILE_PATH = "/api/biggy/rag-file"
+
+
+def _handle_biggy_rag_navigation(handler, parsed) -> bool:
+    """Serve ledger-scoped RAG folder pages and document links for Biggy."""
+    if parsed.path not in {_BIGGY_RAG_BROWSE_PATH, _BIGGY_RAG_FILE_PATH}:
+        return False
+    try:
+        from api.jarvis_v6_world import rag_folder_entries, resolve_rag_document
+
+        requested = unquote((parse_qs(parsed.query).get("path") or [""])[0])
+        if parsed.path == _BIGGY_RAG_FILE_PATH:
+            resolved = resolve_rag_document(requested)
+            if resolved is None:
+                return bad(handler, "document not available", 404)
+            root, target, mime, disposition = resolved
+            return _serve_file_bytes(handler, target, mime, disposition, "no-store", anchor_root=root)
+        entries = rag_folder_entries(requested)
+        if entries is None:
+            return bad(handler, "folder not available", 404)
+        current = str(requested).strip("/")
+        parent = current.rsplit("/", 1)[0] if "/" in current else ""
+        rows = []
+        if current:
+            rows.append(f'<li><a href="{_BIGGY_RAG_BROWSE_PATH}?path={quote(parent, safe="")}">↩ Parent folder</a></li>')
+        for entry in entries:
+            route = _BIGGY_RAG_BROWSE_PATH if entry["kind"] == "folder" else _BIGGY_RAG_FILE_PATH
+            href = f'{route}?path={quote(entry["path"], safe="")}'
+            rows.append(f'<li><a href="{href}">{_html.escape(entry["name"])}</a><small>{entry["kind"].title()}</small></li>')
+        title = "RAG Pool" + (" / " + _html.escape(current) if current else "")
+        body = (
+            "<!doctype html><meta charset=utf-8><title>" + title + "</title>"
+            "<style>body{margin:28px;background:#090c10;color:#dbe7ef;font:15px system-ui,sans-serif}h1{font-size:18px}ul{list-style:none;padding:0;max-width:800px}li{padding:10px 0;border-bottom:1px solid #1e2a34}a{color:#34d399;text-decoration:none}small{margin-left:10px;color:#718096;font:11px ui-monospace,monospace}</style>"
+            "<h1>" + title + "</h1><ul>" + "".join(rows) + "</ul>"
+        ).encode("utf-8")
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/html; charset=utf-8")
+        handler.send_header("Content-Length", str(len(body)))
+        handler.send_header("Cache-Control", "no-store")
+        _security_headers(handler)
+        handler.end_headers()
+        handler.wfile.write(body)
+        return True
+    except Exception:
+        logger.exception("Biggy RAG navigation failed")
+        return bad(handler, "RAG navigation unavailable", 500)
 
 
 def _handle_jarvis_rag_document(handler, parsed) -> bool:
@@ -12221,6 +12268,10 @@ def handle_get(handler, parsed) -> bool:
     proxy_result = _handle_extension_sidecar_proxy(handler, parsed, "GET")
     if proxy_result is not False:
         return proxy_result
+
+    rag_navigation_result = _handle_biggy_rag_navigation(handler, parsed)
+    if rag_navigation_result is not False:
+        return rag_navigation_result
 
     rag_document_result = _handle_jarvis_rag_document(handler, parsed)
     if rag_document_result is not False:

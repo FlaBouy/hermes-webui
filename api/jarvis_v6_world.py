@@ -21,6 +21,7 @@ chrome (canvas, node inspector, legend, hud, search) are left untouched.
 from __future__ import annotations
 
 import json
+import mimetypes
 import os
 import threading
 import time
@@ -48,6 +49,7 @@ DEFAULT_RAG_STATUS_URL = "http://127.0.0.1:5004/ingest-status"
 DEFAULT_RAG_INGEST_LEDGER = Path.home() / ".jarvis_rag_status" / "ingest_ledger.json"
 MAX_WORLD_DOCUMENTS = 4000
 _WORLD_CACHE_TTL_S = 20.0
+_BROWSABLE_DOCUMENT_SUFFIXES = frozenset({".pdf", ".txt", ".md", ".csv", ".json", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"})
 _world_cache_lock = threading.Lock()
 _world_cache: tuple[float, bytes] | None = None
 
@@ -102,6 +104,89 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     };
     g.linkColor(idleColor).linkWidth(idleWidth).linkOpacity(0.74);
     idleContrastInstalled = true;
+    return true;
+  }
+  function nodePath(node) {
+    const match = /^key:(?:dir|doc):(.+)$/.exec(String(node && node.p || ''));
+    return match ? match[1] : '';
+  }
+  function nodeUrl(node) {
+    const rel = nodePath(node);
+    if (!rel) return '';
+    if (String(node.g) === 'document') return `/api/biggy/rag-file?path=${encodeURIComponent(rel)}`;
+    if (String(node.g) === 'folder') return `/api/biggy/rag-browse?path=${encodeURIComponent(rel)}`;
+    return '';
+  }
+  function openNode(node) {
+    const url = nodeUrl(node);
+    if (url) window.open(url, '_blank', 'noopener');
+  }
+  function addNodeAction(node) {
+    const url = nodeUrl(node), card = document.getElementById('j-nodecard');
+    if (!url || !card || card.querySelector('[data-biggy-rag-open]')) return;
+    const link = document.createElement('a');
+    link.href = url; link.target = '_blank'; link.rel = 'noopener';
+    link.dataset.biggyRagOpen = '1';
+    link.textContent = node.g === 'document' ? 'Open document ↗' : 'Browse folder ↗';
+    link.style.cssText = 'display:inline-block;margin-top:12px;color:#34d399;font:700 11px ui-monospace,monospace;text-decoration:none;';
+    card.appendChild(link);
+  }
+  function installGalaxyNavigation() {
+    const g = graph(), host = document.getElementById('g');
+    if (!g || !host || host.dataset.biggyNavigationInstalled) return !!g;
+    host.dataset.biggyNavigationInstalled = '1';
+    const focus = window.__os && window.__os.onNodeClick;
+    const showCard = window.__os && window.__os.showNodeCard;
+    if (typeof focus === 'function') {
+      g.onNodeClick((node, event) => {
+        focus(node, event);
+        if (typeof showCard === 'function' && !(event && event.shiftKey)) {
+          showCard(node, event); addNodeAction(node);
+        }
+        if (event && (event.metaKey || event.ctrlKey)) openNode(node);
+      });
+    }
+    if (typeof showCard === 'function') {
+      g.onNodeRightClick((node, event) => { showCard(node, event); addNodeAction(node); });
+    }
+    // Middle-button drag translates the camera and target together in the
+    // visible screen plane; left drag remains V6's native orbit control.
+    let active = false, lastX = 0, lastY = 0, priorRotate = false;
+    const stop = event => {
+      if (!active) return;
+      active = false;
+      const controls = g.controls();
+      if (controls) controls.autoRotate = priorRotate;
+      try { host.releasePointerCapture(event.pointerId); } catch (_) {}
+    };
+    host.addEventListener('pointerdown', event => {
+      if (event.button !== 1) return;
+      active = true; lastX = event.clientX; lastY = event.clientY;
+      const controls = g.controls(); priorRotate = !!(controls && controls.autoRotate);
+      if (controls) controls.autoRotate = false;
+      try { host.setPointerCapture(event.pointerId); } catch (_) {}
+      event.preventDefault(); event.stopPropagation();
+    }, true);
+    host.addEventListener('pointermove', event => {
+      if (!active) return;
+      const dx = event.clientX - lastX, dy = event.clientY - lastY;
+      lastX = event.clientX; lastY = event.clientY;
+      const camera = g.camera(), controls = g.controls();
+      if (!camera || !controls || !camera.matrixWorld || !camera.matrixWorld.elements) return;
+      const distance = camera.position.distanceTo(controls.target);
+      const scale = (2 * distance * Math.tan((camera.fov || 45) * Math.PI / 360)) / Math.max(host.clientHeight, 1);
+      const m = camera.matrixWorld.elements;
+      const shiftX = (m[0] * -dx + m[4] * dy) * scale;
+      const shiftY = (m[1] * -dx + m[5] * dy) * scale;
+      const shiftZ = (m[2] * -dx + m[6] * dy) * scale;
+      camera.position.x += shiftX; camera.position.y += shiftY; camera.position.z += shiftZ;
+      controls.target.x += shiftX; controls.target.y += shiftY; controls.target.z += shiftZ;
+      controls.update();
+      event.preventDefault(); event.stopPropagation();
+    }, true);
+    host.addEventListener('pointerup', stop, true);
+    host.addEventListener('pointercancel', stop, true);
+    host.addEventListener('auxclick', event => { if (event.button === 1) event.preventDefault(); }, true);
     return true;
   }
   function mapNodes() {
@@ -169,6 +254,7 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
   });
   const waitForGraph = () => {
     if (!installIdleContrast()) setTimeout(waitForGraph, 180);
+    else installGalaxyNavigation();
   };
   waitForGraph();
   // The upstream V6 viewer fits the entire graph for a small personal vault.
@@ -398,6 +484,71 @@ def _canonical_source(value: object) -> str:
     if marker in source:
         source = source.split(marker, 1)[1]
     return source.strip("/")
+
+
+def rag_folder_entries(value: object) -> list[dict[str, str]] | None:
+    """List one virtual RAG folder from ledger-known sources only."""
+    rel = _safe_rag_rel(value)
+    if rel is None:
+        return None
+    prefix = rel + "/" if rel else ""
+    entries: dict[str, dict[str, str]] = {}
+    for source in _ledger_sources():
+        if prefix and not source.startswith(prefix):
+            continue
+        remainder = source[len(prefix):] if prefix else source
+        if not remainder:
+            continue
+        name, separator, _tail = remainder.partition("/")
+        child_rel = f"{rel}/{name}" if rel else name
+        entries[name] = {"name": name, "path": child_rel, "kind": "folder" if separator else "document"}
+    return [entries[name] for name in sorted(entries, key=str.casefold)]
+
+
+def resolve_rag_document(value: object) -> tuple[Path, Path, str, str] | None:
+    """Return a ledger-known document plus safe browser delivery metadata."""
+    rel = _safe_rag_rel(value)
+    if not rel or rel not in _ledger_sources() or Path(rel).suffix.lower() not in _BROWSABLE_DOCUMENT_SUFFIXES:
+        return None
+    root = resolve_rag_library_root()
+    if root is None:
+        return None
+    target = (root / rel).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return None
+    if not target.is_file():
+        return None
+    suffix = target.suffix.lower()
+    mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
+    disposition = "inline" if suffix in {".pdf", ".txt", ".md", ".csv", ".json"} else "attachment"
+    return root, target, mime, disposition
+
+
+def _safe_rag_rel(value: object) -> str | None:
+    rel = _canonical_source(value)
+    if not rel:
+        return ""
+    return None if any(part in {"", ".", ".."} for part in rel.split("/")) else rel
+
+
+def _ledger_sources() -> set[str]:
+    ledger_path = resolve_rag_ingest_ledger()
+    if ledger_path is None:
+        return set()
+    try:
+        payload = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    records = payload.get("files") if isinstance(payload, dict) else {}
+    return {
+        source
+        for row in (records.values() if isinstance(records, dict) else [])
+        if isinstance(row, dict)
+        for source in [_safe_rag_rel(row.get("source") or row.get("path"))]
+        if source
+    }
 
 
 def ingest_status() -> dict[str, Any]:

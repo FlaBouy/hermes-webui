@@ -1526,6 +1526,35 @@
     iframe.setAttribute('title', 'Jarvis V6 \u2014 3D memory graph');
     iframe.setAttribute('referrerpolicy', 'no-referrer');
     iframe.src = `${V6_WORLD_PATH}?v=${encodeURIComponent(BUILD_ID)}`;
+    // Chrome's own fullscreen (F11 / browser wrapper) resizes the top-level
+    // page, but ForceGraph3D retains the dimensions captured when it was
+    // constructed. Reconcile only on a real outer-window resize and only if
+    // the iframe's measured dimensions changed. This is intentionally not a
+    // ResizeObserver or animation loop: it cannot continuously re-render a
+    // static display and drive the TD fans.
+    let lastGalaxySize = '';
+    let galaxyResizeTimer = null;
+    const syncGalaxyCanvasSize = () => {
+      galaxyResizeTimer = null;
+      if (document.getElementById('biggyV6World') !== iframe) return;
+      try {
+        const rect = iframe.getBoundingClientRect();
+        const width = Math.max(1, Math.round(rect.width));
+        const height = Math.max(1, Math.round(rect.height));
+        const size = `${width}x${height}`;
+        if (size === lastGalaxySize) return;
+        const inner = iframe.contentWindow;
+        const graph = inner && inner.__os && inner.__os.Graph;
+        if (!graph) return;
+        graph.width(width).height(height);
+        lastGalaxySize = size;
+      } catch (_) {}
+    };
+    const scheduleGalaxyCanvasSize = () => {
+      if (galaxyResizeTimer !== null) clearTimeout(galaxyResizeTimer);
+      galaxyResizeTimer = setTimeout(syncGalaxyCanvasSize, 120);
+    };
+    window.addEventListener('resize', scheduleGalaxyCanvasSize);
     iframe.addEventListener('error', () => {
       showV6WorldFallback(fallback, 'local V6 viewer unreachable');
       iframe.remove();
@@ -1562,6 +1591,8 @@
           showV6WorldFallback(fallback, 'graph failed to initialize (check network access)');
         }
       }, 4000);
+      scheduleGalaxyCanvasSize();
+      setTimeout(scheduleGalaxyCanvasSize, 700);
       // The ingest watcher is authoritative for a path that failed before it
       // could be retrieved.  Polling it here paints only that known bad edge.
       pollRagWorldState().catch(() => {});
