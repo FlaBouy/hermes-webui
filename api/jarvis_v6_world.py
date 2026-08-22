@@ -11,11 +11,10 @@ narrow allowlist of static files already built to disk by the V6 POC's own
 viewer directory path) is local-only/gitignored, mirroring
 `jarvis_v6_bridge.py`.
 
-Jarvis V6's own presence chrome (orb/state/model chip, inbox, tasks, prompt
-bar) is suppressed in the served `3d.html` via a small injected <style>
-block: Biggy's header reactor is the single Jarvis identity/status display,
-and Biggy owns chat input. The graph/scene renderer and its own viewer
-chrome (canvas, node inspector, legend, hud, search) are left untouched.
+Jarvis V6's standalone chrome is suppressed in the served `3d.html` before
+its first paint: Biggy's header reactor is the single Jarvis identity/status
+display, and Biggy owns chat input, navigation, and workspace presentation.
+The iframe contributes only the force-graph canvas and interaction runtime.
 """
 
 from __future__ import annotations
@@ -62,13 +61,17 @@ ALLOWED_ASSETS: dict[str, str] = {
     "logo.png": "image/png",
 }
 
-# Jarvis V6's own presence/chat chrome — suppressed here because Biggy's
-# header reactor is the single identity/status surface and Biggy's own
-# composer is the only input surface. The graph/scene module and its own
-# viewer chrome (#g canvas, #side, #legend, #hud) are unaffected.
+# Jarvis V6's standalone chrome is suppressed in the document Biggy serves,
+# before an embedded viewer can make its first paint. Biggy owns identity,
+# composer, navigation, and workspace presentation; the iframe contributes
+# only the force graph canvas and its interaction runtime.
 _SUPPRESS_STYLE = (
-    "<style>#j-orb,#j-state,#j-status,#j-brain,#jarvis,#j-inbox,#j-tasks"
-    "{display:none!important}</style>"
+    "<style id=\"biggy-world-prepaint-reset\">"
+    "#side,#collapse,#legend,#hud,#brand,#hint,#toast,"
+    "#j-orb,#j-state,#j-status,#j-brain,#jarvis,#j-inbox,#j-tasks,.foot"
+    "{display:none!important}"
+    "html,body,#g{margin:0!important;width:100%!important;height:100%!important;overflow:hidden!important}"
+    "</style>"
 )
 _BASE_HREF = '<base href="/api/biggy/v6/world/">'
 _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
@@ -85,6 +88,25 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
   function nodeFor(value) {
     const data = window.__os && window.__os.data;
     return data && data.nodes ? data.nodes[idOf(value)] : null;
+  }
+  function promptAnchor() {
+    const data = window.__os && window.__os.data;
+    // The V6 viewer turns graph-data ids into numeric renderer ids, but
+    // preserves our canonical key in `p`.
+    return (data && data.nodes || []).find(node => String(node && node.p) === 'key:prompt:argus') || null;
+  }
+  function preparePromptAnchor() {
+    const g = graph();
+    const anchor = promptAnchor();
+    if (!g || !anchor) return null;
+    // The standalone viewer copies graph data into renderer nodes and drops
+    // fx/fy/fz.  Reassert the fixed origin on that live copy, then enlarge
+    // its value so the Prompt reads as a visible command anchor, not a hub.
+    anchor.fx = anchor.fy = anchor.fz = 0;
+    anchor.x = anchor.y = anchor.z = 0;
+    anchor.val = Math.max(Number(anchor.val) || 0, 22);
+    try { g.d3ReheatSimulation(); } catch (_) {}
+    return anchor;
   }
   function installIdleContrast() {
     const g = graph();
@@ -201,7 +223,7 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
   function routeFor(source) {
     const rel = canonicalSource(source);
     if (!rel) return [];
-    const keys = ['root:rag-pool'];
+    const keys = ['prompt:argus'];
     const parts = rel.split('/').filter(Boolean);
     let cursor = '';
     for (const part of parts.slice(0, -1)) {
@@ -252,23 +274,38 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     if (data.type === 'biggy-rag-trace') apply(data.trace || {});
     if (data.type === 'biggy-rag-trace-clear') restore();
   });
+  const applyLandingCamera = () => {
+    const g = graph();
+    if (!g || landingZoomApplied) return false;
+    const anchor = preparePromptAnchor();
+    if (!anchor || !Number.isFinite(anchor.x) || !Number.isFinite(anchor.y) || !Number.isFinite(anchor.z)) return false;
+    const c = g.cameraPosition();
+    if (!c || !Number.isFinite(c.z)) return false;
+    // A pinned root only anchors the physics simulation.  OrbitControls has
+    // its own target, so explicitly make the active ARGUS Prompt the camera
+    // pivot before the dormant auto-rotate takes over.
+    const controls = g.controls();
+    if (controls && controls.target) {
+      controls.target.set(anchor.x, anchor.y, anchor.z);
+      controls.update();
+    }
+    landingZoomApplied = true;
+    // The original V6 intro-fit is intentionally disabled for an embedded
+    // corpus. Biggy owns one immediate, readable landing distance instead of
+    // a second zoom several seconds after the page appears.
+    g.cameraPosition({
+      x: anchor.x + (c.x - anchor.x) * 0.38,
+      y: anchor.y + (c.y - anchor.y) * 0.38,
+      z: anchor.z + (c.z - anchor.z) * 0.38,
+    }, anchor, 900);
+    return true;
+  };
   const waitForGraph = () => {
-    if (!installIdleContrast()) setTimeout(waitForGraph, 180);
-    else installGalaxyNavigation();
+    if (!installIdleContrast()) { setTimeout(waitForGraph, 180); return; }
+    installGalaxyNavigation();
+    requestAnimationFrame(() => { if (!applyLandingCamera()) setTimeout(waitForGraph, 180); });
   };
   waitForGraph();
-  // The upstream V6 viewer fits the entire graph for a small personal vault.
-  // A thousand-node corpus needs a closer landing distance to read the
-  // hierarchy across the room.  This executes once, after V6's own intro-fit;
-  // normal orbit/wheel controls remain entirely untouched afterwards.
-  setTimeout(() => {
-    const g = graph();
-    if (!g || landingZoomApplied) return;
-    const c = g.cameraPosition();
-    if (!c || !Number.isFinite(c.z)) return;
-    landingZoomApplied = true;
-    g.cameraPosition({ x: c.x * 0.38, y: c.y * 0.38, z: c.z * 0.38 }, undefined, 1300);
-  }, 11800);
   window.__biggyRagTraceReady = true;
 })();
 </script>'''
@@ -399,6 +436,11 @@ def _patch_index_html(data: bytes) -> bytes:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         return data
+    # The standalone viewer owns a delayed intro-fit, which is correct for its
+    # personal-vault page but causes a second camera move after Biggy has
+    # already mounted the full corpus. The embedding runtime above owns the
+    # single landing camera instead.
+    text = text.replace("Graph.onEngineStop(fitOnce);\nsetTimeout(fitOnce, 9000);", "", 1)
     injected = _BASE_HREF + _SUPPRESS_STYLE + _TRACE_RUNTIME
     if "<head>" in text:
         text = text.replace("<head>", "<head>" + injected, 1)
@@ -434,13 +476,19 @@ def _rag_pool_graph_data(fallback: bytes) -> bytes:
 
 def _build_rag_pool_graph(ledger_path: Path) -> dict[str, Any]:
     groups = {
-        "router": {"c": "#34d399", "r": 11, "glow": 30, "name": "RAG Pool", "pace": 0, "pause": 0, "major": True},
+        "prompt": {"c": "#f4a93a", "r": 22, "glow": 54, "name": "ARGUS Prompt", "pace": 0, "pause": 0, "major": True},
         "folder": {"c": "#60a5fa", "r": 7, "glow": 18, "name": "Library folder", "pace": 260, "pause": 360, "major": True},
         "document": {"c": "#a78bfa", "r": 4, "glow": 11, "name": "Indexed document", "pace": 460, "pause": 560, "major": False},
     }
-    nodes: list[dict[str, str]] = [{"id": "root:rag-pool", "label": "RAG Pool", "g": "router", "p": "key:root:rag-pool"}]
+    # The active prompt is the world anchor.  It is pinned at the origin, so
+    # the dormant auto-rotation moves the RAG branches around the question
+    # rather than allowing the root to drift through the display.
+    nodes: list[dict[str, Any]] = [{
+        "id": "prompt:argus", "label": "ARGUS PROMPT", "g": "prompt",
+        "p": "key:prompt:argus", "fx": 0, "fy": 0, "fz": 0,
+    }]
     links: list[dict[str, int]] = []
-    index: dict[str, int] = {"root:rag-pool": 0}
+    index: dict[str, int] = {"prompt:argus": 0}
 
     def add(key: str, label: str, group: str, parent: str) -> None:
         if key in index:
@@ -472,8 +520,8 @@ def _build_rag_pool_graph(ledger_path: Path) -> dict[str, Any]:
         for part in parts[:-1]:
             cursor = f"{cursor}/{part}" if cursor else part
             parent_dir = cursor.rsplit("/", 1)[0] if "/" in cursor else ""
-            add("dir:" + cursor, part, "folder", "dir:" + parent_dir if parent_dir else "root:rag-pool")
-        parent = "dir:" + rel.rsplit("/", 1)[0] if "/" in rel else "root:rag-pool"
+            add("dir:" + cursor, part, "folder", "dir:" + parent_dir if parent_dir else "prompt:argus")
+        parent = "dir:" + rel.rsplit("/", 1)[0] if "/" in rel else "prompt:argus"
         add("doc:" + rel, Path(rel).name, "document", parent)
     return {"brand": {"name": "RAG POOL", "logo": False}, "groups": groups, "nodes": nodes, "links": links}
 
@@ -551,8 +599,116 @@ def _ledger_sources() -> set[str]:
     }
 
 
+def retry_ingest_source(value: object) -> dict[str, str | bool]:
+    """Explicitly re-queue one ledger-known ingestion failure.
+
+    This is deliberately narrower than a general ingest endpoint: callers can
+    only name a canonical source already recorded in the local ledger, and the
+    resolved file must remain below the configured RAG library root.  The
+    browser never auto-calls this; it is the affirmative action behind an
+    operator's red-card dialog.
+    """
+    rel = _safe_rag_rel(value)
+    if not rel or rel not in _ledger_sources():
+        raise ValueError("unknown RAG ledger source")
+    root = resolve_rag_library_root()
+    if root is None:
+        raise ValueError("RAG library is unavailable")
+    target = (root / rel).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("invalid RAG source") from exc
+    if not target.is_file():
+        raise ValueError("RAG source file is unavailable")
+
+    ledger_path = resolve_rag_ingest_ledger()
+    try:
+        payload = json.loads(ledger_path.read_text(encoding="utf-8")) if ledger_path else {}
+    except (OSError, json.JSONDecodeError):
+        payload = {}
+    records = payload.get("files") if isinstance(payload, dict) else {}
+    row = next((item for item in (records.values() if isinstance(records, dict) else [])
+                if isinstance(item, dict) and _canonical_source(item.get("source") or item.get("path")) == rel), None)
+    phase = str((row or {}).get("phase") or "").lower()
+    if phase not in {"failed", "quarantined", "quarantine", "error"}:
+        raise ValueError("only failed ingestion records can be re-ingested")
+
+    from api.jarvis_rag_ingest_events import record_file_event, retry_quarantine
+    if phase in {"quarantined", "quarantine"}:
+        result = retry_quarantine(str(target))
+    else:
+        result = record_file_event(str(target), "queued", reason=None)
+    return {
+        "ok": True,
+        "source": rel,
+        "file": target.name,
+        "state": str(result.get("status") or result.get("phase") or "queued"),
+        "queued": bool(result.get("queued", True)),
+    }
+
+
+def _ingest_overview(ledger_path: Path | None) -> dict[str, Any]:
+    """Return bounded, display-safe RAG counters and the current activity radar."""
+    empty = {"node_count": 0, "link_count": 0, "store_count": 0, "recent": []}
+    if ledger_path is None:
+        return empty
+    try:
+        payload = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return empty
+    records = payload.get("files") if isinstance(payload, dict) else {}
+    if not isinstance(records, dict):
+        return empty
+
+    rows: list[dict[str, str]] = []
+    stored = 0
+    for row in records.values():
+        if not isinstance(row, dict):
+            continue
+        source = _canonical_source(row.get("source") or row.get("path"))
+        if not source:
+            continue
+        phase = str(row.get("phase") or "unknown").lower()
+        reason = str(row.get("reason") or "")
+        if phase == "indexed" or bool(row.get("indexed")):
+            stored += 1
+        issue = phase in {"error", "failed", "quarantined", "quarantine"} or (bool(reason) and phase != "indexed")
+        activity = "issue" if issue else ("ingesting" if phase in {"detected", "queued", "indexing", "extracting", "embedding", "active"} else "complete")
+        rows.append({
+            "file": Path(source).name,
+            "source": source,
+            "state": activity,
+            "phase": phase,
+            "updated_at": str(row.get("updated_at") or row.get("indexed_at") or row.get("indexing_at") or ""),
+            "reason": reason,
+        })
+
+    # This mirrors the bounded graph population. The root is ARGUS PROMPT;
+    # every other visible tree node contributes exactly one link.
+    rows.sort(key=lambda row: row["updated_at"], reverse=True)
+    visible = rows[:MAX_WORLD_DOCUMENTS]
+    sources = {row["source"] for row in visible}
+    folders = {
+        "/".join(source.split("/")[:depth])
+        for source in sources
+        for depth in range(1, len(source.split("/")))
+    }
+    node_count = 1 + len(folders) + len(sources)
+    # Stable partition keeps newest events in order, with unresolved failures
+    # held at the top until they are resolved and become ordinary green rows.
+    recent = sorted(rows, key=lambda row: row["state"] != "issue")[:5]
+    return {
+        "node_count": node_count,
+        "link_count": max(0, node_count - 1),
+        "store_count": stored,
+        "recent": recent,
+    }
+
+
 def ingest_status() -> dict[str, Any]:
-    """Return the public ingestion ledger needed to paint a real failed edge."""
+    """Return the public RAG state used by the Galaxy and ARGUS overview."""
+    started = time.monotonic()
     try:
         with urlopen(DEFAULT_RAG_STATUS_URL, timeout=2.5) as response:
             raw = response.read(64 * 1024)
@@ -567,6 +723,7 @@ def ingest_status() -> dict[str, Any]:
     # to guess a branch when duplicate filenames exist.
     if last_file and "/" not in last_file.replace("\\", "/"):
         last_file = _ledger_source_for_basename(last_file) or last_file
+    overview = _ingest_overview(resolve_rag_ingest_ledger())
     return {
         "ok": True,
         "state": str(payload.get("status") or "unknown"),
@@ -574,6 +731,8 @@ def ingest_status() -> dict[str, Any]:
         "last_file": last_file,
         "last_error": str(payload.get("last_error") or ""),
         "indicator": str(payload.get("indicator") or ""),
+        "latency_ms": round((time.monotonic() - started) * 1000, 1),
+        **overview,
     }
 
 

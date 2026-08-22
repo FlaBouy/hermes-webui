@@ -3,7 +3,7 @@
 body.biggy-brand > .app-titlebar{display:none!important}
 
 .biggy-brand-header{
-  position:relative;z-index:6;overflow:visible;
+  position:relative;z-index:var(--biggy-layer-workspace, 6);overflow:visible;
   height:116px;min-height:116px;
   border:0;background:transparent;
   color:#e6edf3;box-sizing:border-box;
@@ -20,7 +20,7 @@ body.biggy-brand > .app-titlebar{display:none!important}
    every id, class, and style value below is copied unmodified from 3d.html. */
 .biggy-jarvis-transplant{
   position:absolute;left:50%;top:0;transform:translateX(-50%);
-  width:204px;height:280px;z-index:10;pointer-events:none;
+  width:204px;height:280px;z-index:var(--biggy-layer-reactor, 10);pointer-events:none;
 }
 #j-orb{
   position:absolute;left:50%;top:38px;transform:translateX(-50%);
@@ -104,6 +104,12 @@ body.biggy-brand > .app-titlebar{display:none!important}
 #mainChat.biggy-brand-iwo{
   position:relative;
   background:#04050a;
+  /* One owned composition stack: the iframe is only the galaxy layer;
+     Biggy controls every interaction/presentation layer above it. */
+  --biggy-layer-galaxy:0;
+  --biggy-layer-conversation:2;
+  --biggy-layer-workspace:6;
+  --biggy-layer-reactor:10;
 }
 #mainChat.biggy-brand-iwo .messages-shell,
 #mainChat.biggy-brand-iwo .messages{background:transparent!important}
@@ -120,11 +126,11 @@ body.biggy-brand > .app-titlebar{display:none!important}
    4719 directly); see api/jarvis_v6_world.py. */
 .biggy-v6-world{
   position:absolute;inset:0;width:100%;height:100%;
-  border:0;z-index:0;background:#04050a;
+  border:0;z-index:var(--biggy-layer-galaxy);background:#04050a;
   pointer-events:auto;
 }
 .biggy-v6-world-fallback{
-  position:absolute;inset:0;width:100%;height:100%;z-index:0;
+  position:absolute;inset:0;width:100%;height:100%;z-index:var(--biggy-layer-galaxy);
   display:none;align-items:center;justify-content:center;
   background:radial-gradient(ellipse at 50% 40%,#0f151b 0%,#05070a 70%);
   font-family:ui-monospace,'SF Mono',monospace;
@@ -140,6 +146,25 @@ body.biggy-brand > .app-titlebar{display:none!important}
   display:block;margin-top:6px;font-size:9px;opacity:.65;
   letter-spacing:.04em;text-transform:none;
 }
+
+/* ARGUS RAG operations picture. This is display-only by design: it sits above
+   the Galaxy but cannot intercept the existing pan, zoom, or node controls. */
+.biggy-argus-rag-overview{
+  position:absolute;left:24px;top:28px;z-index:var(--biggy-layer-workspace);
+  width:min(410px,calc(100% - 48px));box-sizing:border-box;padding:16px 18px 15px;
+  border:1px solid rgba(58,183,237,.52);border-left-color:#62dbff;background:rgba(3,9,15,.82);
+  box-shadow:0 0 28px rgba(30,140,194,.12),inset 0 0 24px rgba(9,73,109,.09);
+  backdrop-filter:blur(6px);color:#afdff4;pointer-events:none;
+  font:700 12px/1.35 ui-monospace,'SF Mono',monospace;letter-spacing:.1em;
+}
+.biggy-argus-rag-title{color:#67d9ff;font-size:16px;letter-spacing:.25em}
+.biggy-argus-rag-subtitle{margin-top:5px;color:#a6c6d7;font-size:10px;letter-spacing:.085em;white-space:nowrap}
+.biggy-argus-rag-section{margin-top:14px;padding-top:10px;border-top:1px solid rgba(72,180,221,.22);color:#8eb4c8;font-size:10px;letter-spacing:.18em}
+.biggy-argus-rag-state{margin-top:8px;font-size:11px;letter-spacing:.14em}.biggy-argus-rag-state.is-ready{color:#48e0a1}.biggy-argus-rag-state.is-ingesting{color:#f4a93a;animation:argus-ingest-pulse 1.15s ease-in-out infinite}.biggy-argus-rag-state.is-issue,.biggy-argus-rag-state.is-offline{color:#ff756c}@keyframes argus-ingest-pulse{50%{opacity:.45}}
+.biggy-argus-rag-metrics{display:grid;grid-template-columns:1fr 1fr;gap:9px 22px;margin:14px 0 0}.biggy-argus-rag-metrics div{display:flex;justify-content:space-between;gap:8px;min-width:0}.biggy-argus-rag-metrics dt{color:#8eb4c8;font-size:10px}.biggy-argus-rag-metrics dd{margin:0;color:#e1f8ff;font-size:11px;white-space:nowrap}
+.biggy-argus-rag-radar-label{margin-top:15px;padding-top:10px;border-top:1px solid rgba(72,180,221,.22);color:#8eb4c8;font-size:10px}.biggy-argus-rag-radar{display:grid;gap:7px;margin:10px 0 0;padding:0;list-style:none;letter-spacing:.035em}.biggy-argus-rag-radar li{display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:6px;align-items:baseline;min-width:0;color:#53e0a4}.biggy-argus-rag-radar li.is-issue{color:#ff756c}.biggy-argus-rag-radar li.is-ingesting{color:#f4c56e}.biggy-argus-rag-radar li.is-empty{display:block;color:#8eb4c8}.biggy-argus-rag-radar i{font-style:normal;font-size:10px}.biggy-argus-rag-radar b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:700}.biggy-argus-rag-radar small{color:currentColor;opacity:.75;font-size:9px;white-space:nowrap}.biggy-argus-rag-radar li.is-issue button{display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:6px;align-items:baseline;width:100%;padding:5px 4px;border:1px solid rgba(255,117,108,.5);border-radius:3px;background:rgba(112,20,18,.2);color:inherit;cursor:pointer;font:inherit;text-align:left;pointer-events:auto}.biggy-argus-rag-radar li.is-issue button:hover,.biggy-argus-rag-radar li.is-issue button:focus-visible{background:rgba(174,35,31,.35);outline:none}
+.biggy-argus-ingest-dialog{position:absolute;left:24px;top:calc(28px + 390px);z-index:calc(var(--biggy-layer-workspace) + 2);width:min(410px,calc(100% - 48px));box-sizing:border-box;padding:16px 18px;border:1px solid rgba(255,117,108,.72);background:rgba(22,7,9,.94);box-shadow:0 0 30px rgba(220,56,47,.22);color:#ffd0cc;font:700 12px/1.4 ui-monospace,'SF Mono',monospace;letter-spacing:.07em;pointer-events:auto}.biggy-argus-ingest-dialog[hidden]{display:none}.biggy-argus-ingest-dialog-kicker{color:#ff756c;font-size:10px;letter-spacing:.18em}.biggy-argus-ingest-dialog strong{display:block;margin-top:8px;color:#fff0ec;font-size:12px}.biggy-argus-ingest-dialog small{display:block;margin-top:3px;color:#d58c86;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}.biggy-argus-ingest-dialog p{margin:10px 0;color:#ffb4ae;font-size:10px}.biggy-argus-ingest-dialog-actions{display:flex;justify-content:flex-end;gap:7px}.biggy-argus-ingest-dialog-actions button{border:1px solid rgba(255,117,108,.65);border-radius:3px;padding:6px 8px;background:#2a1012;color:#ffd0cc;cursor:pointer;font:700 9px ui-monospace,'SF Mono',monospace;letter-spacing:.09em}.biggy-argus-ingest-dialog-actions button:last-child{border-color:#f4a93a;background:#3a2711;color:#ffe0a6}.biggy-argus-ingest-dialog-actions button:disabled{opacity:.55;cursor:wait}
+@media(max-width:760px){.biggy-argus-rag-overview{left:12px;top:16px;width:min(280px,calc(100% - 24px));padding:11px 12px}}
 
 /* Readable chat contrast over Iwo */
 #mainChat.biggy-brand-iwo .msg-row[data-role="assistant"] .msg-body,
@@ -172,7 +197,7 @@ body.biggy-brand > .app-titlebar{display:none!important}
      That control otherwise sits on the vertical category rail and obscures Fuel. */
   right:64px;
   bottom:auto;
-  z-index:6;
+  z-index:var(--biggy-layer-workspace);
   display:flex;
   flex-direction:row;
   align-items:stretch;

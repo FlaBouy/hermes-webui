@@ -13,11 +13,12 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260821-1225-unbroken-galaxy';
+  const BUILD_ID = '20260822-argus-rag-operations-typography';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
   const V6_WORLD_PATH = '/api/biggy/v6/world';
   const V6_WORLD_STATUS_PATH = '/api/biggy/v6/world/status';
+  const V6_WORLD_RETRY_PATH = '/api/biggy/v6/world/retry';
   const ORB_STATES = Object.freeze([
     'offline', 'online', 'thinking', 'speaking', 'tool-running', 'error',
   ]);
@@ -1490,18 +1491,158 @@
     }
   }
 
+  function ensureArgusRagOverview(mainChat) {
+    const host = mainChat || document.getElementById('mainChat');
+    if (!host) return null;
+    let hud = host.querySelector('#biggyArgusRagOverview');
+    if (hud) return hud;
+    hud = el('section', 'biggy-argus-rag-overview');
+    hud.id = 'biggyArgusRagOverview';
+    hud.dataset.biggyLayer = 'workspace';
+    hud.setAttribute('data-testid', 'biggy-argus-rag-overview');
+    hud.setAttribute('aria-label', 'ARGUS RAG overview');
+    hud.innerHTML = '<div class="biggy-argus-rag-title">A.R.G.U.S.</div>'
+      + '<div class="biggy-argus-rag-subtitle">AUGMENTED RETRIEVAL &amp; GROUNDED UNDERSTANDING SYSTEM</div>'
+      + '<div class="biggy-argus-rag-section">SYSTEM STATUS</div>'
+      + '<div class="biggy-argus-rag-state is-offline">● AWAITING INGEST STATUS</div>';
+    host.appendChild(hud);
+    return hud;
+  }
+
+  function ensureArgusIngestDialog(mainChat) {
+    const host = mainChat || document.getElementById('mainChat');
+    if (!host) return null;
+    let dialog = host.querySelector('#biggyArgusIngestDialog');
+    if (dialog) return dialog;
+    dialog = el('section', 'biggy-argus-ingest-dialog');
+    dialog.id = 'biggyArgusIngestDialog';
+    dialog.dataset.biggyLayer = 'workspace';
+    dialog.hidden = true;
+    dialog.setAttribute('role', 'dialog');
+    dialog.setAttribute('aria-modal', 'false');
+    dialog.setAttribute('aria-label', 'ARGUS ingestion exception');
+    host.appendChild(dialog);
+    return dialog;
+  }
+
+  function closeArgusIngestDialog() {
+    const dialog = document.getElementById('biggyArgusIngestDialog');
+    if (dialog) dialog.hidden = true;
+  }
+
+  function openArgusIngestDialog(row) {
+    const dialog = ensureArgusIngestDialog();
+    if (!dialog || !row) return;
+    const source = String(row.source || '');
+    const file = String(row.file || source || 'unknown file');
+    const reason = String(row.reason || row.phase || 'ingestion issue');
+    dialog.dataset.source = source;
+    dialog.hidden = false;
+    dialog.innerHTML = '<div class="biggy-argus-ingest-dialog-kicker">ARGUS // INGEST EXCEPTION</div>'
+      + `<strong>${esc(file)}</strong><small>${esc(source)}</small>`
+      + `<p>${esc(reason)}</p><div class="biggy-argus-ingest-dialog-actions">`
+      + '<button type="button" data-argus-ingest-disposition="keep">KEEP ON RADAR</button>'
+      + '<button type="button" data-argus-ingest-disposition="retry">RE-INGEST</button></div>';
+    dialog.querySelector('[data-argus-ingest-disposition="keep"]').addEventListener('click', closeArgusIngestDialog);
+    dialog.querySelector('[data-argus-ingest-disposition="retry"]').addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      button.textContent = 'QUEUING…';
+      try {
+        const response = await fetch(V6_WORLD_RETRY_PATH, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) throw new Error(payload.error || 'retry unavailable');
+        dialog.innerHTML = '<div class="biggy-argus-ingest-dialog-kicker">ARGUS // RE-INGEST QUEUED</div>'
+          + `<strong>${esc(file)}</strong><p>The watcher now owns this file again.</p>`
+          + '<div class="biggy-argus-ingest-dialog-actions"><button type="button" data-argus-ingest-disposition="keep">CLOSE</button></div>';
+        dialog.querySelector('[data-argus-ingest-disposition="keep"]').addEventListener('click', closeArgusIngestDialog);
+        pollRagWorldState().catch(() => {});
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = 'RE-INGEST';
+        dialog.querySelector('p').textContent = `Unable to queue: ${String(error.message || error)}`;
+      }
+    });
+  }
+
+  function renderArgusRagOverview(status) {
+    const hud = ensureArgusRagOverview();
+    if (!hud) return;
+    const data = status && typeof status === 'object' ? status : {};
+    const state = String(data.state || 'offline').toLowerCase();
+    const phase = String(data.phase || '').trim();
+    const ingesting = state === 'active' || /^(detected|queued|indexing|extracting|embedding|active)$/i.test(phase);
+    const issue = !data.ok || state === 'error' || /^(failed|quarantined)$/i.test(phase);
+    const stateClass = issue ? 'is-issue' : (ingesting ? 'is-ingesting' : 'is-ready');
+    const stateText = issue ? 'INGEST STATUS UNAVAILABLE'
+      : (ingesting ? `INGESTING${phase ? ` // ${phase.toUpperCase()}` : ''}` : 'INGEST READY');
+    const metric = (value) => Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '—';
+    const latency = Number.isFinite(Number(data.latency_ms)) ? `${Math.round(Number(data.latency_ms))} ms` : '—';
+    const currentSource = String(data.last_file || '').replace(/\\/g, '/').replace(/^.*?\/Library\//, '').replace(/^\/+/, '');
+    const currentFile = currentSource.split('/').filter(Boolean).pop() || '';
+    const currentRow = ingesting && currentFile ? {
+      state: 'ingesting', file: currentFile, source: currentSource,
+      phase: phase || 'ingesting', reason: '', current: true,
+    } : null;
+    const recent = Array.isArray(data.recent) ? data.recent.slice() : [];
+    const remaining = recent.filter((row) => String(row && row.source || '') !== currentSource);
+    const failures = remaining.filter((row) => String(row && row.state || '').toLowerCase() === 'issue');
+    const completed = remaining.filter((row) => String(row && row.state || '').toLowerCase() !== 'issue');
+    // This is intentional operator ordering, not chronological ordering:
+    // current work, then trouble, then the most recent healthy evidence.
+    const cards = (currentRow ? [currentRow] : []).concat(failures, completed).slice(0, 5);
+    const radar = cards.length ? cards.map((row) => {
+      const rowState = String(row && row.state || 'complete').toLowerCase();
+      const file = String(row && row.file || row && row.source || 'unknown file');
+      const detail = rowState === 'issue'
+        ? String(row && (row.reason || row.phase) || 'issue')
+        : (rowState === 'ingesting' ? String(row && row.phase || 'ingesting') : 'indexed');
+      if (rowState === 'issue') {
+        const encoded = encodeURIComponent(JSON.stringify({ file, source: String(row && row.source || ''), reason: String(row && row.reason || ''), phase: String(row && row.phase || '') }));
+        return `<li class="is-${esc(rowState)}"><button type="button" data-argus-ingest-issue="${encoded}" title="Review ingestion failure"><i>◆</i><b>${esc(file)}</b><small>${esc(detail)}</small></button></li>`;
+      }
+      return `<li class="is-${esc(rowState)}"><i>◆</i><b>${esc(file)}</b><small>${esc(detail)}</small></li>`;
+    }).join('') : '<li class="is-empty"><small>NO RECENT LEDGER EVENTS</small></li>';
+    hud.innerHTML = '<div class="biggy-argus-rag-title">A.R.G.U.S.</div>'
+      + '<div class="biggy-argus-rag-subtitle">AUGMENTED RETRIEVAL &amp; GROUNDED UNDERSTANDING SYSTEM</div>'
+      + '<div class="biggy-argus-rag-section">SYSTEM STATUS</div>'
+      + `<div class="biggy-argus-rag-state ${stateClass}">● ${esc(stateText)}</div>`
+      + '<dl class="biggy-argus-rag-metrics">'
+      + `<div><dt>NODE COUNT</dt><dd>${metric(data.node_count)}</dd></div>`
+      + `<div><dt>LINK COUNT</dt><dd>${metric(data.link_count)}</dd></div>`
+      + `<div><dt>LATENCY</dt><dd>${latency}</dd></div>`
+      + `<div><dt>STORE COUNT</dt><dd>${metric(data.store_count)}</dd></div>`
+      + '</dl>'
+      + '<div class="biggy-argus-rag-radar-label">INGEST RADAR // LAST 5</div>'
+      + `<ol class="biggy-argus-rag-radar">${radar}</ol>`;
+    hud.querySelectorAll('[data-argus-ingest-issue]').forEach((button) => {
+      button.addEventListener('click', () => {
+        try { openArgusIngestDialog(JSON.parse(decodeURIComponent(button.dataset.argusIngestIssue))); } catch (_) {}
+      });
+    });
+  }
+
   async function pollRagWorldState() {
     try {
       const response = await fetch(V6_WORLD_STATUS_PATH, { cache: 'no-store' });
-      if (!response.ok) return;
+      if (!response.ok) {
+        renderArgusRagOverview({ ok: false, state: 'offline' });
+        return;
+      }
       const status = await response.json();
+      renderArgusRagOverview(status);
       const phase = String(status && status.phase || '').toLowerCase();
       const state = String(status && status.state || '').toLowerCase();
       const file = String(status && status.last_file || '').trim();
       if (file && (state === 'error' || phase === 'failed' || phase === 'quarantined')) {
         postRagTrace({ state: 'failed', source: file, reason: status.last_error || phase });
       }
-    } catch (_) {}
+    } catch (_) {
+      renderArgusRagOverview({ ok: false, state: 'offline' });
+    }
   }
 
   function installBiggyV6World(mainChat) {
@@ -1510,6 +1651,7 @@
       .forEach((node) => node.remove());
 
     const fallback = el('div', 'biggy-v6-world-fallback');
+    fallback.dataset.biggyLayer = 'galaxy-fallback';
     fallback.setAttribute('data-testid', 'biggy-v6-world-fallback');
     fallback.innerHTML = '<div class="msg">3D world unavailable'
       + '<small id="biggyV6WorldFallbackReason">\u2014</small></div>';
@@ -1521,6 +1663,7 @@
     }
 
     const iframe = el('iframe', 'biggy-v6-world');
+    iframe.dataset.biggyLayer = 'galaxy';
     iframe.id = 'biggyV6World';
     iframe.setAttribute('data-testid', 'biggy-v6-world');
     iframe.setAttribute('title', 'Jarvis V6 \u2014 3D memory graph');
@@ -1560,21 +1703,9 @@
       iframe.remove();
     });
     iframe.addEventListener('load', () => {
-      // Biggy owns the surrounding cockpit.  Keep the native V6 renderer and
-      // graph interactions, but remove the standalone viewer's sidebar,
-      // prompt, inbox, reactor, and rails from the embedded surface.
-      try {
-        const frameDoc = iframe.contentDocument;
-        if (frameDoc && !frameDoc.getElementById('biggy-world-chrome-reset')) {
-          const reset = frameDoc.createElement('style');
-          reset.id = 'biggy-world-chrome-reset';
-          reset.textContent = [
-            'aside,#collapse,#legend,#hud,#brand,#hint,#j-inbox,#j-tasks,#j-orb,#j-state,#j-status,#j-brain,#jarvis,.foot{display:none!important}',
-            'body{overflow:hidden!important} #g{left:0!important;width:100vw!important}',
-          ].join('');
-          frameDoc.head.appendChild(reset);
-        }
-      } catch (_) {}
+      // The proxy injects Biggy's chrome reset before this document paints.
+      // Do not mutate the iframe after load: that was the visible native-V6
+      // flash between Hermes boot and the finished Biggy shell.
       // The graph module exposes window.__os only after it finishes
       // building the ForceGraph3D scene; if that never appears (WebGL
       // context creation failed inside the frame, or the Three.js CDN
@@ -1602,6 +1733,7 @@
 
   function makeHeader() {
     const header = el('div', 'biggy-brand-header');
+    header.dataset.biggyLayer = 'header';
     header.innerHTML =
       `<div class="biggy-brand-controls">` +
       `<button id="biggyPtt" type="button" data-testid="biggy-ptt" title="Foot-pedal PTT status">● PTT</button>` +
@@ -1625,6 +1757,7 @@
   function makeReactorDock() {
     const dock = el('div', 'biggy-jarvis-transplant');
     dock.id = 'biggyJarvisTransplant';
+    dock.dataset.biggyLayer = 'reactor';
     dock.setAttribute('data-testid', 'biggy-reactor-dock');
     dock.innerHTML =
       `<div id="j-orb" data-testid="biggy-jarvis-orb" role="status" aria-live="polite" aria-label="Jarvis V6 offline">` +
@@ -1647,7 +1780,7 @@
       `<circle class="core-disc" cx="100" cy="100" r="32"/>` +
       `<circle class="core-lobe" cx="100" cy="100" r="32"/>` +
       `<circle class="core-rim" cx="100" cy="100" r="32" stroke-width="1.2"/>` +
-      `<text class="hud-label" x="100" y="103.5" text-anchor="middle">J.A.R.V.I.S.</text>` +
+      `<text class="hud-label" x="100" y="103.5" text-anchor="middle">A.R.G.U.S.</text>` +
       `</g>` +
       `</svg>` +
       `</div>` +
@@ -2396,8 +2529,10 @@
     document.querySelectorAll('.biggy-jarvis-transplant').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-composer-controls').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-right-cockpit-controls').forEach((node) => node.remove());
+    mainChat.querySelectorAll('.biggy-argus-rag-overview').forEach((node) => node.remove());
     pttInstalled = false;
     installBiggyV6World(mainChat);
+    ensureArgusRagOverview(mainChat);
     const header = makeHeader();
     mainChat.insertBefore(header, mainChat.firstChild);
     const reactorDock = makeReactorDock();
