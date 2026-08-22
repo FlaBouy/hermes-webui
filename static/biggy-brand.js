@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260822-argus-console-cleanup-4';
+  const BUILD_ID = '20260822-argus-console-cleanup-11';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
   const V6_WORLD_PATH = '/api/biggy/v6/world';
@@ -931,8 +931,11 @@
       const desired = String(status.desired_route || active).toLowerCase();
       const switching = !!status.route_switching || routePending;
       const headsetAvailable = !!status.headset_available;
-      const shown = (switching ? desired : active) === 'headset' ? 'HEADSET' : 'ROOM';
-      routeBtn.textContent = shown;
+      // Keep the cockpit command name stable. The button still toggles the
+      // actual room/headset route; current routing belongs in its title/state,
+      // not as a shifting rail label that differs between displays.
+      routeBtn.textContent = 'ROOM';
+      routeBtn.title = `Audio route: ${(switching ? desired : active) === 'headset' ? 'headset' : 'room'}`;
       routeBtn.classList.remove('ok', 'active', 'down');
       if (!status.pedal_alive) {
         routeBtn.classList.add('down');
@@ -1901,8 +1904,8 @@
     dlg.setAttribute('data-layout-slot', 'docked_landing_panel');
     dlg.setAttribute('data-displaces-conversation', 'false');
     dlg.setAttribute('aria-label', 'Travel category rail');
-    dlg.setAttribute('data-open-panel-scale', '1.5');
-    dlg.style.setProperty('--biggy-travel-dock-width', '540px'); // 360 * 1.5
+    dlg.setAttribute('data-open-panel-scale', 'workspace');
+    dlg.style.setProperty('--biggy-travel-dock-width', 'min(62vw, 980px)');
     // Rail stays visible; panel opens on category select / travel content.
     dlg.hidden = false;
     const railBtns = TRAVEL_CATEGORIES.map((label) => {
@@ -2029,14 +2032,14 @@
         dragging = true;
         startX = ev.clientX;
         const panel = dlg.querySelector('#biggyTravelPanel');
-        startW = panel ? panel.getBoundingClientRect().width : 540;
+        startW = panel ? panel.getBoundingClientRect().width : 980;
         handle.setPointerCapture(ev.pointerId);
         ev.preventDefault();
       });
       handle.addEventListener('pointermove', (ev) => {
         if (!dragging) return;
         const dx = startX - ev.clientX;
-        const next = Math.max(400, Math.min(780, startW + dx));
+        const next = Math.max(620, Math.min(1200, startW + dx));
         dlg.style.setProperty('--biggy-travel-dock-width', next + 'px');
         try { if (mapInstance) mapInstance.resize(); } catch (_) {}
       });
@@ -2532,8 +2535,16 @@
 
   window.__biggyHandoffTravelVisualsFromMessages = handoffTravelVisualsFromMessages;
 
-  function scanMessagesForMapModel() {
-    handoffTravelVisualsFromMessages();
+  async function scanMessagesForMapModel() {
+    // Hydrate the latest saved travel/recommendation models so the category
+    // rail is ready, but never reopen yesterday's card over a clean landing.
+    // Live assistant handoffs call handoffTravelVisualsFromMessages directly
+    // and still open the relevant panel when a new result arrives.
+    await handoffTravelVisualsFromMessages();
+    const dlg = document.getElementById('biggyTravelMapDialog');
+    if (dlg && typeof dlg.__biggySetCollapsed === 'function') {
+      dlg.__biggySetCollapsed(true);
+    }
   }
 
   function applyShell() {
@@ -2570,7 +2581,8 @@
     removeCaduceus();
     updateIdentityChip();
     ensureTravelMapDialog();
-    setTimeout(scanMessagesForMapModel, 400);
+    // Do not replay saved response cards into a fresh cockpit. New assistant
+    // results invoke the handoff directly; the landing page stays collapsed.
     return true;
   }
 
@@ -2585,13 +2597,15 @@
     started = true;
     installGuiDiagnostics();
     installDiagnosticsHotkey();
-    await ensureGuiSession();
+    // The ARGUS landing is intentionally sessionless. Native Hermes creates
+    // or loads a conversation only after explicit operator action; restoring
+    // Biggy's private session key here caused a second, competing boot.
     refreshGuiDiagnostics();
     await refreshIdentity();
     if (identityTimer) clearInterval(identityTimer);
     identityTimer = setInterval(() => {
       refreshIdentity().catch(() => {});
-      ensureGuiSession().then(() => refreshGuiDiagnostics()).catch(() => {});
+      refreshGuiDiagnostics();
     }, 15000);
     if (diagTimer) clearInterval(diagTimer);
     diagTimer = setInterval(() => refreshGuiDiagnostics(), 3000);

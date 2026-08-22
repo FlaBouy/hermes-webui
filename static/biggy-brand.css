@@ -311,20 +311,22 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo > .biggy-category-ra
   color:#f06b64;border-color:#8b3030;background:#1a0d0d;
 }
 
-/* Open panel (+50% vs prior 360px → 540px default). */
+/* Open operational panel: use the right two-thirds workspace instead of the
+   original narrow 540px card. The cap keeps it usable on Smedley and TD. */
 #mainChat.biggy-brand-iwo .biggy-travel-panel{
   order:1;
   position:relative;
   display:flex;
   flex-direction:column;
-  width:var(--biggy-travel-dock-width, 540px);
+  width:var(--biggy-travel-dock-width, min(62vw, 980px));
   max-width:calc(100vw - 80px);
   margin-right:6px;
   background:rgba(13,17,23,.92);
   border:1px solid rgba(148,163,184,.35);
   border-radius:10px;
   overflow:hidden;
-  min-height:220px;
+  height:min(68vh, 720px);
+  min-height:420px;
 }
 #mainChat.biggy-brand-iwo .biggy-travel-dock.is-collapsed .biggy-travel-panel{
   display:none!important;
@@ -408,6 +410,8 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo > .biggy-category-ra
     right:8px;
   }
   #mainChat.biggy-brand-iwo .biggy-travel-panel{
-    width:min(var(--biggy-travel-dock-width, 540px), calc(100vw - 140px));
+    width:min(var(--biggy-travel-dock-width, 760px), calc(100vw - 140px));
+    height:min(66vh, 660px);
+    min-height:360px;
   }
 }

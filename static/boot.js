@@ -3683,6 +3683,14 @@ window._mirrorSpeechSettingsFromServer=_mirrorSpeechSettingsFromServer;
   if (typeof syncSessionSearchClear === 'function') syncSessionSearchClear();
   if(typeof refreshProviderQuotaIndicator==='function') refreshProviderQuotaIndicator();
   const urlSession=(typeof _sessionIdFromLocation==='function')?_sessionIdFromLocation():null;
+  // Biggy owns a single-stage ARGUS landing. On the profile's root URL, do
+  // not let Hermes restore yesterday's conversation underneath the galaxy.
+  // Explicit /session/<id> navigation remains supported when the operator
+  // deliberately selects a conversation.
+  const _biggyCleanRoot=!urlSession&&String(S.activeProfile||'').toLowerCase()==='biggy';
+  if(_biggyCleanRoot){
+    try{localStorage.removeItem('hermes-webui-session');}catch(_){ }
+  }
   const pwaLaunchAction=(window.HermesPWA&&typeof window.HermesPWA.launchAction==='function')
     ? window.HermesPWA.launchAction()
     : null;

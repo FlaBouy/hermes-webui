@@ -217,6 +217,7 @@ def test_renderer_copy_preserves_prompt_fixed_coordinates():
         "<html><head></head><body><script>"
         "const data = { nodes: GRAPH.nodes.map((n, i) => ({ id: i, "
         "val: 1 + Math.sqrt(deg[i]) * 1.6, heat: heatColor(deg[i]) })), };"
+        "ForceGraph3D()(el).showNavInfo(false)\n  .graphData(data)\n  .backgroundColor(theme.bg);"
         "</script></body></html>"
     ).encode()
     patched = world._patch_index_html(source).decode()
@@ -224,8 +225,41 @@ def test_renderer_copy_preserves_prompt_fixed_coordinates():
     assert "anchor.val = Math.max(Number(anchor.val) || 0, 22)" in world._TRACE_RUNTIME
     assert "A.R.G.U.S." in BIGGY_JS
     assert "biggy-argus-rag-overview" in BIGGY_JS
+
+
+def test_saved_travel_cards_are_not_replayed_into_clean_boot():
+    start = BIGGY_JS.index("async function scanMessagesForMapModel()")
+    end = BIGGY_JS.index("\n  function applyShell()", start)
+    boot_scan = BIGGY_JS[start:end]
+    assert "await handoffTravelVisualsFromMessages()" in boot_scan
+    assert "dlg.__biggySetCollapsed(true)" in boot_scan
+    assert "setTimeout(scanMessagesForMapModel" not in BIGGY_JS
     assert "AUGMENTED RETRIEVAL &amp; GROUNDED UNDERSTANDING SYSTEM" in BIGGY_JS
     assert "data-argus-ingest-issue" in BIGGY_JS
+
+
+def test_biggy_root_boot_does_not_restore_native_or_private_saved_session():
+    boot = (ROOT / "static" / "boot.js").read_text()
+    assert "const _biggyCleanRoot=!urlSession&&String(S.activeProfile||'').toLowerCase()==='biggy'" in boot
+    assert "if(_biggyCleanRoot)" in boot
+    assert "localStorage.removeItem('hermes-webui-session')" in boot
+    start = BIGGY_JS.index("async function tryStart()")
+    end = BIGGY_JS.index("\n  function start()", start)
+    startup = BIGGY_JS[start:end]
+    assert "await ensureGuiSession()" not in startup
+    assert "ensureGuiSession().then" not in startup
+
+
+def test_operational_cards_use_large_responsive_workspace():
+    assert "min(62vw, 980px)" in BIGGY_CSS
+    assert "height:min(68vh, 720px)" in BIGGY_CSS
+    assert "Math.max(620, Math.min(1200" in BIGGY_JS
+
+
+def test_right_rail_utility_labels_remain_canonical():
+    assert "routeBtn.textContent = 'ROOM'" in BIGGY_JS
+    assert '>● PTT</button>' in BIGGY_JS
+    assert '>SMEDLEY</button>' in BIGGY_JS
 
 
 def test_routes_wire_world_endpoint():
