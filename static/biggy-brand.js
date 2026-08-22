@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260822-argus-rag-operations-typography';
+  const BUILD_ID = '20260822-argus-core-viewer-only';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
   const V6_WORLD_PATH = '/api/biggy/v6/world';

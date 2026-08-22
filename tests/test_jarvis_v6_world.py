@@ -54,6 +54,12 @@ def test_3d_html_gets_chrome_suppressed_and_based(tmp_path, monkeypatch):
         "<!doctype html><html><head><title>x</title></head>"
         "<body><div id=\"j-orb\"></div><div id=\"jarvis\"></div>"
         "<script>Graph.onEngineStop(fitOnce);\nsetTimeout(fitOnce, 9000);</script>"
+        '<script type="module" src="fx.js?v=1"></script>'
+        '<script type="module" src="missions.js?v=1"></script>'
+        '<script type="module" src="lang.js?v=1"></script>'
+        '<script type="module" src="tools.js?v=1"></script>'
+        '<script type="module" src="hands.js?v=1"></script>'
+        '<script type="module" src="calls.js?v=1"></script>'
         "</body></html>",
         encoding="utf-8",
     )
@@ -72,6 +78,8 @@ def test_3d_html_gets_chrome_suppressed_and_based(tmp_path, monkeypatch):
     # multi-stage boot flash.
     assert "#side,#collapse,#legend,#hud,#brand,#hint,#toast" in text
     assert "setTimeout(fitOnce, 9000);" not in text
+    for module in ("fx.js", "missions.js", "lang.js", "tools.js", "hands.js", "calls.js"):
+        assert f'src="{module}?v=1"' not in text
     # The transplant markers themselves are untouched (still present, just hidden by CSS).
     assert '<div id="j-orb"></div>' in text
 
@@ -202,6 +210,7 @@ def test_routes_wire_world_endpoint():
 def test_iwo_background_image_removed_from_css():
     assert "iwo.jpg" not in BIGGY_CSS
     assert ".biggy-argus-rag-overview" in BIGGY_CSS
+    assert "padding-right:84px" in BIGGY_CSS
 
 
 def test_gitignore_covers_local_world_config():

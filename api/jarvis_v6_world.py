@@ -441,6 +441,16 @@ def _patch_index_html(data: bytes) -> bytes:
     # already mounted the full corpus. The embedding runtime above owns the
     # single landing camera instead.
     text = text.replace("Graph.onEngineStop(fitOnce);\nsetTimeout(fitOnce, 9000);", "", 1)
+    # These six V5 add-on bays are optional in the standalone V6 viewer, but
+    # they are outside Biggy's intentionally narrow local-only iframe surface
+    # (calls, tools, hands, missions, effects, language helpers).  Leaving
+    # their relative module tags in place makes the browser request them from
+    # this proxy, where they correctly 404; some Chrome sessions then leave
+    # the scene black after a fresh server restart.  The core inline graph
+    # renderer is independent, so remove the optional bays before first paint
+    # rather than broadening the static-file allowlist or re-enabling them.
+    for module in ("fx.js", "missions.js", "lang.js", "tools.js", "hands.js", "calls.js"):
+        text = text.replace(f'<script type="module" src="{module}?v=1"></script>', "", 1)
     injected = _BASE_HREF + _SUPPRESS_STYLE + _TRACE_RUNTIME
     if "<head>" in text:
         text = text.replace("<head>", "<head>" + injected, 1)

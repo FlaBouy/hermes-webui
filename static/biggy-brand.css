@@ -116,7 +116,10 @@ body.biggy-brand > .app-titlebar{display:none!important}
 #mainChat.biggy-brand-iwo #emptyState{display:none!important}
 #mainChat.biggy-brand-iwo .empty-logo,
 #mainChat.biggy-brand-iwo .empty-logo svg{display:none!important}
-#mainChat.biggy-brand-iwo .composer-wrap{background:rgba(13,17,23,.82);pointer-events:auto}
+/* The collapsed ARGUS rail remains visible over the right edge of mainChat.
+   Reserve its 48px width plus breathing room only inside the composer: Hermes
+   still owns dynamic layout changes when either real sidebar opens/closes. */
+#mainChat.biggy-brand-iwo .composer-wrap{background:rgba(13,17,23,.82);padding-right:84px;pointer-events:auto}
 #mainChat.biggy-brand-iwo #profileChipWrap{display:none!important}
 .biggy-composer-controls{display:flex;align-items:center;gap:7px;flex:0 0 auto;margin-left:6px;pointer-events:auto}
 
