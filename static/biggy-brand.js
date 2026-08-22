@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260822-argus-core-viewer-only';
+  const BUILD_ID = '20260822-argus-console-cleanup-4';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
   const V6_WORLD_PATH = '/api/biggy/v6/world';
@@ -1711,17 +1711,33 @@
       // context creation failed inside the frame, or the Three.js CDN
       // import couldn't be reached), surface the fallback instead of a
       // silently blank canvas.
-      setTimeout(() => {
+      // Module imports and a 1,100+ node first layout can legitimately take
+      // more than four seconds after a cold browser start. Poll readiness for
+      // a bounded window instead of painting a false failure over a graph
+      // that is still initializing.
+      const readyStartedAt = Date.now();
+      const checkGalaxyReady = () => {
+        if (document.getElementById('biggyV6World') !== iframe) return;
         let booted = false;
         try {
-          booted = !!(iframe.contentWindow && iframe.contentWindow.__os);
+          booted = !!(iframe.contentWindow
+            && iframe.contentWindow.__os
+            && iframe.contentWindow.__biggyRagTraceReady);
         } catch (_) {
           booted = false;
         }
-        if (!booted) {
-          showV6WorldFallback(fallback, 'graph failed to initialize (check network access)');
+        if (booted) {
+          fallback.classList.remove('is-active');
+          scheduleGalaxyCanvasSize();
+          return;
         }
-      }, 4000);
+        if (Date.now() - readyStartedAt >= 20000) {
+          showV6WorldFallback(fallback, 'graph failed to initialize (check network access)');
+          return;
+        }
+        setTimeout(checkGalaxyReady, 250);
+      };
+      setTimeout(checkGalaxyReady, 250);
       scheduleGalaxyCanvasSize();
       setTimeout(scheduleGalaxyCanvasSize, 700);
       // The ingest watcher is authoritative for a path that failed before it

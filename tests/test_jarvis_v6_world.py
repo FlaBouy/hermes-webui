@@ -14,7 +14,7 @@ ROUTES = (ROOT / "api" / "routes.py").read_text(encoding="utf-8")
 
 
 def test_allowlist_is_narrow():
-    assert set(world.ALLOWED_ASSETS) == {"3d.html", "graph-data.js", "logo.png"}
+    assert set(world.ALLOWED_ASSETS) == {"3d.html", "graph-data.js"}
 
 
 def test_unknown_asset_name_is_404_not_filesystem_lookup():
@@ -53,7 +53,19 @@ def test_3d_html_gets_chrome_suppressed_and_based(tmp_path, monkeypatch):
     (viewer / "3d.html").write_text(
         "<!doctype html><html><head><title>x</title></head>"
         "<body><div id=\"j-orb\"></div><div id=\"jarvis\"></div>"
+        '<aside><img src="logo.png" alt="logo"></aside>'
+        "<script>fetch('/api/brand').then(r=>r.ok?r.json():Promise.reject())"
+        ".then(boot).catch(()=>{});</script>"
         "<script>Graph.onEngineStop(fitOnce);\nsetTimeout(fitOnce, 9000);</script>"
+        '<script type="importmap">{"imports":{'
+        '"three": "https://esm.sh/three",'
+        '"three/webgpu": "https://esm.sh/three/webgpu",'
+        '"three/tsl": "https://esm.sh/three/tsl",'
+        '"three/addons/": "https://esm.sh/three/addons/",'
+        '"three/examples/jsm/": "https://esm.sh/three/examples/jsm/",'
+        '"3d-force-graph": "https://esm.sh/3d-force-graph?external=three",'
+        '"three-spritetext": "https://esm.sh/three-spritetext?external=three"'
+        '}}</script>'
         '<script type="module" src="fx.js?v=1"></script>'
         '<script type="module" src="missions.js?v=1"></script>'
         '<script type="module" src="lang.js?v=1"></script>'
@@ -78,8 +90,16 @@ def test_3d_html_gets_chrome_suppressed_and_based(tmp_path, monkeypatch):
     # multi-stage boot flash.
     assert "#side,#collapse,#legend,#hud,#brand,#hint,#toast" in text
     assert "setTimeout(fitOnce, 9000);" not in text
+    assert "fetch('/api/brand')" not in text
+    assert 'src="logo.png"' not in text
+    assert '<img alt="logo">' in text
     for module in ("fx.js", "missions.js", "lang.js", "tools.js", "hands.js", "calls.js"):
         assert f'src="{module}?v=1"' not in text
+    # Keep the upstream module graph intact. Pinning only a subset of this
+    # dependency family can make esm.sh resolve incompatible Three builds.
+    assert '"three": "https://esm.sh/three"' in text
+    assert '"3d-force-graph": "https://esm.sh/3d-force-graph?external=three"' in text
+    assert '"three-spritetext": "https://esm.sh/three-spritetext?external=three"' in text
     # The transplant markers themselves are untouched (still present, just hidden by CSS).
     assert '<div id="j-orb"></div>' in text
 
@@ -108,7 +128,7 @@ def test_rag_pool_graph_uses_ingestion_ledger_for_folder_and_document_paths(tmp_
     ids = {node["id"] for node in graph["nodes"]}
     assert "prompt:argus" in ids
     prompt = next(node for node in graph["nodes"] if node["id"] == "prompt:argus")
-    assert prompt["label"] == "ARGUS PROMPT"
+    assert prompt["label"] == "BIGGY PROMPT"
     assert (prompt["fx"], prompt["fy"], prompt["fz"]) == (0, 0, 0)
     assert graph["groups"]["prompt"]["c"] == "#f4a93a"
     by_id = {node["id"]: i for i, node in enumerate(graph["nodes"])}
@@ -187,8 +207,20 @@ def test_browser_source_never_calls_v6_port_directly():
     assert "biggy-world-chrome-reset" not in BIGGY_JS
     assert "iframe.dataset.biggyLayer = 'galaxy'" in BIGGY_JS
     assert "const keys = ['prompt:argus']" in world._TRACE_RUNTIME
-    assert "controls.target.set(anchor.x, anchor.y, anchor.z)" in world._TRACE_RUNTIME
+    assert "controls.target.set(0, 0, 0)" in world._TRACE_RUNTIME
     assert "node.p) === 'key:prompt:argus'" in world._TRACE_RUNTIME
+    assert "d3ReheatSimulation" not in world._TRACE_RUNTIME
+
+
+def test_renderer_copy_preserves_prompt_fixed_coordinates():
+    source = (
+        "<html><head></head><body><script>"
+        "const data = { nodes: GRAPH.nodes.map((n, i) => ({ id: i, "
+        "val: 1 + Math.sqrt(deg[i]) * 1.6, heat: heatColor(deg[i]) })), };"
+        "</script></body></html>"
+    ).encode()
+    patched = world._patch_index_html(source).decode()
+    assert "fx: n.fx, fy: n.fy, fz: n.fz" in patched
     assert "anchor.val = Math.max(Number(anchor.val) || 0, 22)" in world._TRACE_RUNTIME
     assert "A.R.G.U.S." in BIGGY_JS
     assert "biggy-argus-rag-overview" in BIGGY_JS

@@ -327,10 +327,20 @@ class Handler(BaseHTTPRequestHandler):
         return _build_csp_report_only_policy(extra_connect_src, extra_frame_src)
 
     def end_headers(self) -> None:
-        extra_connect_src = getattr(self, "_csp_extra_connect_src", None)
-        extra_frame_src = getattr(self, "_csp_extra_frame_src", None)
-        self.send_header("Content-Security-Policy-Report-Only", self.csp_report_only_policy(extra_connect_src, extra_frame_src))
-        self.send_header("Report-To", self._CSP_REPORT_TO)
+        # A same-origin embedded surface may supply a tighter, route-specific
+        # enforced CSP. Consume this one-shot flag so it cannot leak to the
+        # next request on a persistent HTTP connection.
+        skip_report_only = bool(getattr(self, "_skip_default_csp_report_only_once", False))
+        if skip_report_only:
+            try:
+                del self._skip_default_csp_report_only_once
+            except AttributeError:
+                pass
+        else:
+            extra_connect_src = getattr(self, "_csp_extra_connect_src", None)
+            extra_frame_src = getattr(self, "_csp_extra_frame_src", None)
+            self.send_header("Content-Security-Policy-Report-Only", self.csp_report_only_policy(extra_connect_src, extra_frame_src))
+            self.send_header("Report-To", self._CSP_REPORT_TO)
         super().end_headers()
 
     def log_message(self, fmt, *args): pass  # suppress default Apache-style log

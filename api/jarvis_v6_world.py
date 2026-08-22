@@ -7,7 +7,7 @@ exposing a general filesystem proxy.
 
 This module never talks to the live V6 HTTP service. It only reads a fixed,
 narrow allowlist of static files already built to disk by the V6 POC's own
-`build.py` step (`3d.html`, `graph-data.js`, `logo.png`). Config (the local
+`build.py` step (`3d.html`, `graph-data.js`). Config (the local
 viewer directory path) is local-only/gitignored, mirroring
 `jarvis_v6_bridge.py`.
 
@@ -58,7 +58,6 @@ _world_cache: tuple[float, bytes] | None = None
 ALLOWED_ASSETS: dict[str, str] = {
     "3d.html": "text/html; charset=utf-8",
     "graph-data.js": "application/javascript; charset=utf-8",
-    "logo.png": "image/png",
 }
 
 # Jarvis V6's standalone chrome is suppressed in the document Biggy serves,
@@ -99,13 +98,13 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     const g = graph();
     const anchor = promptAnchor();
     if (!g || !anchor) return null;
-    // The standalone viewer copies graph data into renderer nodes and drops
-    // fx/fy/fz.  Reassert the fixed origin on that live copy, then enlarge
-    // its value so the Prompt reads as a visible command anchor, not a hub.
+    // Keep the live renderer copy pinned at the same origin emitted by the
+    // graph projection. Do not reheat the full 1,100+ node simulation here:
+    // doing so during iframe boot can monopolize Chrome's renderer long
+    // enough to trigger a Page Unresponsive dialog.
     anchor.fx = anchor.fy = anchor.fz = 0;
     anchor.x = anchor.y = anchor.z = 0;
     anchor.val = Math.max(Number(anchor.val) || 0, 22);
-    try { g.d3ReheatSimulation(); } catch (_) {}
     return anchor;
   }
   function installIdleContrast() {
@@ -278,15 +277,15 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     const g = graph();
     if (!g || landingZoomApplied) return false;
     const anchor = preparePromptAnchor();
-    if (!anchor || !Number.isFinite(anchor.x) || !Number.isFinite(anchor.y) || !Number.isFinite(anchor.z)) return false;
+    if (!anchor) return false;
     const c = g.cameraPosition();
     if (!c || !Number.isFinite(c.z)) return false;
-    // A pinned root only anchors the physics simulation.  OrbitControls has
-    // its own target, so explicitly make the active ARGUS Prompt the camera
-    // pivot before the dormant auto-rotate takes over.
+    // A pinned root only anchors the physics simulation. OrbitControls has
+    // its own target, so make the Biggy Prompt/origin the camera pivot before
+    // dormant auto-rotation takes over.
     const controls = g.controls();
     if (controls && controls.target) {
-      controls.target.set(anchor.x, anchor.y, anchor.z);
+      controls.target.set(0, 0, 0);
       controls.update();
     }
     landingZoomApplied = true;
@@ -294,19 +293,21 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     // corpus. Biggy owns one immediate, readable landing distance instead of
     // a second zoom several seconds after the page appears.
     g.cameraPosition({
-      x: anchor.x + (c.x - anchor.x) * 0.38,
-      y: anchor.y + (c.y - anchor.y) * 0.38,
-      z: anchor.z + (c.z - anchor.z) * 0.38,
-    }, anchor, 900);
+      x: c.x * 0.38,
+      y: c.y * 0.38,
+      z: c.z * 0.38,
+    }, { x: 0, y: 0, z: 0 }, 900);
     return true;
   };
   const waitForGraph = () => {
     if (!installIdleContrast()) { setTimeout(waitForGraph, 180); return; }
     installGalaxyNavigation();
-    requestAnimationFrame(() => { if (!applyLandingCamera()) setTimeout(waitForGraph, 180); });
+    requestAnimationFrame(() => {
+      if (!applyLandingCamera()) { setTimeout(waitForGraph, 180); return; }
+      window.__biggyRagTraceReady = true;
+    });
   };
   waitForGraph();
-  window.__biggyRagTraceReady = true;
 })();
 </script>'''
 
@@ -441,6 +442,27 @@ def _patch_index_html(data: bytes) -> bytes:
     # already mounted the full corpus. The embedding runtime above owns the
     # single landing camera instead.
     text = text.replace("Graph.onEngineStop(fitOnce);\nsetTimeout(fitOnce, 9000);", "", 1)
+    # Preserve fixed coordinates from the generated graph when V6 creates
+    # its renderer-node copies. This pins BIGGY PROMPT before force layout
+    # starts, so the world settles around the root without a later reheat.
+    text = text.replace(
+        "val: 1 + Math.sqrt(deg[i]) * 1.6, heat: heatColor(deg[i]) })),",
+        "val: 1 + Math.sqrt(deg[i]) * 1.6, heat: heatColor(deg[i]), "
+        "fx: n.fx, fy: n.fy, fz: n.fz })),",
+        1,
+    )
+    # Biggy embeds only the force graph.  Prevent the standalone V6 shell from
+    # issuing requests for chrome that Biggy deliberately does not serve.  The
+    # rejected promise follows V6's existing catch path, which hides its own
+    # orb/tasks without touching the graph renderer.
+    text = text.replace(
+        "fetch('/api/brand').then(r=>r.ok?r.json():Promise.reject())",
+        "Promise.reject(new Error('Biggy graph-only embed'))",
+        1,
+    )
+    # Keep the hidden element because the upstream module dereferences it
+    # during boot; remove only its network source so no logo.png 404 occurs.
+    text = text.replace('<img src="logo.png" alt="logo">', '<img alt="logo">', 1)
     # These six V5 add-on bays are optional in the standalone V6 viewer, but
     # they are outside Biggy's intentionally narrow local-only iframe surface
     # (calls, tools, hands, missions, effects, language helpers).  Leaving
@@ -486,7 +508,7 @@ def _rag_pool_graph_data(fallback: bytes) -> bytes:
 
 def _build_rag_pool_graph(ledger_path: Path) -> dict[str, Any]:
     groups = {
-        "prompt": {"c": "#f4a93a", "r": 22, "glow": 54, "name": "ARGUS Prompt", "pace": 0, "pause": 0, "major": True},
+        "prompt": {"c": "#f4a93a", "r": 22, "glow": 54, "name": "Biggy Prompt", "pace": 0, "pause": 0, "major": True},
         "folder": {"c": "#60a5fa", "r": 7, "glow": 18, "name": "Library folder", "pace": 260, "pause": 360, "major": True},
         "document": {"c": "#a78bfa", "r": 4, "glow": 11, "name": "Indexed document", "pace": 460, "pause": 560, "major": False},
     }
@@ -494,7 +516,7 @@ def _build_rag_pool_graph(ledger_path: Path) -> dict[str, Any]:
     # the dormant auto-rotation moves the RAG branches around the question
     # rather than allowing the root to drift through the display.
     nodes: list[dict[str, Any]] = [{
-        "id": "prompt:argus", "label": "ARGUS PROMPT", "g": "prompt",
+        "id": "prompt:argus", "label": "BIGGY PROMPT", "g": "prompt",
         "p": "key:prompt:argus", "fx": 0, "fy": 0, "fz": 0,
     }]
     links: list[dict[str, int]] = []

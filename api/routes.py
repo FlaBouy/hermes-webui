@@ -12215,7 +12215,7 @@ def _render_index_shell_base() -> str:
 def _handle_biggy_v6_world_asset(handler, parsed) -> bool:
     """Serve the read-only, same-origin V6 3D graph viewer embed.
 
-    Fixed allowlist only (3d.html / graph-data.js / logo.png), read directly
+    Fixed allowlist only (3d.html / graph-data.js), read directly
     from the local V6 POC's built viewer directory on disk — no live request
     to the V6 service on port 4719. This route intentionally sends its own
     scoped CSP/X-Frame-Options instead of api.helpers._security_headers(),
@@ -12249,6 +12249,11 @@ def _handle_biggy_v6_world_asset(handler, parsed) -> bool:
     # page may frame this, matching frame-ancestors 'self' below.
     handler.send_header("X-Frame-Options", "SAMEORIGIN")
     handler.send_header("Content-Security-Policy", WORLD_CSP)
+    # The app-wide report-only policy deliberately forbids framing and esm.sh.
+    # This response has a narrower enforced policy that explicitly permits
+    # both for the same-origin graph iframe, so do not append the contradictory
+    # global report-only header to this one response.
+    handler._skip_default_csp_report_only_once = True
     try:
         from api.helpers import flush_pending_auth_cookies
 

@@ -35,6 +35,26 @@ def test_handler_adds_content_security_policy_report_only(monkeypatch):
     }
 
 
+def test_handler_can_skip_report_only_once_for_scoped_embed(monkeypatch):
+    sent_headers = []
+    handler = Handler.__new__(Handler)
+    handler._skip_default_csp_report_only_once = True
+    handler.send_header = lambda key, value: sent_headers.append((key, value))
+    monkeypatch.setattr(BaseHTTPRequestHandler, "end_headers", lambda self: None)
+
+    Handler.end_headers(handler)
+
+    headers = dict(sent_headers)
+    assert "Content-Security-Policy-Report-Only" not in headers
+    assert "Report-To" not in headers
+    assert not hasattr(handler, "_skip_default_csp_report_only_once")
+
+    Handler.end_headers(handler)
+    headers = dict(sent_headers)
+    assert "Content-Security-Policy-Report-Only" in headers
+    assert "Report-To" in headers
+
+
 def test_csp_report_only_keeps_legacy_inline_allowances_for_current_ui():
     policy = Handler.csp_report_only_policy()
 
