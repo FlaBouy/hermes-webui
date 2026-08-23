@@ -251,9 +251,9 @@ def test_biggy_root_boot_does_not_restore_native_or_private_saved_session():
 
 
 def test_operational_cards_use_large_responsive_workspace():
-    assert "min(62vw, 980px)" in BIGGY_CSS
+    assert "min(38vw, 720px)" in BIGGY_CSS
     assert "height:min(68vh, 720px)" in BIGGY_CSS
-    assert "Math.max(620, Math.min(1200" in BIGGY_JS
+    assert "Math.max(480, Math.min(860" in BIGGY_JS
 
 
 def test_right_rail_utility_labels_remain_canonical():

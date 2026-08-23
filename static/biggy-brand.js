@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260822-argus-console-cleanup-11';
+  const BUILD_ID = '20260823-argus-panel-boundary-1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
   const V6_WORLD_PATH = '/api/biggy/v6/world';
@@ -1905,7 +1905,7 @@
     dlg.setAttribute('data-displaces-conversation', 'false');
     dlg.setAttribute('aria-label', 'Travel category rail');
     dlg.setAttribute('data-open-panel-scale', 'workspace');
-    dlg.style.setProperty('--biggy-travel-dock-width', 'min(62vw, 980px)');
+    dlg.style.setProperty('--biggy-travel-dock-width', 'min(38vw, 720px)');
     // Rail stays visible; panel opens on category select / travel content.
     dlg.hidden = false;
     const railBtns = TRAVEL_CATEGORIES.map((label) => {
@@ -2032,14 +2032,14 @@
         dragging = true;
         startX = ev.clientX;
         const panel = dlg.querySelector('#biggyTravelPanel');
-        startW = panel ? panel.getBoundingClientRect().width : 980;
+        startW = panel ? panel.getBoundingClientRect().width : 720;
         handle.setPointerCapture(ev.pointerId);
         ev.preventDefault();
       });
       handle.addEventListener('pointermove', (ev) => {
         if (!dragging) return;
         const dx = startX - ev.clientX;
-        const next = Math.max(620, Math.min(1200, startW + dx));
+        const next = Math.max(480, Math.min(860, startW + dx));
         dlg.style.setProperty('--biggy-travel-dock-width', next + 'px');
         try { if (mapInstance) mapInstance.resize(); } catch (_) {}
       });
