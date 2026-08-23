@@ -15,6 +15,7 @@ LIVE_EXT = (
     / "smedley-engineering"
     / "smedley-engineering.v0.2.5.js"
 )
+PEDAL = Path.home() / "jarvis-pedal" / "jarvis-webui-voice-pedal.py"
 
 
 def select_smedley_voice_emitter(*, realtime_active: bool, ptt_owned: bool = False) -> str:
@@ -68,3 +69,26 @@ def test_voice_dispatch_one_emitter_no_double_fire():
     assert ptt == []
     assert "realtime" not in realtime_on
     assert "browser" not in realtime_on
+
+
+def test_server_owned_argus_turn_skips_second_pedal_speaking_cycle():
+    if not PEDAL.is_file():
+        return
+    source = PEDAL.read_text(encoding="utf-8")
+    assert "return None, None" in source
+    assert "server-owned Argus voice complete" in source
+    assert "if answer is None and spoken_text is None:" in source
+
+
+def test_stt_getting_argus_variant_skips_biggy_filler_and_narration():
+    if not PEDAL.is_file():
+        return
+    source = PEDAL.read_text(encoding="utf-8")
+    namespace = {"re": __import__("re")}
+    start = source.index("def _is_ask_jarvis_prompt")
+    end = source.index("\ndef ", start + 5)
+    exec(source[start:end], namespace)
+    matcher = namespace["_is_ask_jarvis_prompt"]
+    assert matcher(
+        "a biggie about getting Argus to get me a map routed to Jordan Harris Stadium."
+    )

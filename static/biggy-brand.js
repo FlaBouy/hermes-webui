@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260823-argus-panel-boundary-1';
+  const BUILD_ID = '20260823-argus-status-map-palette-6';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
   const V6_WORLD_PATH = '/api/biggy/v6/world';
@@ -55,6 +55,9 @@
   let identityTimer = null;
   let diagTimer = null;
   let ragWorldTimer = null;
+  let conversationLaneTimer = null;
+  let completionMessages = [];
+  let completionMessagesSessionId = '';
   let ragTraceObserverInstalled = false;
   let ragTraceStatusListenerInstalled = false;
   let started = false;
@@ -287,7 +290,7 @@
       for (let i = msgs.length - 1; i >= 0; i--) {
         const m = msgs[i];
         if (m && m.role === 'assistant' && m.ask_jarvis_hard_bind) {
-          return String(m.tts_voice_id || 'dzRy05hNK3bab9ViJ0oU').trim();
+          return String(m.tts_voice_id || 'rvugSNzdY0NcpG2PKe4B').trim();
         }
         if (m && m.role === 'assistant') break;
       }
@@ -307,8 +310,8 @@
       const body = { text: clean.slice(0, 800) };
       let voiceId = opts.voice_id ? String(opts.voice_id).trim() : '';
       // Exact override: speechSynthesis sink and other no-opts callers were
-      // posting /speak with no voice_id → Austin. Ask Jarvis turns must carry
-      // James Michael through this single Smedley-sink choke point.
+      // posting /speak with no voice_id → Austin. Ask Argus turns must carry
+      // Alistar through this single Smedley-sink choke point.
       if (!voiceId) voiceId = resolveAskJarvisVoiceId();
       if (voiceId && /^[A-Za-z0-9_-]{8,64}$/.test(voiceId)) body.voice_id = voiceId;
       // Existing Smedley RAG sidecar: ElevenLabs → room soundbar/speakers or headset.
@@ -402,7 +405,7 @@
       const prior = window.autoReadLastAssistant;
       window.autoReadLastAssistant = function biggyAutoReadToSmedley() {
         try {
-          // Ask Jarvis hard-bind: spoken_text only + James Michael voice override.
+          // Ask Argus hard-bind: spoken_text only + Alistar voice override.
           const msgs = (typeof S !== 'undefined' && Array.isArray(S.messages)) ? S.messages : [];
           let jarvisMsg = null;
           for (let i = msgs.length - 1; i >= 0; i--) {
@@ -415,15 +418,15 @@
           if (jarvisMsg) {
             // Pending working bubble has no spoken_text; never invent/speak it.
             if (jarvisMsg.ask_jarvis_pending) return;
-            // Server already queued James Michael (and Austin ack) — no client duplicate.
+            // Server already queued Alistar (and Austin ack) — no client duplicate.
             if (jarvisMsg._tts_final_server_queued || jarvisMsg._tts_ack_server_queued) {
               if (jarvisMsg._tts_final_server_queued) return;
             }
             const spoken = String(jarvisMsg.spoken_text || jarvisMsg.spoken_reply || '').trim();
             if (spoken) {
-              // Final only: James Michael. Never speak Austin ack from client.
+              // Final only: Alistar. Never speak Austin ack from client.
               if (String(jarvisMsg.tts_voice_profile || '') === 'biggy_austin_ack') return;
-              const voiceId = jarvisMsg.tts_voice_id || 'dzRy05hNK3bab9ViJ0oU';
+              const voiceId = jarvisMsg.tts_voice_id || 'rvugSNzdY0NcpG2PKe4B';
               speakOnSmedley(spoken, { voice_id: voiceId });
               return;
             }
@@ -567,14 +570,14 @@
           String(message.assistant_identity || '').toLowerCase() === 'jarvis'
           || message.ask_jarvis_hard_bind || message.jarvis_response
         ))
-          || /^\s*(?:\*\*)?Jarvis\s*:/i.test(visible);
+          || /^\s*(?:\*\*)?(?:A\.R\.G\.U\.S\.|Argus|Jarvis)\s*:/i.test(visible);
         if (!isJarvis) return;
         const turn = segment.closest('.assistant-turn');
         const role = turn && turn.querySelector('.msg-role.assistant');
         if (!role) return;
         const name = role.querySelector('.msg-role-name');
         const icon = role.querySelector('.role-icon.assistant');
-        if (name) name.textContent = 'Jarvis';
+        if (name) name.textContent = 'A.R.G.U.S.';
         if (icon) icon.textContent = 'J';
         if (turn) turn.dataset.responseAgent = 'jarvis';
       });
@@ -924,6 +927,8 @@
     let lastSessionPostAt = 0;
     let lastCompletionTimestamp = 0;
     let completionBaselineEstablished = false;
+    let progressHydrationPromise = null;
+    let lastProgressHydrationAt = 0;
     let routePending = false;
 
     function applyAudioRouteStatus(status) {
@@ -999,8 +1004,8 @@
       applyAudioRouteStatus(status);
     }
 
-    async function syncActiveSession() {
-      const sid = currentHermesSessionId();
+    async function syncActiveSession(fallbackSid) {
+      const sid = currentHermesSessionId() || (isValidSessionId(fallbackSid) ? fallbackSid : '');
       if (!sid) return;
       const now = Date.now();
       const sessionChanged = sid !== postedSession;
@@ -1018,60 +1023,100 @@
       } catch (_) {}
     }
 
+    async function hydratePttSessionMessages(sessionId, reason, { includeVisuals = false } = {}) {
+      const sid = String(sessionId || '').trim();
+      if (!isValidSessionId(sid)) return false;
+      try {
+        const url = `/api/session?session_id=${encodeURIComponent(sid)}`
+          + '&messages=1&msg_limit=24&resolve_model=0';
+        const response = await fetch(url, {
+          credentials: 'same-origin',
+          cache: 'no-store',
+          headers: { 'X-Biggy-Completion-Reason': String(reason || 'ptt-completion') },
+        });
+        if (!response.ok) throw new Error(`completion hydration HTTP ${response.status}`);
+        const payload = await response.json();
+        const session = payload && payload.session;
+        const messages = session && Array.isArray(session.messages) ? session.messages : null;
+        if (!messages) throw new Error('completion hydration returned no messages');
+        completionMessages = messages;
+        completionMessagesSessionId = sid;
+        persistGuiSessionId(sid);
+        renderArgusConversationLane();
+        if (includeVisuals && typeof window.__biggyHandoffTravelVisualsFromMessages === 'function') {
+          await window.__biggyHandoffTravelVisualsFromMessages(messages);
+        }
+        return true;
+      } catch (error) {
+        try { console.warn('[biggy] PTT session hydration will retry', error); } catch (_) {}
+        return false;
+      }
+    }
+
+    async function refreshPttProgress(status) {
+      const phase = String(status.phase || '').toLowerCase();
+      if (phase !== 'processing' && phase !== 'speaking') return false;
+      const sid = String(
+        status.linked_session_id || status.session_id || currentHermesSessionId() || ''
+      ).trim();
+      if (!isValidSessionId(sid)) return false;
+      const now = Date.now();
+      if (progressHydrationPromise || (now - lastProgressHydrationAt) < 1200) return false;
+      lastProgressHydrationAt = now;
+      progressHydrationPromise = hydratePttSessionMessages(
+        sid,
+        `ptt-${phase}-progress`,
+        { includeVisuals: false },
+      );
+      try {
+        return await progressHydrationPromise;
+      } finally {
+        progressHydrationPromise = null;
+      }
+    }
+
+    async function refreshCompletedPttTurn(status, reason) {
+      const completionSid = String(status.completion_session_id || '');
+      if (!acceptPttCompletion(status)) return false;
+      try {
+        const hydrated = await hydratePttSessionMessages(
+          completionSid,
+          reason,
+          { includeVisuals: true },
+        );
+        if (!hydrated) return false;
+        postedSession = '';
+        await syncActiveSession(completionSid);
+        return true;
+      } catch (error) {
+        try { console.warn('[biggy] PTT completion refresh will retry', error); } catch (_) {}
+        return false;
+      }
+    }
+
     async function pollPttStatus() {
-      await syncActiveSession();
       try {
         const status = await proxyJson('/ptt/status');
         applyPttStatus(status);
+        await syncActiveSession(status.linked_session_id || status.session_id || status.completion_session_id);
+        await refreshPttProgress(status);
         const completionTs = Number(status.completion_timestamp || 0);
         if (!completionBaselineEstablished) {
-          lastCompletionTimestamp = completionTs;
           completionBaselineEstablished = true;
-          if (acceptPttCompletion(status)) {
-            const completionSid = String(status.completion_session_id || '');
-            const loadSess = (typeof window.loadSession === 'function')
-              ? window.loadSession
-              : (typeof loadSession === 'function' ? loadSession : null);
-            const cur = currentHermesSessionId();
-            if (loadSess && completionSid !== cur) {
-              try {
-                await loadSess(completionSid, {
-                  force: true,
-                  externalRefreshReason: 'ptt-baseline-sync',
-                  guiId: GUI_ID,
-                });
-                postedSession = '';
-                persistGuiSessionId(completionSid);
-              } catch (_) {}
-            } else if (loadSess && completionSid === cur) {
-              try {
-                await loadSess(completionSid, {
-                  force: true,
-                  externalRefreshReason: 'ptt-baseline-refresh',
-                  guiId: GUI_ID,
-                });
-              } catch (_) {}
-            }
+          const recentCompletion = completionTs > 0 && ((Date.now() / 1000) - completionTs) <= 90;
+          if (recentCompletion && acceptPttCompletion(status)) {
+            const refreshed = await refreshCompletedPttTurn(status, 'ptt-baseline-refresh');
+            if (!refreshed) return;
           }
+          lastCompletionTimestamp = completionTs;
           return;
         }
         if (completionTs > lastCompletionTimestamp) {
-          lastCompletionTimestamp = completionTs;
           if (!acceptPttCompletion(status)) return;
-          const completionSid = String(status.completion_session_id || '');
-          const loadSess = (typeof window.loadSession === 'function')
-            ? window.loadSession
-            : (typeof loadSession === 'function' ? loadSession : null);
-          if (!loadSess) return;
-          try {
-            await loadSess(completionSid, {
-              force: true,
-              externalRefreshReason: 'ptt-completion',
-              guiId: GUI_ID,
-            });
-            postedSession = '';
-            persistGuiSessionId(completionSid);
-          } catch (_) {}
+          const refreshed = await refreshCompletedPttTurn(status, 'ptt-completion');
+          // Do not consume the event until the visible session and cards have
+          // hydrated. A transient load failure must retry on the next poll.
+          if (refreshed) lastCompletionTimestamp = completionTs;
         }
       } catch (_) {
         ptt.classList.remove('ok', 'active');
@@ -1207,8 +1252,8 @@
     if (!orb) return;
     orb.className = REACTOR_ORB_CLASS[next] || '';
     const label = detail ? `${next}: ${detail}` : next;
-    orb.setAttribute('title', `Jarvis V6 ${label}`);
-    orb.setAttribute('aria-label', `Jarvis V6 ${label}`);
+    orb.setAttribute('title', `A.R.G.U.S. ${label}`);
+    orb.setAttribute('aria-label', `A.R.G.U.S. ${label}`);
     const st = document.getElementById('j-state');
     const stTxt = document.getElementById('j-state-txt');
     if (st && stTxt) {
@@ -1315,7 +1360,7 @@
     const userLine = String(question || '').trim();
     const reply = ok
       ? String(answer || '').trim()
-      : (`**Jarvis V6 unavailable:** ${String(errorText || 'request failed')}`);
+      : (`**A.R.G.U.S. unavailable:** ${String(errorText || 'request failed')}`);
     try {
       if (typeof S !== 'undefined' && S && Array.isArray(S.messages)) {
         S.messages.push({ role: 'user', content: userLine, jarvis_v6: true });
@@ -1353,12 +1398,12 @@
     const question = String(raw || '').trim();
     const note = document.getElementById('biggyHeaderNote');
     if (!question) {
-      if (note) note.textContent = 'Type a question, then Ask Jarvis.';
+      if (note) note.textContent = 'Type a question, then Ask Argus.';
       return;
     }
     jarvisOrbFlight = true;
     setJarvisOrbState('thinking', 'request in flight');
-    if (note) note.textContent = 'Jarvis V6 thinking…';
+    if (note) note.textContent = 'A.R.G.U.S. thinking…';
     try {
       const data = await jsonPost(V6_CHAT_PATH, {
         message: question,
@@ -1372,8 +1417,8 @@
       } else {
         const state = String((data && data.state) || 'error');
         setJarvisOrbState(state === 'offline' ? 'offline' : 'error', data && data.error);
-        appendJarvisV6Turn(question, '', false, (data && data.error) || 'Jarvis V6 request failed');
-        if (note) note.textContent = String((data && data.error) || 'Jarvis V6 error');
+        appendJarvisV6Turn(question, '', false, (data && data.error) || 'A.R.G.U.S. request failed');
+        if (note) note.textContent = String((data && data.error) || 'A.R.G.U.S. error');
       }
     } catch (err) {
       setJarvisOrbState('error', String(err && err.message || err));
@@ -1512,6 +1557,112 @@
     return hud;
   }
 
+  function ensureArgusConversationLane(mainChat) {
+    const host = mainChat || document.getElementById('mainChat');
+    if (!host) return null;
+    let lane = host.querySelector('#biggyArgusConversationLane');
+    if (lane) return lane;
+    lane = el('section', 'biggy-argus-conversation-lane');
+    lane.id = 'biggyArgusConversationLane';
+    lane.dataset.biggyLayer = 'conversation';
+    lane.setAttribute('data-testid', 'biggy-argus-conversation-lane');
+    lane.setAttribute('aria-label', 'Biggy and ARGUS conversation');
+    lane.hidden = true;
+    lane.innerHTML = '<div class="biggy-argus-conversation-heading">CONVERSATION // LIVE</div>'
+      + '<div class="biggy-argus-conversation-turns" aria-live="polite"></div>';
+    host.appendChild(lane);
+    syncArgusConversationLaneBoundary(lane, host);
+    return lane;
+  }
+
+  function syncArgusConversationLaneBoundary(lane, host) {
+    lane = lane || document.getElementById('biggyArgusConversationLane');
+    host = host || document.getElementById('mainChat');
+    const composer = document.getElementById('composerWrap');
+    if (!lane || !host || !composer) return;
+    const hostRect = host.getBoundingClientRect();
+    const composerRect = composer.getBoundingClientRect();
+    const overlapBoundary = Math.max(132, Math.round(hostRect.bottom - composerRect.top + 18));
+    lane.style.setProperty('--biggy-conversation-bottom', overlapBoundary + 'px');
+  }
+
+  function argusConversationText(message) {
+    let value = message && message.content;
+    if (Array.isArray(value)) {
+      value = value.map((part) => {
+        if (typeof part === 'string') return part;
+        return part && typeof part === 'object' ? (part.text || part.content || '') : '';
+      }).join('\n');
+    } else if (value && typeof value === 'object') {
+      value = value.text || value.content || '';
+    }
+    return String(value || '')
+      .replace(/```[\s\S]*?```/g, '[technical detail available in transcript]')
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1')
+      .replace(/^#{1,6}\s+/gm, '')
+      .replace(/[*_~`]+/g, '')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+  }
+
+  function argusConversationIdentity(message) {
+    if (!message || message.role === 'user') return { key: 'operator', label: 'PROMPT' };
+    const identity = String(message.assistant_identity || '').toLowerCase();
+    const isArgus = identity === 'argus' || identity === 'jarvis'
+      || message.ask_jarvis_hard_bind || message.jarvis_response || message.jarvis_v6;
+    return isArgus ? { key: 'argus', label: 'A.R.G.U.S.' } : { key: 'biggy', label: 'BIGGY' };
+  }
+
+  function renderArgusConversationLane() {
+    const lane = ensureArgusConversationLane();
+    if (!lane) return;
+    syncArgusConversationLaneBoundary(lane);
+    const activeSid = currentHermesSessionId();
+    const source = (
+      completionMessagesSessionId
+      && (completionMessagesSessionId === activeSid || completionMessagesSessionId === state.sessionId)
+      && Array.isArray(completionMessages)
+    )
+      ? completionMessages
+      : ((typeof S !== 'undefined' && S && Array.isArray(S.messages)) ? S.messages : []);
+    const visible = source.filter((message) => message
+      && (message.role === 'user' || message.role === 'assistant')
+      && !message.tool_only && !message._hidden);
+    const turns = visible.slice(-8).flatMap((message, index) => {
+      const identity = argusConversationIdentity(message);
+      const pending = !!(message.ask_jarvis_pending || message._live);
+      const raw = argusConversationText(message);
+      const text = pending && !raw ? 'Tracing the retrieval path…' : raw;
+      const result = [];
+      const ackText = String(message && message._ack_spoken_text || '').trim();
+      if (message.role === 'assistant' && message.ask_jarvis_hard_bind && ackText) {
+        result.push({ identity: { key: 'biggy', label: 'BIGGY' }, pending: false, text: ackText.slice(0, 1400), index: `${index}-ack` });
+      }
+      result.push({ identity, pending, text: text.slice(0, 1400), index });
+      return result;
+    }).filter((turn) => turn.text);
+    const signature = JSON.stringify(turns.map((turn) => [turn.identity.key, turn.pending, turn.text]));
+    if (lane.dataset.signature === signature) return;
+    lane.dataset.signature = signature;
+    lane.hidden = turns.length === 0;
+    const body = lane.querySelector('.biggy-argus-conversation-turns');
+    if (!body) return;
+    body.innerHTML = turns.map((turn) => `<article class="biggy-argus-dialog is-${turn.identity.key}${turn.pending ? ' is-pending' : ''}">`
+      + `<div class="biggy-argus-dialog-role">${esc(turn.identity.label)}${turn.pending ? ' // WORKING' : ''}</div>`
+      + `<div class="biggy-argus-dialog-copy">${esc(turn.text).replace(/\n/g, '<br>')}</div>`
+      + '</article>').join('');
+    body.scrollTop = body.scrollHeight;
+  }
+
+  function installArgusConversationLane(mainChat) {
+    const lane = ensureArgusConversationLane(mainChat);
+    syncArgusConversationLaneBoundary(lane, mainChat);
+    renderArgusConversationLane();
+    if (conversationLaneTimer) clearInterval(conversationLaneTimer);
+    conversationLaneTimer = setInterval(renderArgusConversationLane, 500);
+  }
+
   function ensureArgusIngestDialog(mainChat) {
     const host = mainChat || document.getElementById('mainChat');
     if (!host) return null;
@@ -1628,14 +1779,29 @@
     });
   }
 
+  let ragWorldStatusFailures = 0;
+  let lastGoodRagWorldStatus = null;
+
+  function noteRagWorldStatusFailure() {
+    ragWorldStatusFailures += 1;
+    // The ingest API and the browser do not always restart in lock-step. A
+    // single missed poll must not replace known-good operator truth with a
+    // red status card. Only declare the feed unavailable after three misses.
+    if (ragWorldStatusFailures >= 3 || !lastGoodRagWorldStatus) {
+      renderArgusRagOverview({ ok: false, state: 'offline' });
+    }
+  }
+
   async function pollRagWorldState() {
     try {
       const response = await fetch(V6_WORLD_STATUS_PATH, { cache: 'no-store' });
       if (!response.ok) {
-        renderArgusRagOverview({ ok: false, state: 'offline' });
+        noteRagWorldStatusFailure();
         return;
       }
       const status = await response.json();
+      ragWorldStatusFailures = 0;
+      lastGoodRagWorldStatus = status;
       renderArgusRagOverview(status);
       const phase = String(status && status.phase || '').toLowerCase();
       const state = String(status && status.state || '').toLowerCase();
@@ -1644,7 +1810,7 @@
         postRagTrace({ state: 'failed', source: file, reason: status.last_error || phase });
       }
     } catch (_) {
-      renderArgusRagOverview({ ok: false, state: 'offline' });
+      noteRagWorldStatusFailure();
     }
   }
 
@@ -1669,7 +1835,7 @@
     iframe.dataset.biggyLayer = 'galaxy';
     iframe.id = 'biggyV6World';
     iframe.setAttribute('data-testid', 'biggy-v6-world');
-    iframe.setAttribute('title', 'Jarvis V6 \u2014 3D memory graph');
+    iframe.setAttribute('title', 'A.R.G.U.S. \u2014 3D memory graph');
     iframe.setAttribute('referrerpolicy', 'no-referrer');
     iframe.src = `${V6_WORLD_PATH}?v=${encodeURIComponent(BUILD_ID)}`;
     // Chrome's own fullscreen (F11 / browser wrapper) resizes the top-level
@@ -1759,7 +1925,7 @@
       `<button id="biggyAudioRoute" type="button" data-testid="biggy-audio-route" title="Toggle headset / room audio">ROOM</button>` +
       `<button id="biggyOpenSmedley" type="button" data-testid="biggy-open-smedley" title="Open Smedley GUI (RAG + electrical tools)">SMEDLEY</button>` +
       `</div>` +
-      `<div class="biggy-brand-status" aria-label="Jarvis V6 model">` +
+      `<div class="biggy-brand-status" aria-label="A.R.G.U.S. model">` +
       `<div id="j-brain"><span id="j-brain-chip" data-testid="biggy-jarvis-model">—</span></div>` +
       `</div>`;
     return header;
@@ -1779,7 +1945,7 @@
     dock.dataset.biggyLayer = 'reactor';
     dock.setAttribute('data-testid', 'biggy-reactor-dock');
     dock.innerHTML =
-      `<div id="j-orb" data-testid="biggy-jarvis-orb" role="status" aria-live="polite" aria-label="Jarvis V6 offline">` +
+      `<div id="j-orb" data-testid="biggy-jarvis-orb" role="status" aria-live="polite" aria-label="A.R.G.U.S. offline">` +
       `<svg viewBox="0 0 200 200" aria-hidden="true">` +
       `<defs><radialGradient id="hudCore" cx="50%" cy="45%" r="62%">` +
       `<stop offset="0%" stop-color="#0e413c"/><stop offset="70%" stop-color="#0b302d"/>` +
@@ -1799,7 +1965,7 @@
       `<circle class="core-disc" cx="100" cy="100" r="32"/>` +
       `<circle class="core-lobe" cx="100" cy="100" r="32"/>` +
       `<circle class="core-rim" cx="100" cy="100" r="32" stroke-width="1.2"/>` +
-      `<text class="hud-label" x="100" y="103.5" text-anchor="middle">A.R.G.U.S.</text>` +
+      `<text class="hud-label" x="101.5" y="103.5" text-anchor="middle">A.R.G.U.S.</text>` +
       `</g>` +
       `</svg>` +
       `</div>` +
@@ -1824,6 +1990,26 @@
   let mapboxLoadPromise = null;
   let mapInstance = null;
   let lastMapModelKey = '';
+  let mapRenderPromise = null;
+
+  function setGalaxyRenderPaused(paused) {
+    const frame = document.getElementById('biggyV6World');
+    if (!frame || !frame.contentWindow) return;
+    try {
+      frame.contentWindow.postMessage(
+        { type: paused ? 'biggy-world-pause' : 'biggy-world-resume' },
+        window.location.origin,
+      );
+    } catch (_) {}
+  }
+
+  function releaseTravelMap() {
+    try {
+      if (mapInstance) mapInstance.remove();
+    } catch (_) {}
+    mapInstance = null;
+    setGalaxyRenderPaused(false);
+  }
 
   function loadMapboxAssets() {
     if (window.mapboxgl) return Promise.resolve(window.mapboxgl);
@@ -1975,14 +2161,21 @@
       const showWeatherActions =
         key === 'weather' && mapActions && mapActions.getAttribute('data-action-category') === 'weather' &&
         mapActions.childElementCount > 0;
+      const recommendationKey = lodging
+        ? mapRecCategoryToRail(lodging.getAttribute('data-rec-category') || '')
+        : '';
+      const showRecommendation = !!(
+        lodging && !showTravel && !showWeatherActions && key === recommendationKey &&
+        lodging.getAttribute('data-has-cards') === '1'
+      );
       if (mapCanvas) mapCanvas.hidden = !showTravel;
       if (mapActions) mapActions.hidden = !(showTravel || showWeatherActions);
       if (mapNote) mapNote.hidden = !(showTravel || showWeatherActions);
       if (lodging) {
-        lodging.hidden = showTravel || showWeatherActions || lodging.getAttribute('data-has-cards') !== '1';
+        lodging.hidden = !showRecommendation;
       }
       if (empty) {
-        empty.hidden = showTravel || showWeatherActions || (lodging && lodging.getAttribute('data-has-cards') === '1');
+        empty.hidden = showTravel || showWeatherActions || showRecommendation;
       }
       if (open) {
         dlg.hidden = false;
@@ -2075,12 +2268,7 @@
       if (typeof dlg.__biggySetCollapsed === 'function') dlg.__biggySetCollapsed(true);
       else dlg.classList.add('is-collapsed');
     }
-    try {
-      if (mapInstance) {
-        mapInstance.remove();
-        mapInstance = null;
-      }
-    } catch (_) {}
+    releaseTravelMap();
   }
 
   function modelKey(mvm) {
@@ -2100,7 +2288,7 @@
     return cfg && typeof cfg === 'object' ? cfg : { available: false, reason: 'BAD_CONFIG' };
   }
 
-  async function renderMapViewModel(mvm) {
+  async function renderMapViewModelOnce(mvm) {
     if (!mvm || typeof mvm !== 'object') return false;
     if (mvm.available === false) {
       const dlg = ensureTravelMapDialog();
@@ -2146,6 +2334,7 @@
     }
     if (actions) {
       actions.innerHTML = '';
+      actions.setAttribute('data-action-category', 'travel');
       const nav = mvm.navigation || {};
       // Optional buttons from model only — public O/D params; no auto-launch.
       if (nav.waze_url) {
@@ -2175,6 +2364,7 @@
       return true;
     }
     lastMapModelKey = key;
+    setGalaxyRenderPaused(true);
 
     let cfg;
     try {
@@ -2190,6 +2380,7 @@
           '). Config var: ' +
           String(cfg.token_env || 'BIGGY_MAPBOX_PUBLIC_TOKEN');
       }
+      setGalaxyRenderPaused(false);
       return false;
     }
     try {
@@ -2209,8 +2400,14 @@
         attributionControl: true,
       });
       mapInstance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
-      await new Promise((resolve) => {
-        mapInstance.on('load', () => {
+      await new Promise((resolve, reject) => {
+        const timeout = window.setTimeout(() => reject(new Error('mapbox_load_timeout')), 12000);
+        mapInstance.once('error', (event) => {
+          window.clearTimeout(timeout);
+          reject(new Error(String(event && event.error && event.error.message || 'mapbox_load_error')));
+        });
+        mapInstance.once('load', () => {
+          window.clearTimeout(timeout);
           try {
             const geom = mvm.route && mvm.route.geometry;
             if (geom && geom.type === 'LineString' && Array.isArray(geom.coordinates)) {
@@ -2250,11 +2447,23 @@
         });
       });
       if (note) note.textContent = 'Display only · Agent map_view_model · not a decision-maker';
+      // Mapbox and Three.js compete during WebGL initialization only. Resume
+      // the galaxy as soon as the map is ready, even while its panel is open.
+      setGalaxyRenderPaused(false);
       return true;
     } catch (err) {
+      releaseTravelMap();
       if (note) note.textContent = 'Mapbox render failed: ' + String(err && err.message || err);
       return false;
     }
+  }
+
+  function renderMapViewModel(mvm) {
+    if (mapRenderPromise) return mapRenderPromise;
+    mapRenderPromise = renderMapViewModelOnce(mvm).finally(() => {
+      mapRenderPromise = null;
+    });
+    return mapRenderPromise;
   }
 
   window.__biggyRenderMapViewModel = renderMapViewModel;
@@ -2267,6 +2476,36 @@
     }
     if (/[<>"']|javascript:/i.test(s)) return null;
     return s;
+  }
+
+  function safeRecommendationHref(opt) {
+    if (!opt || typeof opt !== 'object') return null;
+    const address = String(opt.address || '').trim();
+    if (address) {
+      return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(address);
+    }
+    const safe = safeLodgingHref(opt.url || opt.directions_url);
+    if (!safe) return null;
+    try {
+      const parsed = new URL(safe);
+      if (!/(^|\.)google\.[a-z.]+$/i.test(parsed.hostname)) return safe;
+      const key = parsed.searchParams.has('query') ? 'query'
+        : (parsed.searchParams.has('destination') ? 'destination' : '');
+      if (!key) return safe;
+      const raw = String(parsed.searchParams.get(key) || '').trim();
+      const match = raw.match(/^(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)$/);
+      if (!match) return safe;
+      const first = Number(match[1]);
+      const second = Number(match[2]);
+      // Mapbox payloads historically emitted longitude,latitude. Only swap
+      // when the first value cannot be a latitude and the second can, which
+      // avoids guessing for valid latitude,longitude coordinates.
+      if (Math.abs(first) > 90 && Math.abs(first) <= 180 && Math.abs(second) <= 90) {
+        parsed.searchParams.set(key, `${second},${first}`);
+        return parsed.toString();
+      }
+    } catch (_) {}
+    return safe;
   }
 
   function ensureTravelRecommendationSection(dlg) {
@@ -2340,6 +2579,7 @@
     dlg.classList.add('has-lodging');
     dlg.setAttribute('data-rec-category', category || '');
     const railKey = mapRecCategoryToRail(category || 'lodging');
+    section.setAttribute('data-rec-category', railKey);
     if (rvm.available === false) {
       section.hidden = false;
       section.setAttribute('data-has-cards', '0');
@@ -2358,7 +2598,7 @@
     let rendered = 0;
     options.slice(0, 5).forEach((opt) => {
       if (!opt || typeof opt !== 'object') return;
-      const href = safeLodgingHref(opt.url);
+      const href = safeRecommendationHref(opt);
       if (!href) return;
       // Never show lodging-titled cards under a non-lodging category.
       if (category && category !== 'lodging') {
@@ -2417,15 +2657,21 @@
 
   window.__biggyRenderLodgingViewModel = renderLodgingViewModel;
   window.__biggyRenderRecommendationViewModel = renderRecommendationViewModel;
-  window.__biggyRenderTripPlanViewModel = function renderTripPlanViewModel(tvm) {
+  function cacheTripPlanViewModels(tvm) {
     if (!tvm || typeof tvm !== 'object' || tvm.schema !== 'jarvis.trip_plan_view_model.v1' ||
-        tvm.emitted_by !== 'Jarvis II PA Tool') return { rendered: false, count: 0, category: null };
+        tvm.emitted_by !== 'Jarvis II PA Tool') return [];
     const models = Array.isArray(tvm.categories) ? tvm.categories : [];
     models.forEach((model) => {
       if (model && typeof model === 'object' && model.category) {
         recommendationModelsByCategory[mapRecCategoryToRail(model.category)] = model;
       }
     });
+    return models;
+  }
+
+  window.__biggyRenderTripPlanViewModel = function renderTripPlanViewModel(tvm) {
+    const models = cacheTripPlanViewModels(tvm);
+    if (!models.length) return { rendered: false, count: 0, category: null };
     const first = models.find((model) => model && model.category === 'lodging') || models.find((model) => model && model.available) || models[0];
     return first ? renderRecommendationViewModel(first) : { rendered: false, count: 0, category: null };
   };
@@ -2479,57 +2725,75 @@
   window.__biggyRenderVisualActionViewModel = renderVisualActionViewModel;
 
   async function handoffTravelVisualsFromMessages(messages, correlationId) {
-    try {
-      const list = Array.isArray(messages) ? messages : (typeof S !== 'undefined' && S && S.messages) || [];
-      for (let i = list.length - 1; i >= 0; i--) {
-        const m = list[i];
-        if (!m || m.role !== 'assistant') continue;
-        if (m.ask_jarvis_pending) continue;
-        const corr = String(correlationId || m._correlation_id || window.__askJarvisActiveCorrelation || '');
-        if (corr) window.__askJarvisActiveCorrelation = corr;
-        const mvm = m.map_view_model;
-        const rvm = m.recommendation_view_model;
-        const tpm = m.trip_plan_view_model;
-        const lvm = m.lodging_view_model;
-        const avm = m.visual_action_view_model;
-        // Prefer recommendation_view_model; never fall back to lodging when category != lodging.
-        let mapOk = false;
-        let recInfo = { rendered: false, count: 0, category: null };
-        let visualActionOk = false;
-        if (mvm && typeof mvm === 'object') {
-          mapOk = !!(await renderMapViewModel(mvm));
-        }
+    const list = Array.isArray(messages) ? messages : (typeof S !== 'undefined' && S && S.messages) || [];
+    for (let i = list.length - 1; i >= 0; i--) {
+      const m = list[i];
+      if (!m || m.role !== 'assistant' || m.ask_jarvis_pending) continue;
+      const corr = String(correlationId || m._correlation_id || window.__askJarvisActiveCorrelation || '');
+      if (corr) window.__askJarvisActiveCorrelation = corr;
+      const mvm = m.map_view_model;
+      const rvm = m.recommendation_view_model;
+      const tpm = m.trip_plan_view_model;
+      const lvm = m.lodging_view_model;
+      const avm = m.visual_action_view_model;
+      const hasVisual = [mvm, rvm, tpm, lvm, avm].some((vm) => vm && typeof vm === 'object');
+      if (!hasVisual) continue;
+
+      let recInfo = { rendered: false, count: 0, category: null };
+      let visualActionOk = false;
+      try {
+        // A trip package owns every category on the right rail.  Cache all of
+        // them even when the response also carries a preferred recommendation
+        // model; otherwise only Lodging survives hydration and the remaining
+        // category buttons incorrectly appear empty.
+        const tripModels = tpm && typeof tpm === 'object' ? cacheTripPlanViewModels(tpm) : [];
         if (rvm && typeof rvm === 'object') {
           recInfo = renderRecommendationViewModel(rvm) || recInfo;
-        } else if (tpm && typeof tpm === 'object') {
+        } else if (tripModels.length) {
           recInfo = window.__biggyRenderTripPlanViewModel(tpm) || recInfo;
         } else if (lvm && typeof lvm === 'object') {
-          // Only render lodging alias when no non-lodging recommendation is present.
           recInfo = renderLodgingViewModel(lvm) || recInfo;
         }
         if (avm && typeof avm === 'object') {
           visualActionOk = renderVisualActionViewModel(avm);
         }
-        if ((mvm && typeof mvm === 'object') || (rvm && typeof rvm === 'object') || (tpm && typeof tpm === 'object') || (lvm && typeof lvm === 'object') || (avm && typeof avm === 'object')) {
-          const dlg = document.getElementById('biggyTravelMapDialog');
-          postRenderAck({
-            correlation_id: corr,
-            map_rendered: !!mapOk,
-            recommendations_rendered: !!recInfo.rendered,
-            recommendation_card_count: recInfo.count || 0,
-            category: recInfo.category || (visualActionOk ? 'weather' : null),
-            visual_actions_rendered: visualActionOk,
-            layout_slot: 'docked_landing_panel',
-            overlay_dialog: false,
-            displaces_conversation: false,
-            panel_visible: !!(dlg && !dlg.hidden),
-            panel_collapsed: !!(dlg && dlg.classList.contains('is-collapsed')),
-            dialog_visible: false,
-          });
-          return true;
-        }
+      } catch (error) {
+        console.error('[biggy] recommendation card hydration failed', error);
       }
-    } catch (_) {}
+
+      const sendAck = (mapOk) => {
+        const dlg = document.getElementById('biggyTravelMapDialog');
+        postRenderAck({
+          correlation_id: corr,
+          map_rendered: !!mapOk,
+          recommendations_rendered: !!recInfo.rendered,
+          recommendation_card_count: recInfo.count || 0,
+          category: recInfo.category || (visualActionOk ? 'weather' : null),
+          visual_actions_rendered: visualActionOk,
+          layout_slot: 'docked_landing_panel',
+          overlay_dialog: false,
+          displaces_conversation: false,
+          panel_visible: !!(dlg && !dlg.hidden),
+          panel_collapsed: !!(dlg && dlg.classList.contains('is-collapsed')),
+          dialog_visible: false,
+        });
+      };
+
+      if (mvm && typeof mvm === 'object') {
+        // Mapbox/WebGL may take seconds to initialize.  Start it after the card
+        // DOM and category cache exist, but do not make completion hydration,
+        // PTT release, or the visible cards wait for the map promise.
+        Promise.resolve(renderMapViewModel(mvm)).then((mapOk) => {
+          sendAck(!!mapOk);
+        }).catch((error) => {
+          console.error('[biggy] map card hydration failed', error);
+          sendAck(false);
+        });
+      } else {
+        sendAck(false);
+      }
+      return true;
+    }
     return false;
   }
 
@@ -2557,9 +2821,11 @@
     document.querySelectorAll('.biggy-composer-controls').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-right-cockpit-controls').forEach((node) => node.remove());
     mainChat.querySelectorAll('.biggy-argus-rag-overview').forEach((node) => node.remove());
+    mainChat.querySelectorAll('.biggy-argus-conversation-lane').forEach((node) => node.remove());
     pttInstalled = false;
     installBiggyV6World(mainChat);
     ensureArgusRagOverview(mainChat);
+    installArgusConversationLane(mainChat);
     const header = makeHeader();
     mainChat.insertBefore(header, mainChat.firstChild);
     const reactorDock = makeReactorDock();

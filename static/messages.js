@@ -1382,7 +1382,7 @@ async function send(){
     const defaultMessageMode=window._defaultMessageMode||'steer';
       // Ask Jarvis must never be steered into an in-flight agent/pending turn —
       // hard-bind only works via /api/chat/start. Queue if another turn owns the session.
-      const _askJarvisBusy=/\bask\s+jarvis\b/i.test(text);
+      const _askJarvisBusy=/\bask\s+(?:argus|jarvis)\b/i.test(text);
       const _askJarvisPending=String(S.activeStreamId||'').startsWith('ask-jarvis-pending:');
       if(_askJarvisBusy||_askJarvisPending){
         const _modelState=_chatPayloadModelState();
@@ -1390,7 +1390,7 @@ async function send(){
         _clearComposerAfterQueuedSelectionSend(S.session&&S.session.session_id);
         S.pendingFiles=[];renderTray();
         updateQueueBadge(S.session.session_id);
-        showToast(`Queued Ask Jarvis: "${text.slice(0,40)}${text.length>40?'…':''}"`,2500);
+        showToast(`Queued Ask Argus: "${text.slice(0,40)}${text.length>40?'…':''}"`,2500);
       } else if(defaultMessageMode==='steer'&&S.activeStreamId&&typeof _trySteer==='function'){
         // Real steer: clear the input first so the user gets immediate
         // feedback, then ship the steer payload via /api/chat/steer.
@@ -1845,7 +1845,7 @@ async function send(){
 
   const startData = postStartData || {};
   // Ask Jarvis hard-bind: deterministic Jarvis PA webhook reply, no agent stream.
-  // Two-stage: immediate pending+Austin ack, then poll until final James Michael result.
+  // Two-stage: immediate pending+Austin ack, then poll until final Alistar result.
   if(startData.ask_jarvis_hard_bind){
     const _ajt0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
     const _ajCorr = startData.correlation_id ? String(startData.correlation_id) : '';
@@ -1913,9 +1913,6 @@ async function send(){
         }catch(_){ }
       };
       _render();
-      setTimeout(_render, 250);
-      setTimeout(_render, 900);
-      setTimeout(_render, 2000);
     };
 
     if(_ajPending){
@@ -1958,7 +1955,7 @@ async function send(){
             // Always hand off from live S.messages — pending→final refresh can
             // populate map/lodging after the first poll snapshot.
             _ajApplyFinalVisual(finalMsg.map_view_model, finalMsg.lodging_view_model, finalMsg.recommendation_view_model, finalMsg.trip_plan_view_model);
-            // Server queues James Michael once — skip client sink (no duplicate audio).
+            // Server queues Alistar once — skip client sink (no duplicate audio).
           }else if(typeof window.__biggyHandoffTravelVisualsFromMessages==='function'){
             try{ window.__biggyHandoffTravelVisualsFromMessages(); }catch(_){ }
           }
@@ -2062,7 +2059,7 @@ async function send(){
       try{console.warn('[webui] ask-jarvis hard-bind session refresh failed', askJarvisErr);}catch(_){ }
     }
     if(typeof autoReadLastAssistant==='function'){
-      // Server already queued James Michael on Smedley /speak — skip client sink
+      // Server already queued Alistar on Smedley /speak — skip client sink
       // so a cache-stuck Austin path cannot override/double-speak.
       if(!(startData.tts_server_queued || startData.tts_final_queued)){
         setTimeout(()=>autoReadLastAssistant(), 300);

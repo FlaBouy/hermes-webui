@@ -68,7 +68,7 @@ class JarvisBridge:
             return _payload(
                 state="offline",
                 online=False,
-                error=err or "Jarvis V6 is offline",
+                error=err or "A.R.G.U.S. is offline",
                 http_status=status,
                 base_url_safe=_safe_base(self.base_url),
             ), 200
@@ -76,7 +76,7 @@ class JarvisBridge:
             return _payload(
                 state="error",
                 online=False,
-                error=err or f"Jarvis V6 health failed (HTTP {status})",
+                error=err or f"A.R.G.U.S. health failed (HTTP {status})",
                 http_status=status,
                 base_url_safe=_safe_base(self.base_url),
             ), 200
@@ -85,7 +85,7 @@ class JarvisBridge:
             return _payload(
                 state="error",
                 online=False,
-                error="Jarvis V6 /api/model did not report a model",
+                error="A.R.G.U.S. did not report a model",
                 http_status=status,
                 upstream=body,
                 base_url_safe=_safe_base(self.base_url),
@@ -140,7 +140,7 @@ class JarvisBridge:
             return {
                 "ok": False,
                 "state": "offline",
-                "error": err or "Jarvis V6 is offline",
+                "error": err or "A.R.G.U.S. is offline",
                 "answer": None,
                 "http_status": status,
             }, 200
@@ -148,7 +148,7 @@ class JarvisBridge:
             return {
                 "ok": False,
                 "state": "error",
-                "error": err or f"Jarvis V6 /chat failed (HTTP {status})",
+                "error": err or f"A.R.G.U.S. request failed (HTTP {status})",
                 "answer": None,
                 "http_status": status,
             }, 200
@@ -165,7 +165,7 @@ class JarvisBridge:
             return {
                 "ok": False,
                 "state": "error",
-                "error": "Jarvis V6 returned an empty answer",
+                "error": "A.R.G.U.S. returned an empty answer",
                 "answer": None,
                 "http_status": status,
             }, 200
@@ -203,13 +203,13 @@ class JarvisBridge:
             with urlopen(req, timeout=timeout_s) as resp:
                 raw_body = resp.read(MAX_BODY_BYTES + 1)
                 if len(raw_body) > MAX_BODY_BYTES:
-                    return 502, None, "Jarvis V6 response too large", "error"
+                    return 502, None, "A.R.G.U.S. response too large", "error"
                 parsed = _parse_json(raw_body)
                 return int(getattr(resp, "status", 200) or 200), parsed, None, "ok"
         except socket.timeout:
-            return 0, None, f"Jarvis V6 timed out after {timeout_s:.0f}s", "offline"
+            return 0, None, f"A.R.G.U.S. timed out after {timeout_s:.0f}s", "offline"
         except TimeoutError:
-            return 0, None, f"Jarvis V6 timed out after {timeout_s:.0f}s", "offline"
+            return 0, None, f"A.R.G.U.S. timed out after {timeout_s:.0f}s", "offline"
         except HTTPError as exc:
             raw_body = b""
             try:
@@ -223,12 +223,12 @@ class JarvisBridge:
             return int(exc.code or 0), parsed, detail or f"HTTP {exc.code}", "error"
         except URLError as exc:
             reason = str(getattr(exc, "reason", exc) or exc)
-            return 0, None, f"Jarvis V6 unreachable ({reason})", "offline"
+            return 0, None, f"A.R.G.U.S. unreachable ({reason})", "offline"
         except OSError as exc:
-            return 0, None, f"Jarvis V6 unreachable ({exc})", "offline"
+            return 0, None, f"A.R.G.U.S. unreachable ({exc})", "offline"
         except Exception:
             logger.exception("jarvis v6 bridge request failed")
-            return 0, None, "Jarvis V6 bridge request failed", "error"
+            return 0, None, "A.R.G.U.S. bridge request failed", "error"
 
 
 def load_bridge_config() -> dict[str, Any]:

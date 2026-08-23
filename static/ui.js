@@ -8888,7 +8888,7 @@ function autoReadLastAssistant(){
   if(jarvisMsg){
     const spoken=String(jarvisMsg.spoken_text||jarvisMsg.spoken_reply||'').trim();
     if(!spoken) return;
-    const voiceId=jarvisMsg.tts_voice_id||'dzRy05hNK3bab9ViJ0oU';
+    const voiceId=jarvisMsg.tts_voice_id||'rvugSNzdY0NcpG2PKe4B';
     _playElevenLabsTts(spoken, null, {voice_id:voiceId});
     return;
   }

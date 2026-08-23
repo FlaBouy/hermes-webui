@@ -262,6 +262,98 @@ def test_right_rail_utility_labels_remain_canonical():
     assert '>SMEDLEY</button>' in BIGGY_JS
 
 
+def test_argus_conversation_lane_mirrors_existing_message_state():
+    assert 'id = \'biggyArgusConversationLane\'' in BIGGY_JS
+    assert "Array.isArray(S.messages)" in BIGGY_JS
+    assert "message.ask_jarvis_pending || message._live" in BIGGY_JS
+    assert "identity === 'argus' || identity === 'jarvis'" in BIGGY_JS
+    assert "installArgusConversationLane(mainChat)" in BIGGY_JS
+    assert ".biggy-argus-conversation-lane" in BIGGY_CSS
+    assert "width:min(410px,calc(34% - 34px))" in BIGGY_CSS
+    assert "font-size:14px" in BIGGY_CSS
+    assert 'x="101.5"' in BIGGY_JS
+    assert "syncArgusConversationLaneBoundary(lane)" in BIGGY_JS
+    assert "--biggy-conversation-bottom" in BIGGY_CSS
+
+
+def test_map_handoff_is_single_flight_and_pauses_the_galaxy():
+    assert "let mapRenderPromise = null" in BIGGY_JS
+    assert "if (mapRenderPromise) return mapRenderPromise" in BIGGY_JS
+    assert "biggy-world-pause" in BIGGY_JS
+    assert "biggy-world-resume" in BIGGY_JS
+    assert "mapbox_load_timeout" in BIGGY_JS
+    assert "setGalaxyRenderPaused(false);\n      return true;" in BIGGY_JS
+    assert "setTimeout(_render" not in (ROOT / "static" / "messages.js").read_text(encoding="utf-8")
+    assert "pauseAnimation" in world._TRACE_RUNTIME
+    assert "resumeAnimation" in world._TRACE_RUNTIME
+
+
+def test_ptt_completion_is_retryable_and_rehydrates_dialogs_and_cards():
+    assert "async function refreshCompletedPttTurn(status, reason)" in BIGGY_JS
+    assert "renderArgusConversationLane();" in BIGGY_JS
+    assert "await window.__biggyHandoffTravelVisualsFromMessages(messages);" in BIGGY_JS
+    assert "if (refreshed) lastCompletionTimestamp = completionTs" in BIGGY_JS
+    assert "await syncActiveSession(completionSid)" in BIGGY_JS
+    assert "completion hydration returned no messages" in BIGGY_JS
+    assert "await loadSess(completionSid" not in BIGGY_JS
+    assert "__biggyHandoffTravelVisualsFromMessages(messages)" in BIGGY_JS
+    assert "async function refreshPttProgress(status)" in BIGGY_JS
+    assert "phase !== 'processing' && phase !== 'speaking'" in BIGGY_JS
+    assert "{ includeVisuals: false }" in BIGGY_JS
+    assert "await refreshPttProgress(status)" in BIGGY_JS
+    assert "message._ack_spoken_text" in BIGGY_JS
+
+
+def test_completion_card_hydration_does_not_wait_for_mapbox_and_caches_all_trip_categories():
+    handoff = BIGGY_JS.split("async function handoffTravelVisualsFromMessages", 1)[1].split(
+        "window.__biggyHandoffTravelVisualsFromMessages", 1
+    )[0]
+    assert "cacheTripPlanViewModels(tpm)" in handoff
+    assert "Promise.resolve(renderMapViewModel(mvm)).then" in handoff
+    assert "await renderMapViewModel(mvm)" not in handoff
+    assert "recommendation card hydration failed" in handoff
+    assert "map card hydration failed" in handoff
+
+
+def test_travel_categories_do_not_leak_stale_cards_and_map_survives_category_switches():
+    category = BIGGY_JS.split("const setActiveCategory =", 1)[1].split(
+        "dlg.__biggySetActiveCategory", 1
+    )[0]
+    collapsed = BIGGY_JS.split("const setCollapsed =", 1)[1].split(
+        "dlg.__biggySetCollapsed", 1
+    )[0]
+    assert "key === recommendationKey" in category
+    assert "lodging.hidden = !showRecommendation" in category
+    assert "releaseTravelMap()" not in category
+    assert "releaseTravelMap()" not in collapsed
+    assert "section.setAttribute('data-rec-category', railKey)" in BIGGY_JS
+
+
+def test_conversation_palette_matches_argus_hud():
+    assert ".biggy-argus-rag-subtitle{margin-top:5px;color:#b59cff" in BIGGY_CSS
+    assert ".biggy-argus-dialog.is-operator .biggy-argus-dialog-copy{color:#c7afff}" in BIGGY_CSS
+    assert ".biggy-argus-dialog.is-biggy .biggy-argus-dialog-copy{color:#8bdba0}" in BIGGY_CSS
+    assert ".biggy-argus-dialog.is-argus .biggy-argus-dialog-copy{color:#8fdcf2}" in BIGGY_CSS
+
+
+def test_rag_status_requires_three_missed_polls_before_offline():
+    assert "let ragWorldStatusFailures = 0" in BIGGY_JS
+    assert "ragWorldStatusFailures >= 3 || !lastGoodRagWorldStatus" in BIGGY_JS
+    assert "lastGoodRagWorldStatus = status" in BIGGY_JS
+
+
+def test_recommendation_links_prefer_addresses_and_repair_lon_lat():
+    assert "function safeRecommendationHref(opt)" in BIGGY_JS
+    assert "encodeURIComponent(address)" in BIGGY_JS
+    assert "Math.abs(first) > 90" in BIGGY_JS
+    assert "const href = safeRecommendationHref(opt)" in BIGGY_JS
+
+
+def test_argus_browser_voice_fallback_is_alistar():
+    assert "rvugSNzdY0NcpG2PKe4B" in BIGGY_JS
+    assert "dzRy05hNK3bab9ViJ0oU" not in BIGGY_JS
+
+
 def test_routes_wire_world_endpoint():
     assert "/api/biggy/v6/world" in ROUTES
     assert "jarvis_v6_world" in ROUTES

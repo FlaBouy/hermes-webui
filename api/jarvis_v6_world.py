@@ -272,6 +272,18 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     const data = event.data || {};
     if (data.type === 'biggy-rag-trace') apply(data.trace || {});
     if (data.type === 'biggy-rag-trace-clear') restore();
+    if (data.type === 'biggy-world-pause') {
+      const g = graph();
+      const controls = g && g.controls && g.controls();
+      if (controls) controls.autoRotate = false;
+      if (g && typeof g.pauseAnimation === 'function') g.pauseAnimation();
+    }
+    if (data.type === 'biggy-world-resume') {
+      const g = graph();
+      if (g && typeof g.resumeAnimation === 'function') g.resumeAnimation();
+      const controls = g && g.controls && g.controls();
+      if (controls) controls.autoRotate = true;
+    }
   });
   const applyLandingCamera = () => {
     const g = graph();

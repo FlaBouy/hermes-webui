@@ -12806,7 +12806,7 @@ def handle_get(handler, parsed) -> bool:
                     "service": "jarvis-v6",
                     "state": "error",
                     "online": False,
-                    "error": "Jarvis V6 health bridge failed",
+                    "error": "A.R.G.U.S. health bridge failed",
                 },
                 status=500,
             )
@@ -14315,7 +14315,7 @@ def handle_post(handler, parsed) -> bool:
             }
             prev["render_ack"] = ack
             # Post-ack visual claim line suppressed: Ask Jarvis hard-bind already
-            # speaks exactly one Austin ack + one James Michael final. Extra TTS
+            # speaks exactly one Austin ack + one Alistar final. Extra TTS
             # overlaps the authoritative Jarvis response.
             post_ack_tts = {"queued": False, "reason": "suppressed_single_jm_authority"}
             try:
@@ -14468,7 +14468,7 @@ def handle_post(handler, parsed) -> bool:
                 {
                     "ok": False,
                     "state": "error",
-                    "error": "Jarvis V6 chat bridge failed",
+                    "error": "A.R.G.U.S. chat bridge failed",
                     "answer": None,
                 },
                 status=500,
@@ -22724,6 +22724,24 @@ def _handle_goal_command(handler, body):
     return j(handler, payload)
 
 
+def _normalize_biggy_wake_name(message: str) -> str:
+    """Repair known leading wake and venue near-misses from local STT."""
+    msg = str(message or "")
+    msg = re.sub(
+        r"^\s*(?:hey\s+|morning\s+|good\s+morning\s+)?(?:a\s+)?(?:piggy|biggie)\b",
+        "Hey Biggy",
+        msg,
+        count=1,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(
+        r"\bJordan\s+Harris\s+Stadium\b",
+        "Jordan-Hare Stadium",
+        msg,
+        flags=re.IGNORECASE,
+    )
+
+
 def _handle_chat_start(handler, body, diag=None):
     try:
         diag.stage("validate_session_id") if diag else None
@@ -22832,7 +22850,7 @@ def _handle_chat_start(handler, body, diag=None):
             else:
                 return bad(handler, "Session not found", 404)
         diag.stage("normalize_message") if diag else None
-        msg = str(body.get("message", "")).strip()
+        msg = _normalize_biggy_wake_name(str(body.get("message", ""))).strip()
         if not msg:
             return bad(handler, "message is required")
         diag.stage("normalize_attachments") if diag else None
@@ -22922,8 +22940,8 @@ def _handle_chat_start(handler, body, diag=None):
                             "ask_jarvis_hard_bind": True,
                             "spoken_reply": spoken,
                             "spoken_text": spoken,
-                            "tts_voice_id": "dzRy05hNK3bab9ViJ0oU",
-                            "tts_voice_profile": "jarvis_james_michael",
+                            "tts_voice_id": "rvugSNzdY0NcpG2PKe4B",
+                            "tts_voice_profile": "argus_alistar",
                         },
                     ]
                 )
@@ -22948,8 +22966,8 @@ def _handle_chat_start(handler, body, diag=None):
                         "reply": reply,
                         "spoken_reply": spoken,
                         "spoken_text": spoken,
-                        "tts_voice_id": "dzRy05hNK3bab9ViJ0oU",
-                        "tts_voice_profile": "jarvis_james_michael",
+                        "tts_voice_id": "rvugSNzdY0NcpG2PKe4B",
+                        "tts_voice_profile": "argus_alistar",
                         "matches": jarvis_document.get("matches") or [],
                         "collection": jarvis_document.get("collection") or "",
                         "active_document": getattr(s, "active_document", None),
@@ -22959,7 +22977,7 @@ def _handle_chat_start(handler, body, diag=None):
                 )
         # Hard-bind: explicit leading "Ask Jarvis:" → Jarvis PA briefing webhook.
         # PTT-style two-stage: immediate Austin ack (once), then governed Jarvis
-        # Agent path unchanged; James Michael speaks the final once. No Agent bypass.
+        # Agent path unchanged; Alistar speaks the final once. No Agent bypass.
         # Must run before smedley document/engineering RAG routes.
         if not attachments:
             try:
@@ -23076,7 +23094,7 @@ def _handle_chat_start(handler, body, diag=None):
                             "Untitled",
                             "New chat",
                         ):
-                            s.title = (msg[:64] or "Ask Jarvis").strip()
+                            s.title = (msg[:64] or "Ask Argus").strip()
                     except Exception:
                         pass
                     try:
@@ -23135,8 +23153,8 @@ def _handle_chat_start(handler, body, diag=None):
                                             if isinstance(routed, dict)
                                             else ""
                                         ),
-                                        "tts_voice_id": "dzRy05hNK3bab9ViJ0oU",
-                                        "tts_voice_profile": "jarvis_james_michael",
+                                        "tts_voice_id": "rvugSNzdY0NcpG2PKe4B",
+                                        "tts_voice_profile": "argus_alistar",
                                         "transport": "jarvis_ii_generic_rag_vnext",
                                     }
                                 elif pa_core_enabled:
@@ -23156,9 +23174,9 @@ def _handle_chat_start(handler, body, diag=None):
                                     ask_jarvis = {
                                         "handled": True,
                                         "ok": False,
-                                        "reply": "Jarvis briefing failed. Fail closed.",
-                                        "spoken_text": "Jarvis briefing failed.",
-                                        "spoken_reply": "Jarvis briefing failed.",
+                                        "reply": "A.R.G.U.S. briefing failed. Fail closed.",
+                                        "spoken_text": "Argus briefing failed.",
+                                        "spoken_reply": "Argus briefing failed.",
                                         "evidence_footer": "",
                                         "correlation_id": correlation_id,
                                         "tts_voice_id": None,
@@ -24051,8 +24069,8 @@ def _jarvis_active_followup_objective(session, message: str) -> str | None:
     language rather than every ordinary message: an explicit address to Biggy
     or Smedley, or a new unrelated request, remains with the host assistant.
     """
-    text = str(message or "").strip()
-    if not text or re.search(r"(?i)\b(?:biggy|smedley)\b", text):
+    text = _owner_text_without_library_appendix(message)
+    if not text:
         return None
 
     # Preserve the existing richer travel continuation, including its verified
@@ -24060,6 +24078,13 @@ def _jarvis_active_followup_objective(session, message: str) -> str | None:
     travel = _jarvis_travel_followup_objective(session, text)
     if travel:
         return travel
+
+    # A direct address to the host releases non-travel follow-up binding.  The
+    # travel continuation check intentionally runs first: "Hey Biggy, the game
+    # is at Jordan-Hare" is an owner clarification for the active A.R.G.U.S.
+    # travel job, not a new engineering-RAG question.
+    if re.search(r"(?i)\b(?:biggy|smedley)\b", text):
+        return None
 
     continuation = re.search(
         r"(?i)^(?:"
@@ -24086,7 +24111,7 @@ def _jarvis_active_followup_objective(session, message: str) -> str | None:
         if not is_jarvis:
             return None
         return (
-            "Ask Jarvis: Continue the active Jarvis task. "
+            "Ask Argus: Continue the active Argus task. "
             + "Owner follow-up: "
             + text
             + " Resolve references from this chat context, but make fresh approved "
@@ -24095,17 +24120,42 @@ def _jarvis_active_followup_objective(session, message: str) -> str | None:
     return None
 
 
-def _jarvis_travel_followup_objective(session, message: str) -> str | None:
-    """Bind an unambiguous lodging follow-up to the prior Jarvis travel turn.
+def _owner_text_without_library_appendix(message: str) -> str:
+    """Return the owner's utterance, excluding a native-RAG prompt appendix.
 
-    The owner should not have to repeat a venue that Jarvis just established.
-    This is intentionally narrow: it only fires for a lodging request when the
-    current session already contains a Jarvis travel map with a canonical
-    destination.  The generated context preserves the full venue label and
-    never supplies recommendations itself.
+    The engineering lane appends a ``library matches`` block to model prompts.
+    If a PA travel clarification is recovered after that routing mistake, the
+    untrusted document excerpts must never be forwarded into A.R.G.U.S. or
+    persisted as the owner's travel objective.
     """
     text = str(message or "").strip()
-    if not re.search(r"(?i)\b(?:lodging|accommodations?|hotel|motel|place\s+to\s+stay)\b", text):
+    return re.split(
+        r"(?i)\n?\s*[—-]{4,}\s*library\s+matches\s*[—-]{4,}\s*",
+        text,
+        maxsplit=1,
+    )[0].strip()
+
+
+def _jarvis_travel_followup_objective(session, message: str) -> str | None:
+    """Bind an unambiguous travel continuation to the prior A.R.G.U.S. turn.
+
+    The owner should not have to repeat a venue that Jarvis just established.
+    This remains session-gated: it fires only when a completed hard-bound PA
+    travel turn already contains a canonical map destination.  Route, event,
+    venue, weather, lodging, meals, and fuel refinements stay in that active
+    travel lane instead of falling into engineering RAG.
+    """
+    text = _owner_text_without_library_appendix(message)
+    if not text or not re.search(
+        r"(?i)\b(?:"
+        r"route|map(?:ping)?|drive|trip|travel|"
+        r"game|match|venue|stadium|played|"
+        r"weather|forecast|radar|"
+        r"lodging|accommodations?|accomodations?|hotel|motel|place\s+to\s+stay|"
+        r"meals?|restaurants?|dining|food|fuel|gas"
+        r")\b",
+        text,
+    ):
         return None
     prior = None
     for item in reversed(list(getattr(session, "messages", None) or [])):
@@ -24131,10 +24181,17 @@ def _jarvis_travel_followup_objective(session, message: str) -> str | None:
                 break
     suffix = f" The relevant event date from this conversation is {date_context}." if date_context else ""
     return (
-        "Ask Jarvis: " + text
-        + " Carry forward the previously verified venue exactly as " + prior + "."
+        "Ask Argus: Continue the active A.R.G.U.S. travel task using the "
+        "owner-confirmed destination exactly as " + prior + ". "
+        "Do not replace that destination with an event phrase or re-resolve it "
+        "to a different venue. Owner request: " + text + "."
         + suffix
-        + " Return only verified lodging recommendations as structured cards; do not invent names, rates, distances, or availability."
+        + " Complete each requested route, lodging, meal, fuel, and weather "
+        "category independently; one unavailable category must not cancel the "
+        "others. Weather must use the authorized five-day forecast only when "
+        "the requested date is within that horizon; otherwise state that the "
+        "forecast is not available yet. Return only verified recommendations "
+        "as structured cards; do not invent names, rates, distances, or availability."
     )
 
 
@@ -24142,7 +24199,7 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
     """PTT/sync ``/api/chat`` Ask Jarvis hard-bind (blocks until Jarvis + TTS done).
 
     Pedal posts wrapped ``message`` plus raw ``display_message``. Always bind on the
-    raw owner utterance so Austin ack + James Michael final run here — never the
+    raw owner utterance so Austin ack + Alistar final run here — never the
     agent/skill paraphrase path.
     """
     from api.ask_jarvis_route import (
@@ -24241,7 +24298,7 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
             "Untitled",
             "New chat",
         ):
-            s.title = (objective[:64] or "Ask Jarvis").strip()
+            s.title = (objective[:64] or "Ask Argus").strip()
     except Exception:
         pass
     try:
@@ -24273,9 +24330,9 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
         ask_jarvis = {
             "handled": True,
             "ok": False,
-            "reply": "Jarvis briefing unavailable. Fail closed.",
-            "spoken_text": "Jarvis briefing unavailable.",
-            "spoken_reply": "Jarvis briefing unavailable.",
+            "reply": "A.R.G.U.S. briefing unavailable. Fail closed.",
+            "spoken_text": "Argus briefing unavailable.",
+            "spoken_reply": "Argus briefing unavailable.",
             "evidence_footer": "",
             "error": "ask_jarvis_sync_empty",
             "correlation_id": corr,
@@ -24298,7 +24355,7 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
         "evidence_footer": evidence_footer or None,
         "tts_engine": ask_jarvis.get("tts_engine") or "elevenlabs",
         "tts_voice_id": ask_jarvis.get("tts_voice_id"),
-        "tts_voice_profile": ask_jarvis.get("tts_voice_profile") or "jarvis_james_michael",
+        "tts_voice_profile": ask_jarvis.get("tts_voice_profile") or "argus_alistar",
         "map_view_model": ask_jarvis.get("map_view_model")
         if isinstance(ask_jarvis.get("map_view_model"), dict)
         else None,
@@ -24325,7 +24382,7 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
     wait_ack_playback_complete(corr, timeout_s=120.0)
 
     # Replace pending assistant in-place before final TTS wait so GUI can leave
-    # "Working with Jarvis…" while James Michael speaks.
+    # "Working with A.R.G.U.S.…" while Alistar speaks.
     try:
         with LOCK:
             sess = SESSIONS.get(s.session_id) or s
@@ -24616,7 +24673,7 @@ def _handle_chat_sync(handler, body):
     if _session_is_subagent_view_only(str(body.get("session_id") or "")):
         return bad(handler, "Subagent sessions are view-only and cannot be written from WebUI", 400)
     s = get_session(body["session_id"])
-    msg = str(body.get("message", "")).strip()
+    msg = _normalize_biggy_wake_name(str(body.get("message", ""))).strip()
     if not msg:
         return j(handler, {"error": "empty message"}, status=400)
     display_msg = msg
@@ -24626,7 +24683,7 @@ def _handle_chat_sync(handler, body):
         raw_display_msg = body.get("display_message")
         if not isinstance(raw_display_msg, str) or not raw_display_msg.strip():
             return bad(handler, "display_message must be a non-empty string")
-        display_msg = raw_display_msg.strip()
+        display_msg = _normalize_biggy_wake_name(raw_display_msg).strip()
         if len(display_msg) > SYNC_DISPLAY_MESSAGE_MAX_CHARS:
             return bad(
                 handler,
@@ -24690,7 +24747,7 @@ def _handle_chat_sync(handler, body):
             {"role": "assistant", "content": reply, "timestamp": now_ts + 1,
              "document_route": True, "assistant_identity": "jarvis", "jarvis_response": True, "ask_jarvis_hard_bind": True,
              "spoken_reply": spoken, "spoken_text": spoken,
-             "tts_voice_id": "dzRy05hNK3bab9ViJ0oU", "tts_voice_profile": "jarvis_james_michael",
+             "tts_voice_id": "rvugSNzdY0NcpG2PKe4B", "tts_voice_profile": "argus_alistar",
              "smedley_document_sidecar": "governed_document_route"},
         ])
         s.pending_user_message = None
@@ -24706,7 +24763,7 @@ def _handle_chat_sync(handler, body):
             "session_id": s.session_id, "answer": reply, "reply": reply,
             "spoken_reply": spoken, "spoken_text": spoken,
             "document_route": True, "assistant_identity": "jarvis", "jarvis_response": True, "ask_jarvis_hard_bind": True,
-            "tts_voice_id": "dzRy05hNK3bab9ViJ0oU", "tts_voice_profile": "jarvis_james_michael",
+            "tts_voice_id": "rvugSNzdY0NcpG2PKe4B", "tts_voice_profile": "argus_alistar",
             "ptt_owned_tts": ptt_owned,
             "matches": ask_document.get("matches") or [],
             "collection": ask_document.get("collection") or "",
