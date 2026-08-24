@@ -61,9 +61,6 @@
   let completionMessagesSessionId = '';
   let ragTraceObserverInstalled = false;
   let ragTraceStatusListenerInstalled = false;
-  let lastSessionRagTraceKey = '';
-  let sessionTraceBaselineReady = false;
-  let sessionTraceBaselineSessionId = '';
   let ragWorldReady = false;
   let pendingRagTrace = null;
   let started = false;
@@ -1175,6 +1172,17 @@
         completionMessages = messages;
         completionMessagesSessionId = sid;
         persistGuiSessionId(sid);
+        // Pedal turns arrive through /api/chat and never execute messages.js's
+        // direct response hook.  Apply the completed turn once at this shared
+        // session boundary, before transcript/card reconciliation.
+        const latestAssistant = includeVisuals
+          ? [...messages].reverse().find((message) => message
+              && message.role === 'assistant' && !message.ask_jarvis_pending)
+          : null;
+        if (latestAssistant && isGalaxyTraceEligibleMessage(latestAssistant)
+            && galaxyTraceCitation(latestAssistant)) {
+          window.__biggyHandleDocumentResult(latestAssistant);
+        }
         renderArgusConversationLane();
         if (includeVisuals && typeof window.__biggyHandoffTravelVisualsFromMessages === 'function') {
           await window.__biggyHandoffTravelVisualsFromMessages(messages);
@@ -1683,24 +1691,6 @@
     }
   }
 
-  function traceFromSessionMessage(message) {
-    if (!isGalaxyTraceEligibleMessage(message)) return;
-    const citation = galaxyTraceCitation(message);
-    if (!citation) return;
-    const source = String(citation.source || '').trim();
-    const pdfPage = Number(citation.pdf_page || citation.page_hint || 0);
-    const printedPage = Number(citation.printed_page || 0);
-    const key = [message._correlation_id || message.timestamp || '', source, pdfPage || ''].join('|');
-    if (!source || key === lastSessionRagTraceKey) return;
-    lastSessionRagTraceKey = key;
-    postRagTrace({
-      state: message.error ? 'failed' : 'complete',
-      source,
-      pdfPage: Number.isFinite(pdfPage) && pdfPage > 0 ? pdfPage : null,
-      printedPage: Number.isFinite(printedPage) && printedPage > 0 ? printedPage : null,
-    });
-  }
-
   function isGalaxyTraceEligibleMessage(message) {
     if (!message || message.role !== 'assistant' || message.ask_jarvis_pending) return false;
     const identity = String(message.assistant_identity || '').toLowerCase();
@@ -1732,17 +1722,6 @@
     if (receipt && typeof receipt === 'object' && receipt.source) return receipt;
     const active = message && message.active_document;
     return active && typeof active === 'object' && active.source ? active : null;
-  }
-
-  function sessionRagTraceKey(message) {
-    if (!isGalaxyTraceEligibleMessage(message)) return '';
-    const citation = galaxyTraceCitation(message);
-    if (!citation) return '';
-    const source = String(citation.source || '').trim();
-    const pdfPage = Number(citation.pdf_page || citation.page_hint || 0);
-    return source
-      ? [message._correlation_id || message.timestamp || '', source, pdfPage || ''].join('|')
-      : '';
   }
 
   function installRagTraceObserver() {
@@ -1884,41 +1863,9 @@
     const visible = source.filter((message) => message
       && (message.role === 'user' || message.role === 'assistant')
       && !message.tool_only && !message._hidden);
-    // The PA path returns immediately and persists its verified RAG evidence
-    // later through the session stream. Feed that final authoritative citation
-    // into the same galaxy trace used by synchronous document responses.
-    if (sessionTraceBaselineSessionId !== activeSid) {
-      sessionTraceBaselineSessionId = activeSid;
-      sessionTraceBaselineReady = false;
-      lastSessionRagTraceKey = '';
-    }
-    let newestEvidenceMessage = null;
-    for (let i = visible.length - 1; i >= 0; i--) {
-      if (visible[i].role === 'assistant' && visible[i].ask_jarvis_pending) {
-        clearRagTrace();
-        break;
-      }
-      if (sessionRagTraceKey(visible[i])) {
-        newestEvidenceMessage = visible[i];
-        break;
-      }
-    }
-    if (!sessionTraceBaselineReady) {
-      // The Galaxy is an operational state display, not a transcript-only
-      // decoration.  Restore the latest concrete receipt after a reload so a
-      // prior travel card cannot remain mounted and an older trace cannot
-      // masquerade as the current RAG answer.
-      if (newestEvidenceMessage) {
-        hideTravelMap();
-        traceFromSessionMessage(newestEvidenceMessage);
-      }
-      sessionTraceBaselineReady = true;
-    } else if (newestEvidenceMessage) {
-      // A concrete document receipt starts a new RAG visual state.  Collapse
-      // any old travel map before its trace can frame the current directory.
-      hideTravelMap();
-      traceFromSessionMessage(newestEvidenceMessage);
-    }
+    // Rendering the conversation is presentation-only. Visual ownership is
+    // applied at the direct-response or PTT-session completion boundary, not
+    // repeatedly from this timer-driven transcript decorator.
     const turns = visible.slice(-8).flatMap((message, index) => {
       const identity = argusConversationIdentity(message);
       const pending = !!(message.ask_jarvis_pending || message._live);
@@ -2798,7 +2745,11 @@
   window.__biggyHandleDocumentResult = function handleDocumentResult(payload) {
     invalidateTravelVisuals();
     clearRagTrace();
-    traceFromRagPayload(payload);
+    const citation = galaxyTraceCitation(payload);
+    const tracePayload = payload && (payload.retrieval_receipt || payload.active_document)
+      ? payload
+      : { ...(payload || {}), retrieval_receipt: citation };
+    traceFromRagPayload(tracePayload);
   };
 
   function safeLodgingHref(url) {
@@ -3139,11 +3090,17 @@
   window.__biggyHandoffTravelVisualsFromMessages = handoffTravelVisualsFromMessages;
 
   async function scanMessagesForMapModel() {
-    // Hydrate the latest saved travel/recommendation models so the category
-    // rail is ready, but never reopen yesterday's card over a clean landing.
-    // Live assistant handoffs call handoffTravelVisualsFromMessages directly
-    // and still open the relevant panel when a new result arrives.
-    await handoffTravelVisualsFromMessages();
+    // One boot-time restore for the latest completed turn. Live turns are
+    // owned by their direct-response/PTT completion boundaries.
+    const list = (typeof S !== 'undefined' && S && Array.isArray(S.messages)) ? S.messages : [];
+    const latestAssistant = [...list].reverse().find((message) => message
+      && message.role === 'assistant' && !message.ask_jarvis_pending);
+    if (latestAssistant && isGalaxyTraceEligibleMessage(latestAssistant)
+        && galaxyTraceCitation(latestAssistant)) {
+      window.__biggyHandleDocumentResult(latestAssistant);
+      return;
+    }
+    await handoffTravelVisualsFromMessages(list);
     const dlg = document.getElementById('biggyTravelMapDialog');
     if (dlg && typeof dlg.__biggySetCollapsed === 'function') {
       dlg.__biggySetCollapsed(true);

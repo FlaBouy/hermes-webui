@@ -711,6 +711,44 @@ def test_webui_chat_start_and_messages_wire_document_route():
     assert "invalidateTravelVisuals()" in brand
     assert "window.__biggyHandleDocumentResult" in brand
     assert "traceFromRagPayload(payload)" in brand
+    assert "window.__biggyHandleDocumentResult(latestAssistant)" in brand
+
+
+def test_duplicate_manual_exports_prefer_extractable_pdf():
+    query = "Have Argus pull me a schematic for Honeywell 900G02-0102"
+    base = "Vendor Data/Honeywell/Honeywell Edge UIO/User-manual"
+    pdf = {
+        "source": base + ".pdf",
+        "score": 0.740628,
+        "snippet": "Honeywell Edge UIO 900G02-0102",
+    }
+    word = {
+        "source": base + ".doc",
+        "score": 0.74756,
+        "snippet": "Honeywell Edge UIO 900G02-0102",
+    }
+    selected, _index = docroute.select_operator_document_match(
+        [word, pdf], query=query
+    )
+    assert selected is pdf
+
+
+def test_pdf_preference_does_not_override_stronger_title_match():
+    query = "Honeywell 900G02-0102 special alpha guide"
+    pdf = {
+        "source": "Vendor Data/Honeywell/Honeywell Edge UIO/User-manual.pdf",
+        "score": 0.90,
+        "snippet": "Honeywell Edge UIO 900G02-0102",
+    }
+    word = {
+        "source": "Vendor Data/Honeywell/Honeywell Edge UIO/Special Alpha Guide.doc",
+        "score": 0.80,
+        "snippet": "Honeywell Edge UIO 900G02-0102",
+    }
+    selected, _index = docroute.select_operator_document_match(
+        [pdf, word], query=query
+    )
+    assert selected is word
 
 
 def test_electrical_fuse_question_is_source_gated_not_free_chat():

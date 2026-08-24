@@ -895,18 +895,23 @@ def select_operator_document_match(
         elif kind == "index":
             indexes.append(match)
 
-    def _rank_key(match: dict[str, Any]) -> tuple[int, int, int, float]:
+    def _rank_key(match: dict[str, Any]) -> tuple[int, int, int, int, float]:
         exact = 1 if str(match.get("match_kind") or "") == "exact" else 0
         tdc = 1 if str(match.get("retrieval") or "") == "tdc3000_custom_index" else 0
         title = _match_title(match)
         source = str(match.get("source") or "")
+        # Prefer the extractable, ledger-visible PDF when the library contains
+        # duplicate PDF/DOC exports of the same manual.  A tiny vector-score
+        # difference must not bind the preview-only Word copy and strand the
+        # Galaxy on an older trace.
+        pdf = 1 if source.lower().endswith(".pdf") else 0
         blob_tokens = set(re.findall(r"[a-z0-9]+", f"{title} {source}".lower()))
         overlap = len(query_tokens & blob_tokens) if query_tokens else 0
         try:
             score = float(match.get("score") or 0.0)
         except Exception:
             score = 0.0
-        return (exact, tdc, overlap, score)
+        return (exact, tdc, overlap, pdf, score)
 
     manuals.sort(key=_rank_key, reverse=True)
     indexes.sort(key=_rank_key, reverse=True)

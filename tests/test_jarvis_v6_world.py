@@ -254,9 +254,9 @@ def test_browser_trace_forwards_verified_page_metadata_only():
     assert "active && active.page_hint" in BIGGY_JS
     assert "printedPage" in BIGGY_JS
     assert "if (receipt && source)" in BIGGY_JS
-    assert "traceFromSessionMessage" in BIGGY_JS
+    assert "window.__biggyHandleDocumentResult" in BIGGY_JS
     assert "message.rag_evidence" in BIGGY_JS
-    assert "citation.pdf_page || citation.page_hint" in BIGGY_JS
+    assert "retrieval_receipt: citation" in BIGGY_JS
     assert "function isGalaxyTraceEligibleMessage(message)" in BIGGY_JS
     assert "message.map_view_model" in BIGGY_JS
     assert "message.trip_plan_view_model" in BIGGY_JS
@@ -273,7 +273,7 @@ def test_trace_waits_for_world_ready_and_does_not_replay_saved_receipt_on_boot()
     assert "pendingRagTrace = trace" in BIGGY_JS
     assert "data.type === 'biggy-rag-world-ready'" in BIGGY_JS
     assert "parent.postMessage({ type: 'biggy-rag-world-ready' }" in world._TRACE_RUNTIME
-    assert "Restore the latest concrete receipt after a reload" in BIGGY_JS
+    assert "One boot-time restore for the latest completed turn" in BIGGY_JS
     assert "hideTravelMap();" in BIGGY_JS
     assert "function clearRagTrace()" in BIGGY_JS
     assert "frame.removeAttribute('data-rag-trace')" in BIGGY_JS
@@ -290,6 +290,8 @@ def test_trace_waits_for_world_ready_and_does_not_replay_saved_receipt_on_boot()
     assert "'#54d9c2'" in world._TRACE_RUNTIME
     assert "'#3f94ae'" in world._TRACE_RUNTIME
     assert "/ 135" in world._TRACE_RUNTIME
+    assert "state: 'unresolved'" in world._TRACE_RUNTIME
+    assert "segments: 0" in world._TRACE_RUNTIME
     assert "Keep the evidence path available for inspection" in world._TRACE_RUNTIME
 
 
@@ -297,7 +299,7 @@ def test_saved_travel_cards_are_not_replayed_into_clean_boot():
     start = BIGGY_JS.index("async function scanMessagesForMapModel()")
     end = BIGGY_JS.index("\n  function applyShell()", start)
     boot_scan = BIGGY_JS[start:end]
-    assert "await handoffTravelVisualsFromMessages()" in boot_scan
+    assert "await handoffTravelVisualsFromMessages(list)" in boot_scan
     assert "dlg.__biggySetCollapsed(true)" in boot_scan
     assert "setTimeout(scanMessagesForMapModel" not in BIGGY_JS
     assert "AUGMENTED RETRIEVAL &amp; GROUNDED UNDERSTANDING SYSTEM" in BIGGY_JS

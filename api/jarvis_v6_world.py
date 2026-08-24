@@ -400,7 +400,17 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     installIdleContrast();
     const resolved = routeFor(trace && trace.source);
     const route = resolved.ids;
-    if (route.length < 2) return;
+    if (route.length < 2) {
+      // Never leave an earlier successful route displayed when the current
+      // receipt cannot be resolved into this ledger projection.
+      restore();
+      parent.postMessage({ type: 'biggy-rag-trace-applied', trace: {
+        state: 'unresolved',
+        source: trace && trace.source || '',
+        segments: 0,
+      } }, location.origin);
+      return;
+    }
     const token = ++traceToken;
     const page = Number(trace && trace.pdfPage || 0);
     if (resolved.rel && Number.isFinite(page) && page > 0) activePages.set(resolved.rel, Math.floor(page));
