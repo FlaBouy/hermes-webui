@@ -258,3 +258,65 @@ def test_sync_chat_ptt_owned_tts_stamps_assistant(sync_chat_env, monkeypatch):
     asst = [m for m in saved.messages if m.get("role") == "assistant"][-1]
     assert asst.get("ptt_owned_tts") is True
     assert asst.get("tts_owner") == "pedal_austin"
+
+
+def test_sync_argus_document_result_is_server_owned_alistar(sync_chat_env, monkeypatch):
+    """A direct RAG result must never fall through to the pedal's Austin TTS."""
+    tmp_path = sync_chat_env
+    session = _make_session(tmp_path)
+
+    import api.ask_jarvis_route as ask_route
+    import api.smedley_document_route as doc_route
+
+    source = "Vendor Data/Honeywell/Honeywell Edge UIO/User-manual.pdf"
+    monkeypatch.setattr(routes, "_request_base_url", lambda _handler: "http://127.0.0.1:8790")
+    monkeypatch.setattr(ask_route, "is_ask_jarvis_command", lambda _text: True)
+    monkeypatch.setattr(doc_route, "is_document_request", lambda *_a, **_k: True)
+    monkeypatch.setattr(
+        doc_route,
+        "try_document_route",
+        lambda *_a, **_k: {
+            "handled": True,
+            "reply": "I found the Honeywell manual.",
+            "spoken_reply": "I found the Honeywell manual.",
+            "active_document": {"source": source},
+            "retrieval_receipt": {"source": source},
+        },
+    )
+    monkeypatch.setattr(ask_route, "mint_correlation_id", lambda: "corr-honeywell")
+    monkeypatch.setattr(ask_route, "timing_path_for", lambda _corr: tmp_path / "timing.json")
+    queued = {}
+
+    def _queue(text, **kwargs):
+        queued.update(text=text, **kwargs)
+        return {"queued": True}
+
+    monkeypatch.setattr(ask_route, "queue_ask_jarvis_smedley_tts", _queue)
+    monkeypatch.setattr(
+        ask_route,
+        "wait_final_playback_complete",
+        lambda _corr, timeout_s: {"ok": True},
+    )
+
+    handler = _FakePostHandler()
+    routes._handle_chat_sync(
+        handler,
+        {
+            "session_id": session.session_id,
+            "message": "Ask Argus for the Honeywell 900A16-0103 manual",
+            "display_message": "Ask Argus for the Honeywell 900A16-0103 manual",
+            "workspace": str(tmp_path),
+        },
+    )
+
+    assert handler.status == 200
+    body = handler.json_body()
+    assert body["tts_server_handled"] is True
+    assert body["tts_final_queued"] is True
+    assert body["tts_voice_profile"] == "argus_alistar"
+    assert body["retrieval_receipt"]["source"] == source
+    assert queued["voice_id"] == "rvugSNzdY0NcpG2PKe4B"
+    saved = models.get_session(session.session_id)
+    final = [m for m in saved.messages if m.get("role") == "assistant"][-1]
+    assert final["_correlation_id"] == "corr-honeywell"
+    assert final["_tts_final_server_queued"] is True

@@ -2576,6 +2576,18 @@
     releaseTravelMap();
   }
 
+  // Incremented whenever a non-travel result takes visual ownership.  Mapbox
+  // initialization is asynchronous; without this generation check an older
+  // travel request can finish later and reopen its panel over a RAG result.
+  let travelVisualEpoch = 0;
+
+  function invalidateTravelVisuals() {
+    travelVisualEpoch += 1;
+    lastMapModelKey = '';
+    hideTravelMap();
+    return travelVisualEpoch;
+  }
+
   function modelKey(mvm) {
     try {
       const o = mvm && mvm.origin;
@@ -2595,6 +2607,7 @@
 
   async function renderMapViewModelOnce(mvm) {
     if (!mvm || typeof mvm !== 'object') return false;
+    const renderEpoch = travelVisualEpoch;
     if (mvm.available === false) {
       const dlg = ensureTravelMapDialog();
       if (!dlg) return;
@@ -2677,6 +2690,7 @@
     } catch (_) {
       cfg = { available: false, reason: 'CONFIG_FETCH_FAILED' };
     }
+    if (renderEpoch !== travelVisualEpoch) return false;
     if (!cfg.available || !cfg.token) {
       if (note) {
         note.textContent =
@@ -2690,6 +2704,7 @@
     }
     try {
       const mapboxgl = await loadMapboxAssets();
+      if (renderEpoch !== travelVisualEpoch) return false;
       if (!mapboxgl) throw new Error('mapboxgl_missing');
       mapboxgl.accessToken = cfg.token;
       if (mapInstance) {
@@ -2751,6 +2766,10 @@
           }
         });
       });
+      if (renderEpoch !== travelVisualEpoch) {
+        releaseTravelMap();
+        return false;
+      }
       if (note) note.textContent = 'Display only · Agent map_view_model · not a decision-maker';
       // Mapbox and Three.js compete during WebGL initialization only. Resume
       // the galaxy as soon as the map is ready, even while its panel is open.
@@ -2772,6 +2791,15 @@
   }
 
   window.__biggyRenderMapViewModel = renderMapViewModel;
+
+  // The response that produced a document result owns this transition.  Apply
+  // its receipt directly instead of waiting for a later session scan that can
+  // race stale travel hydration or select an older assistant turn.
+  window.__biggyHandleDocumentResult = function handleDocumentResult(payload) {
+    invalidateTravelVisuals();
+    clearRagTrace();
+    traceFromRagPayload(payload);
+  };
 
   function safeLodgingHref(url) {
     const s = String(url || '').trim();

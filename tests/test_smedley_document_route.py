@@ -701,6 +701,16 @@ def test_webui_chat_start_and_messages_wire_document_route():
     assert "externalRefreshReason:'document-route'" in messages or 'document-route' in messages
     # Session binding must clear on index-only / no-manual document turns.
     assert "s.active_document = None" in routes
+    assert "window.__biggyHandleDocumentResult(startData)" in messages
+    assert "startData.tts_server_handled || startData.tts_final_queued" in messages
+
+    brand = (Path(__file__).resolve().parents[1] / "static" / "biggy-brand.js").read_text(
+        encoding="utf-8"
+    )
+    assert "travelVisualEpoch" in brand
+    assert "invalidateTravelVisuals()" in brand
+    assert "window.__biggyHandleDocumentResult" in brand
+    assert "traceFromRagPayload(payload)" in brand
 
 
 def test_electrical_fuse_question_is_source_gated_not_free_chat():

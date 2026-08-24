@@ -289,7 +289,7 @@ def test_trace_waits_for_world_ready_and_does_not_replay_saved_receipt_on_boot()
     assert "g.nodeOpacity(0.94)" in world._TRACE_RUNTIME
     assert "'#54d9c2'" in world._TRACE_RUNTIME
     assert "'#3f94ae'" in world._TRACE_RUNTIME
-    assert "/ 220" in world._TRACE_RUNTIME
+    assert "/ 135" in world._TRACE_RUNTIME
     assert "Keep the evidence path available for inspection" in world._TRACE_RUNTIME
 
 

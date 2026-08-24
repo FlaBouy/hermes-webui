@@ -279,9 +279,9 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
       const object = pulseNode.__threeObj;
       if (object && object.scale) {
         if (!pulseScale) pulseScale = object.scale.clone();
-        // Slow, restrained breathing pulse: the selected file remains easy to
-        // spot without turning the 1,100-node scene into a flashing display.
-        const factor = 1.08 + 0.18 * (0.5 + 0.5 * Math.sin((now - begin) / 220));
+        // Deliberately quicker pulse so the winning file remains obvious after
+        // the camera recenters on its containing directory.
+        const factor = 1.08 + 0.18 * (0.5 + 0.5 * Math.sin((now - begin) / 135));
         object.scale.set(pulseScale.x * factor, pulseScale.y * factor, pulseScale.z * factor);
       }
       pulseFrame = requestAnimationFrame(animate);

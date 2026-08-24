@@ -2070,6 +2070,13 @@ async function send(){
   }
   // Smedley document-link repair / engineering RAG: deterministic reply, no agent stream.
   if(startData.document_route || startData.active_document_review || startData.engineering_rag_answer){
+    try{
+      if(typeof window.__biggyHandleDocumentResult==='function'){
+        window.__biggyHandleDocumentResult(startData);
+      }
+    }catch(docVisualErr){
+      try{console.warn('[webui] document-result visual handoff failed', docVisualErr);}catch(_){ }
+    }
     S.activeStreamId=null;
     if(S.session&&S.session.session_id===activeSid){
       S.session.active_stream_id=null;
@@ -2123,7 +2130,11 @@ async function send(){
         }
       }catch(_){ }
       try{ window.__smedleyDocSpokenReply=String(startData.spoken_reply||'').trim(); }catch(_){ }
-      setTimeout(()=>autoReadLastAssistant(), 300);
+      // A.R.G.U.S. document results are server-owned Alistar speech.  Never
+      // feed them back into the generic browser/Biggy auto-read sink.
+      if(!(startData.tts_server_handled || startData.tts_final_queued)){
+        setTimeout(()=>autoReadLastAssistant(), 300);
+      }
     }
     if(typeof renderSessionList==='function') void renderSessionList();
     return;
