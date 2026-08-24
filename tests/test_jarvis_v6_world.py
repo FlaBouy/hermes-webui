@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import api.jarvis_v6_world as world
@@ -156,6 +157,55 @@ def test_ingest_overview_reports_visible_counts_and_pins_issues_above_recent_suc
     assert overview["recent"][0]["state"] == "issue"
 
 
+def test_ingest_overview_exposes_five_radar_rows_when_history_allows(tmp_path):
+    files = {
+        f"row{i}": {
+            "source": f"Vendor Data/manual-{i}.pdf",
+            "phase": "indexed",
+            "updated_at": f"2026-08-22T10:0{i}:00Z",
+        }
+        for i in range(6)
+    }
+    ledger = tmp_path / "ingest_ledger.json"
+    ledger.write_text(json.dumps({"files": files}), encoding="utf-8")
+
+    overview = world._ingest_overview(ledger)
+
+    assert len(overview["recent"]) == 5
+    assert [row["file"] for row in overview["recent"]] == [
+        "manual-5.pdf", "manual-4.pdf", "manual-3.pdf", "manual-2.pdf", "manual-1.pdf"
+    ]
+
+
+def test_ingest_status_retains_ledger_truth_while_monitor_reconnects(tmp_path, monkeypatch):
+    ledger = tmp_path / "ingest_ledger.json"
+    ledger.write_text(
+        '{"files":{"good":{"source":"Vendor Data/manual.pdf",'
+        '"phase":"indexed","updated_at":"2026-08-22T10:00:00Z"}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(world, "resolve_rag_ingest_ledger", lambda: ledger)
+
+    def unavailable(*_args, **_kwargs):
+        raise OSError("watcher restarting")
+
+    monkeypatch.setattr(world, "urlopen", unavailable)
+    status = world.ingest_status()
+
+    assert status["ok"] is True
+    assert status["state"] == "monitor_offline"
+    assert status["monitor_online"] is False
+    assert status["node_count"] == 3
+    assert status["link_count"] == 2
+    assert status["store_count"] == 1
+    assert status["recent"][0]["file"] == "manual.pdf"
+
+
+def test_ingest_overlay_treats_monitor_reconnect_as_amber_not_failure():
+    assert "INGEST MONITOR RECONNECTING" in BIGGY_JS
+    assert "state === 'monitor_offline'" in BIGGY_JS
+
+
 def test_retry_is_confined_to_a_ledger_known_failed_file(tmp_path, monkeypatch):
     root = tmp_path / "Library"
     document = root / "Alpha" / "problem.pdf"
@@ -247,6 +297,9 @@ def test_receipt_driven_trace_walks_to_folder_frames_family_and_pulses_file():
     assert "key === failed ? '#ef4444' : '#34d399'" in runtime
     assert "activePages.set(resolved.rel" in runtime
     assert "#page=${Math.floor(page)}" in runtime
+    assert "restoreBaseGalaxyVisibility();\n    const resolved" in runtime
+    assert "activePages.has(rel)" in runtime
+    assert "openNode(node);\n          return;" in runtime
 
 
 def test_browser_trace_forwards_verified_page_metadata_only():
@@ -286,6 +339,9 @@ def test_trace_waits_for_world_ready_and_does_not_replay_saved_receipt_on_boot()
     assert "controls.autoRotate = false" in world._TRACE_RUNTIME
     assert "liveControls.autoRotate = true" in world._TRACE_RUNTIME
     assert "activePages.clear();" in world._TRACE_RUNTIME
+    assert "restoreBaseGalaxyVisibility();\n    resetLandingCamera();" in world._TRACE_RUNTIME
+    assert "typeof os.clearFocus === 'function'" in world._TRACE_RUNTIME
+    assert "idleContrastInstalled = false" in world._TRACE_RUNTIME
     assert "g.nodeOpacity(0.94)" in world._TRACE_RUNTIME
     assert "'#54d9c2'" in world._TRACE_RUNTIME
     assert "'#3f94ae'" in world._TRACE_RUNTIME
@@ -325,7 +381,8 @@ def test_operational_cards_use_large_responsive_workspace():
 
 
 def test_right_rail_utility_labels_remain_canonical():
-    assert "routeBtn.textContent = 'ROOM'" in BIGGY_JS
+    assert "routeBtn.textContent = muted ? 'MUTE' : shownRoute.toUpperCase()" in BIGGY_JS
+    assert "active === 'headset' ? 'mute' : 'headset'" in BIGGY_JS
     assert '>● PTT</button>' in BIGGY_JS
     assert 'id="biggyOpenSmedley"' not in BIGGY_JS
 
@@ -381,6 +438,15 @@ def test_completion_card_hydration_does_not_wait_for_mapbox_and_caches_all_trip_
     assert "await renderMapViewModel(mvm)" not in handoff
     assert "recommendation card hydration failed" in handoff
     assert "map card hydration failed" in handoff
+
+
+def test_rag_completion_without_visual_model_invalidates_prior_travel_generation():
+    handoff = BIGGY_JS.split("async function handoffTravelVisualsFromMessages", 1)[1].split(
+        "window.__biggyHandoffTravelVisualsFromMessages", 1
+    )[0]
+    assert "if (!hasVisual)" in handoff
+    assert "isGalaxyTraceEligibleMessage(m)" in handoff
+    assert "invalidateTravelVisuals();" in handoff
 
 
 def test_travel_categories_do_not_leak_stale_cards_and_map_survives_category_switches():

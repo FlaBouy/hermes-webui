@@ -23979,18 +23979,40 @@ def _server_speak_smedley(text: str) -> None:
     if not spoken:
         return
 
+    def _chunks(value: str, limit: int = 760) -> list[str]:
+        remaining = " ".join(str(value or "").split())
+        chunks: list[str] = []
+        while len(remaining) > limit:
+            window = remaining[: limit + 1]
+            cuts = [window.rfind(mark) for mark in (". ", "! ", "? ", "; ", ": ", ", ", " ")]
+            cut = max(cuts)
+            if cut < int(limit * 0.55):
+                cut = limit
+            else:
+                cut += 1
+            chunk = remaining[:cut].strip()
+            if chunk:
+                chunks.append(chunk)
+            remaining = remaining[cut:].strip()
+        if remaining:
+            chunks.append(remaining)
+        return chunks
+
     def _run():
         try:
-            body = json.dumps({"text": spoken[:800]}).encode("utf-8")
-            req = Request(
-                "http://127.0.0.1:5004/speak",
-                data=body,
-                headers={"Content-Type": "application/json"},
-                method="POST",
-            )
             from urllib.request import urlopen
 
-            urlopen(req, timeout=10).read()
+            for chunk in _chunks(spoken):
+                body = json.dumps({"text": chunk, "wait": True}).encode("utf-8")
+                req = Request(
+                    "http://127.0.0.1:5004/speak",
+                    data=body,
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                # wait=true is real playback completion on the live sidecar,
+                # so long fast-route answers remain ordered and complete.
+                urlopen(req, timeout=120).read()
         except Exception:
             logger.warning("[smedley-server-speak] direct sidecar speak failed", exc_info=True)
 
@@ -24771,6 +24793,39 @@ def _handle_chat_sync(handler, body):
         tpath = timing_path_for(corr)
         tts_final = {"queued": False}
         final_gate = {"ok": False, "skipped": True}
+        active_document = ask_document.get("active_document")
+        s.active_document = active_document if isinstance(active_document, dict) and active_document.get("source") else None
+        now_ts = int(time.time())
+        if not isinstance(getattr(s, "messages", None), list):
+            s.messages = []
+        final_message = {
+            "role": "assistant", "content": reply, "timestamp": now_ts + 1,
+            "document_route": True, "assistant_identity": "jarvis", "jarvis_response": True,
+            "ask_jarvis_hard_bind": True, "spoken_reply": spoken, "spoken_text": spoken,
+            "tts_voice_id": "rvugSNzdY0NcpG2PKe4B", "tts_voice_profile": "argus_alistar",
+            "_correlation_id": corr, "_tts_final_server_queued": False,
+            "_tts_final_gate": final_gate, "active_document": s.active_document,
+            "retrieval_receipt": ask_document.get("retrieval_receipt")
+            if isinstance(ask_document.get("retrieval_receipt"), dict) else None,
+            "smedley_document_sidecar": "governed_document_route",
+        }
+        s.messages.extend([
+            {"role": "user", "content": display_msg, "timestamp": now_ts, "_ask_jarvis": True,
+             "_correlation_id": corr},
+            final_message,
+        ])
+        s.pending_user_message = None
+        s.active_stream_id = None
+        if hasattr(s, "pending_started_at"):
+            s.pending_started_at = None
+        # Publish the final text before Alistar begins. PTT/browser progress
+        # hydration can now paint the answer while the existing playback gate
+        # continues to own the speaking lifecycle.
+        try:
+            s.save()
+        except Exception:
+            logger.exception("failed to persist synchronous Ask Jarvis document turn for %s", s.session_id)
+            return bad(handler, "failed to persist Ask Jarvis document-route turn", 500)
         if spoken:
             try:
                 tts_final = queue_ask_jarvis_smedley_tts(
@@ -24785,30 +24840,8 @@ def _handle_chat_sync(handler, body):
                 tts_final = {"queued": False, "reason": "exception"}
         if tts_final.get("queued"):
             final_gate = wait_final_playback_complete(corr, timeout_s=180.0)
-        active_document = ask_document.get("active_document")
-        s.active_document = active_document if isinstance(active_document, dict) and active_document.get("source") else None
-        now_ts = int(time.time())
-        if not isinstance(getattr(s, "messages", None), list):
-            s.messages = []
-        s.messages.extend([
-            {"role": "user", "content": display_msg, "timestamp": now_ts, "_ask_jarvis": True,
-             "_correlation_id": corr},
-            {"role": "assistant", "content": reply, "timestamp": now_ts + 1,
-             "document_route": True, "assistant_identity": "jarvis", "jarvis_response": True, "ask_jarvis_hard_bind": True,
-             "spoken_reply": spoken, "spoken_text": spoken,
-             "tts_voice_id": "rvugSNzdY0NcpG2PKe4B", "tts_voice_profile": "argus_alistar",
-             "_correlation_id": corr,
-             "_tts_final_server_queued": bool(tts_final.get("queued")),
-             "_tts_final_gate": final_gate,
-             "active_document": s.active_document,
-             "retrieval_receipt": ask_document.get("retrieval_receipt")
-             if isinstance(ask_document.get("retrieval_receipt"), dict) else None,
-             "smedley_document_sidecar": "governed_document_route"},
-        ])
-        s.pending_user_message = None
-        s.active_stream_id = None
-        if hasattr(s, "pending_started_at"):
-            s.pending_started_at = None
+        final_message["_tts_final_server_queued"] = bool(tts_final.get("queued"))
+        final_message["_tts_final_gate"] = final_gate
         try:
             s.save()
         except Exception:

@@ -23,9 +23,10 @@ body.biggy-brand > .app-titlebar{display:none!important}
   width:204px;height:280px;z-index:var(--biggy-layer-reactor, 10);pointer-events:none;
 }
 #j-orb{
-  position:absolute;left:50%;top:38px;transform:translateX(-50%);
+  position:absolute;left:50%;top:38px;transform:translateX(-50%) scale(var(--orb-scale,1));
   width:204px;height:204px;pointer-events:none;display:block;
-  --hud:#62dbff; --hud2:#2f9fd0; --accent:#f4a93a; --glow:rgba(70,200,255,.5); --beat:0;
+  --hud:#62dbff; --hud2:#2f9fd0; --accent:#f4a93a; --glow:rgba(70,200,255,.5); --beat:0; --orb-scale:1;
+  transform-origin:50% 50%;transition:transform 105ms ease-out;
 }
 #j-state{
   position:absolute;left:50%;top:250px;transform:translateX(-50%);width:204px;text-align:center;
@@ -73,6 +74,7 @@ body.biggy-brand > .app-titlebar{display:none!important}
 .biggy-brand-controls button.ok{border-color:#2f7d42;color:#55c96b;background:#0d1a10}
 .biggy-brand-controls button.active{border-color:#b0882e;color:#f0c14b;background:#1a1200}
 .biggy-brand-controls button.down{border-color:#8b3030;color:#f06b64;background:#1a0d0d}
+.biggy-brand-controls button.muted{border-color:#b83d3d;color:#ff8178;background:#210b0b;box-shadow:inset 0 0 0 1px rgba(255,90,80,.14)}
 .biggy-brand-header-note{
   position:absolute;left:0;top:calc(100% + 4px);
   font:700 8px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;

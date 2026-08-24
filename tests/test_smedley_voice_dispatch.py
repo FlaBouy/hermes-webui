@@ -92,3 +92,24 @@ def test_stt_getting_argus_variant_skips_biggy_filler_and_narration():
     assert matcher(
         "a biggie about getting Argus to get me a map routed to Jordan Harris Stadium."
     )
+
+
+def test_long_biggy_narration_is_chunked_and_waited_in_order():
+    source = (ROOT / "static" / "biggy-brand.js").read_text(encoding="utf-8")
+    splitter = extract_function(source, "splitSmedleySpeech")
+    speak = extract_function(source, "speakOnSmedley")
+    assert "760" in speak
+    assert "wait: true" in speak
+    assert "smedleySpeechTail" in speak
+    assert "clean.slice(0, 800)" not in speak
+    assert "windowText.lastIndexOf" in splitter
+
+
+def test_server_fast_route_narration_does_not_truncate_at_800_chars():
+    source = (ROOT / "api" / "routes.py").read_text(encoding="utf-8")
+    start = source.index("def _server_speak_smedley")
+    end = source.index("\ndef ", start + 5)
+    body = source[start:end]
+    assert '"wait": True' in body
+    assert "for chunk in _chunks(spoken)" in body
+    assert "spoken[:800]" not in body

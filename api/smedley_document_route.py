@@ -286,7 +286,16 @@ _AB_DIGITAL_IO_WIRING_PAGES = {
 # so enclosure work never receives a guessed viewer offset.
 _HC900_WIRING_PAGES = {
     "900A16-0103": {"pdf_page": 12, "printed_page": 12},
+    "900G02-0102": {"pdf_page": 18, "printed_page": 18},
+    # Relay-output terminal wiring is shown on the 900RTR remote-terminal-
+    # panel diagram. Page 40 only lists module/RTP compatibility and must not
+    # win a schematic request merely because it contains the exact part ID.
+    "900H01-0202": {"pdf_page": 38, "printed_page": 38},
 }
+_HC900_IO_MANUAL_SOURCE = (
+    "Vendor Data/Honeywell/Honeywell Edge UIO/"
+    "ControlEdge HC900 IO Modules Specifications.pdf"
+)
 _AB_CHASSIS_POWER_MANUAL_SOURCES = (
     "Vendor Data/Allen Bradley/1756-um001_-en-p.pdf",
     "Vendor Data/Allen Bradley/1756/1756-um001_-en-p.pdf",
@@ -865,6 +874,27 @@ def _match_title(match: dict[str, Any]) -> str:
     return str((ident or {}).get("title") or match.get("source") or "").rsplit("/", 1)[-1]
 
 
+def _extractable_pdf_sibling(match: dict[str, Any]) -> dict[str, Any] | None:
+    """Promote a retrieved Word export to its same-name PDF when it exists."""
+    source = str(match.get("source") or "").replace("\\", "/")
+    stem, ext = os.path.splitext(source)
+    if ext.lower() not in {".doc", ".docx"}:
+        return None
+    pdf_source = stem + ".pdf"
+    if not resolve_active_document_filesystem_path({"source": pdf_source}):
+        return None
+    promoted = dict(match)
+    promoted["source"] = pdf_source
+    promoted["url"] = ""
+    promoted["markdown"] = ""
+    if isinstance(match.get("document_identity"), dict):
+        identity = dict(match["document_identity"])
+        identity["title"] = pdf_source.rsplit("/", 1)[-1]
+        identity["filename"] = pdf_source.rsplit("/", 1)[-1]
+        promoted["document_identity"] = identity
+    return promoted
+
+
 def select_operator_document_match(
     matches: object, *, query: object = ""
 ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
@@ -881,6 +911,10 @@ def select_operator_document_match(
     }
     manuals: list[dict[str, Any]] = []
     indexes: list[dict[str, Any]] = []
+    retrieved_sources = {
+        str(item.get("source") or "").replace("\\", "/")
+        for item in items
+    }
     for match in items:
         source = str(match.get("source") or "").replace("\\", "/")
         title = _match_title(match)
@@ -892,6 +926,9 @@ def select_operator_document_match(
             if not manual_relevant_to_query_parts(match, query_parts):
                 continue
             manuals.append(match)
+            sibling = _extractable_pdf_sibling(match)
+            if sibling and str(sibling.get("source") or "") not in retrieved_sources:
+                manuals.append(sibling)
         elif kind == "index":
             indexes.append(match)
 
@@ -915,7 +952,10 @@ def select_operator_document_match(
 
     manuals.sort(key=_rank_key, reverse=True)
     indexes.sort(key=_rank_key, reverse=True)
-    return (manuals[0] if manuals else None, indexes[0] if indexes else None)
+    manual = manuals[0] if manuals else None
+    if manual:
+        manual = _extractable_pdf_sibling(manual) or manual
+    return (manual, indexes[0] if indexes else None)
 
 
 def _top_document_match(matches: object) -> dict[str, Any] | None:
@@ -1521,6 +1561,10 @@ def active_document_from_matches(
         record["index_href"] = str(item.get("index_href"))
     if item.get("revision"):
         record["revision"] = str(item.get("revision"))
+    for key in ("page_hint", "pdf_page", "printed_page"):
+        value = item.get(key)
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            record[key] = value
     return record
 
 
@@ -2298,6 +2342,28 @@ def _seed_authoritative_manuals_for_part(part: object, *, query: object = "") ->
                     }
                 )
                 break
+    if _HC900_PART.fullmatch(part_s):
+        rel = _HC900_IO_MANUAL_SOURCE
+        abs_path = os.path.join(root, rel) if root else ""
+        if abs_path and os.path.isfile(abs_path):
+            seed: dict[str, Any] = {
+                "source": rel,
+                "score": 0.99,
+                "match_kind": "authoritative_seed",
+                "retrieval": "smedley_authoritative_seed",
+                "part_number": part_s,
+                "document_identity": {
+                    "title": "ControlEdge HC900 IO Modules Specifications",
+                    "doc_no": "51-52-03-41",
+                },
+            }
+            page_hint = _HC900_WIRING_PAGES.get(part_s)
+            if page_hint:
+                seed["page_hint"] = page_hint["pdf_page"]
+                seed["pdf_page"] = page_hint["pdf_page"]
+                seed["printed_page"] = page_hint["printed_page"]
+            seeds.append(seed)
+        return seeds
     if not part_s.startswith("1756-"):
         return seeds
     wants_io_table = bool(
@@ -3425,39 +3491,47 @@ def try_document_route(
     if not is_document_request(msg, allow_ask_jarvis=allow_ask_jarvis):
         return None
     origin = normalize_public_origin(public_origin)
-    # VNext citations must return to the GUI that owns the active browser
-    # session. Preserve the caller's raw origin here; legacy retrieval below
-    # retains its existing normalized Smedley-public-origin behavior.
-    vnext = try_jarvis_ii_generic_rag_vnext(msg, public_origin=public_origin)
-    # Preserve VNext fail-closed behavior for unknown requests.  For a
-    # recognized catalog family, however, NO_VERIFIED_EVIDENCE can still be
-    # resolved by the same local library's curated authoritative manual map.
-    # That is a bounded hybrid fallback, not an LLM guess.
-    known_catalog_request = bool(_AB_PART.search(msg) or _HW_PART.search(msg) or _HC900_PART.search(msg))
-    if vnext is not None and not (
-        known_catalog_request
-        and not vnext.get("active_document")
-        and (vnext.get("error") or not vnext.get("matches"))
-    ):
-        return vnext
-    try:
-        retrieval_query = project_spec_lookup_query(msg) if is_specification_number_request(msg) else msg
-        payload = retrieve_documents(retrieval_query, topk=topk, public_origin=origin)
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("smedley document route retrieve failed: %s", type(exc).__name__)
-        reply = (
-            "Document request detected, but Smedley RAG retrieval is unavailable "
-            f"({type(exc).__name__}). Ordinary chat was not used for this turn."
+    # Exact catalog identities are owned by the local authoritative map.  Bind
+    # that evidence before either semantic retrieval or the n8n/VNext agent can
+    # substitute a nearby manual.  The remainder of this function builds one
+    # receipt that owns the answer, active document, page link, and UI trace.
+    authoritative_matches: list[dict[str, Any]] = []
+    for part in extract_query_part_numbers(msg):
+        authoritative_matches.extend(
+            _seed_authoritative_manuals_for_part(part, query=msg)
         )
-        return {
-            "handled": True,
-            "query": msg,
-            "reply": reply,
-            "spoken_reply": sanitize_for_spoken_output(reply),
-            "matches": [],
-            "collection": "",
-            "error": type(exc).__name__,
+
+    if authoritative_matches:
+        payload = {
+            "matches": authoritative_matches,
+            "collection": "jarvis_kb",
+            "retrieval": "smedley_authoritative_seed",
         }
+    else:
+        # VNext citations must return to the GUI that owns the active browser
+        # session. Preserve the caller's raw origin here; legacy retrieval below
+        # retains its existing normalized Smedley-public-origin behavior.
+        vnext = try_jarvis_ii_generic_rag_vnext(msg, public_origin=public_origin)
+        if vnext is not None:
+            return vnext
+        try:
+            retrieval_query = project_spec_lookup_query(msg) if is_specification_number_request(msg) else msg
+            payload = retrieve_documents(retrieval_query, topk=topk, public_origin=origin)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("smedley document route retrieve failed: %s", type(exc).__name__)
+            reply = (
+                "Document request detected, but Smedley RAG retrieval is unavailable "
+                f"({type(exc).__name__}). Ordinary chat was not used for this turn."
+            )
+            return {
+                "handled": True,
+                "query": msg,
+                "reply": reply,
+                "spoken_reply": sanitize_for_spoken_output(reply),
+                "matches": [],
+                "collection": "",
+                "error": type(exc).__name__,
+            }
     matches = payload.get("matches") or []
     # A schematic request is also a document request, so it normally reaches
     # this route before the engineering-fact route.  Preserve the same

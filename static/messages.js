@@ -2070,13 +2070,6 @@ async function send(){
   }
   // Smedley document-link repair / engineering RAG: deterministic reply, no agent stream.
   if(startData.document_route || startData.active_document_review || startData.engineering_rag_answer){
-    try{
-      if(typeof window.__biggyHandleDocumentResult==='function'){
-        window.__biggyHandleDocumentResult(startData);
-      }
-    }catch(docVisualErr){
-      try{console.warn('[webui] document-result visual handoff failed', docVisualErr);}catch(_){ }
-    }
     S.activeStreamId=null;
     if(S.session&&S.session.session_id===activeSid){
       S.session.active_stream_id=null;
@@ -2112,6 +2105,20 @@ async function send(){
       }
     }catch(docRouteErr){
       try{console.warn('[webui] document-route session refresh failed', docRouteErr);}catch(_){ }
+    }
+    // Make the final text visible first. The galaxy focus is presentation,
+    // and must never outrun the answer it is illustrating.
+    try{
+      if(typeof window.__biggyRenderArgusConversationLaneNow==='function'){
+        window.__biggyRenderArgusConversationLaneNow();
+      }
+      if(typeof window.__biggyHandleDocumentResult==='function'){
+        requestAnimationFrame(()=>requestAnimationFrame(()=>{
+          try{window.__biggyHandleDocumentResult(startData);}catch(_){ }
+        }));
+      }
+    }catch(docVisualErr){
+      try{console.warn('[webui] document-result visual handoff failed', docVisualErr);}catch(_){ }
     }
     // Voice-safe TTS: prefer compact spoken_reply (never narrate full RAG body / CoT).
     if(typeof autoReadLastAssistant==='function'){

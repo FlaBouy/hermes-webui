@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260823-argus-status-map-palette-6';
+  const BUILD_ID = '20260824-argus-orb-radar-2';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
   const V6_WORLD_PATH = '/api/biggy/v6/world';
@@ -305,28 +305,68 @@
     return '';
   }
 
+  function splitSmedleySpeech(text, maxChars) {
+    const limit = Math.max(200, Number(maxChars) || 760);
+    let remaining = String(text || '').replace(/\s+/g, ' ').trim();
+    const chunks = [];
+    while (remaining.length > limit) {
+      const windowText = remaining.slice(0, limit + 1);
+      const candidates = [
+        windowText.lastIndexOf('. '),
+        windowText.lastIndexOf('! '),
+        windowText.lastIndexOf('? '),
+        windowText.lastIndexOf('; '),
+        windowText.lastIndexOf(': '),
+        windowText.lastIndexOf(', '),
+        windowText.lastIndexOf(' '),
+      ];
+      let cut = Math.max.apply(null, candidates);
+      // Prefer a natural boundary, but never let one long sentence exceed the
+      // speech service's 800-character contract.
+      if (cut < Math.floor(limit * .55)) cut = limit;
+      else cut += 1;
+      const chunk = remaining.slice(0, cut).trim();
+      if (chunk) chunks.push(chunk);
+      remaining = remaining.slice(cut).trim();
+    }
+    if (remaining) chunks.push(remaining);
+    return chunks;
+  }
+
+  let smedleySpeechTail = Promise.resolve();
+
   async function speakOnSmedley(text, opts) {
     opts = opts || {};
     const clean = stripForSmedleySpeak(text);
     if (!clean) return false;
-    try {
-      const body = { text: clean.slice(0, 800) };
-      let voiceId = opts.voice_id ? String(opts.voice_id).trim() : '';
-      // Exact override: speechSynthesis sink and other no-opts callers were
-      // posting /speak with no voice_id → Austin. Ask Argus turns must carry
-      // Alistar through this single Smedley-sink choke point.
-      if (!voiceId) voiceId = resolveAskJarvisVoiceId();
-      if (voiceId && /^[A-Za-z0-9_-]{8,64}$/.test(voiceId)) body.voice_id = voiceId;
-      // Existing Smedley RAG sidecar: ElevenLabs → room soundbar/speakers or headset.
-      await proxyJson('/speak', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      return true;
-    } catch (_) {
-      return false;
-    }
+    let voiceId = opts.voice_id ? String(opts.voice_id).trim() : '';
+    // Exact override: speechSynthesis sink and other no-opts callers were
+    // posting /speak with no voice_id → Austin. Ask Argus turns must carry
+    // Alistar through this single Smedley-sink choke point.
+    if (!voiceId) voiceId = resolveAskJarvisVoiceId();
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(voiceId)) voiceId = '';
+    const chunks = splitSmedleySpeech(clean, 760);
+    const dispatch = async () => {
+      try {
+        for (const chunk of chunks) {
+          const body = { text: chunk, wait: true };
+          if (voiceId) body.voice_id = voiceId;
+          // wait=true makes each chunk finish playback before the next begins;
+          // this prevents both the former 800-character cutoff and overlap.
+          await proxyJson('/speak', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+        }
+        return true;
+      } catch (_) {
+        return false;
+      }
+    };
+    const queued = smedleySpeechTail.catch(() => false).then(dispatch);
+    smedleySpeechTail = queued;
+    return queued;
   }
 
   function isGreetingPrompt(text) {
@@ -1064,16 +1104,20 @@
     function applyAudioRouteStatus(status) {
       const active = String(status.active_route || 'room').toLowerCase();
       const desired = String(status.desired_route || active).toLowerCase();
+      const muted = !!status.output_muted;
       const switching = !!status.route_switching || routePending;
       const headsetAvailable = !!status.headset_available;
-      // Keep the cockpit command name stable. The button still toggles the
-      // actual room/headset route; current routing belongs in its title/state,
-      // not as a shifting rail label that differs between displays.
-      routeBtn.textContent = 'ROOM';
-      routeBtn.title = `Audio route: ${(switching ? desired : active) === 'headset' ? 'headset' : 'room'}`;
-      routeBtn.classList.remove('ok', 'active', 'down');
+      const shownRoute = (switching ? desired : active) === 'headset' ? 'headset' : 'room';
+      routeBtn.textContent = muted ? 'MUTE' : shownRoute.toUpperCase();
+      routeBtn.title = muted
+        ? `Audio muted; ${shownRoute} route retained. Click for Room.`
+        : `Audio route: ${shownRoute}. Click for ${shownRoute === 'room' ? 'Headset' : 'Mute'}.`;
+      routeBtn.classList.remove('ok', 'active', 'down', 'muted');
       if (!status.pedal_alive) {
         routeBtn.classList.add('down');
+      } else if (muted) {
+        routeBtn.classList.add('muted');
+        if (note) note.textContent = 'Biggy and A.R.G.U.S. speech muted.';
       } else if (switching) {
         routeBtn.classList.add('active');
         if (note) note.textContent = `Switching to ${desired === 'headset' ? 'Headset' : 'Room'}…`;
@@ -1082,7 +1126,7 @@
         if (note) note.textContent = 'Headset is not connected to Smedley.';
       } else {
         routeBtn.classList.add('ok');
-        if (note && /^Switching to (?:Headset|Room)…$/.test(note.textContent || '')) {
+        if (note && /^(?:Switching to (?:Headset|Room)…|Biggy and A\.R\.G\.U\.S\. speech muted\.)$/.test(note.textContent || '')) {
           note.textContent = '';
         }
       }
@@ -1098,7 +1142,8 @@
         return;
       }
       const active = String(status.active_route || 'room').toLowerCase();
-      const target = active === 'headset' ? 'room' : 'headset';
+      const muted = !!status.output_muted;
+      const target = muted ? 'room' : (active === 'headset' ? 'mute' : 'headset');
       if (target === 'headset' && !status.headset_available) {
         if (note) note.textContent = 'Headset is not connected to Smedley.';
         applyAudioRouteStatus(status);
@@ -1131,6 +1176,16 @@
       if (!pedalAlive) ptt.classList.add('down');
       else if (busy) ptt.classList.add('active');
       else ptt.classList.add('ok');
+      // Speech may be owned by the server-side Alistar queue even when the
+      // physical pedal sidecar is not reporting alive.  The orb follows the
+      // authoritative speaking phase, not pedal connectivity.
+      if (ours && phase === 'speaking') {
+        setJarvisOrbState('speaking', 'Alistar voice active');
+        startArgusSpeechPulse(latestArgusSpokenText());
+      } else if (argusSpeechPulseSignature) {
+        stopArgusSpeechPulse();
+        if (!jarvisOrbFlight) pollJarvisV6Health().catch(() => {});
+      }
       applyAudioRouteStatus(status);
     }
 
@@ -1179,11 +1234,15 @@
           ? [...messages].reverse().find((message) => message
               && message.role === 'assistant' && !message.ask_jarvis_pending)
           : null;
+        renderArgusConversationLane();
+        // Text is the first visible final-state owner. Let the browser paint
+        // it before the camera starts its retrieval focus transition.
         if (latestAssistant && isGalaxyTraceEligibleMessage(latestAssistant)
             && galaxyTraceCitation(latestAssistant)) {
-          window.__biggyHandleDocumentResult(latestAssistant);
+          requestAnimationFrame(() => requestAnimationFrame(() => {
+            window.__biggyHandleDocumentResult(latestAssistant);
+          }));
         }
-        renderArgusConversationLane();
         if (includeVisuals && typeof window.__biggyHandoffTravelVisualsFromMessages === 'function') {
           await window.__biggyHandoffTravelVisualsFromMessages(messages);
         }
@@ -1413,6 +1472,65 @@
     }
   }
 
+  let argusSpeechPulseTimer = null;
+  let argusSpeechPulseSignature = '';
+  let argusSpeechPulseIndex = 0;
+
+  function stopArgusSpeechPulse() {
+    if (argusSpeechPulseTimer) clearTimeout(argusSpeechPulseTimer);
+    argusSpeechPulseTimer = null;
+    argusSpeechPulseSignature = '';
+    argusSpeechPulseIndex = 0;
+    const orb = document.getElementById('j-orb');
+    if (orb) {
+      orb.style.setProperty('--beat', '0');
+      orb.style.setProperty('--orb-scale', '1');
+    }
+  }
+
+  function startArgusSpeechPulse(text) {
+    const spoken = String(text || '').trim();
+    const signature = spoken || 'argus-speaking';
+    if (argusSpeechPulseTimer && signature === argusSpeechPulseSignature) return;
+    stopArgusSpeechPulse();
+    argusSpeechPulseSignature = signature;
+    const words = spoken.match(/\S+/g) || ['speaking'];
+    const step = () => {
+      const orb = document.getElementById('j-orb');
+      if (!orb || !argusSpeechPulseSignature) return;
+      const word = words[argusSpeechPulseIndex % words.length];
+      const emphasis = /[.!?]$/.test(word) ? 1 : (/[,:;]$/.test(word) ? .78 : .58 + Math.min(.32, word.length / 28));
+      orb.style.setProperty('--beat', String(emphasis));
+      orb.style.setProperty('--orb-scale', String(1.018 + (emphasis * .072)));
+      setTimeout(() => {
+        if (argusSpeechPulseSignature) {
+          orb.style.setProperty('--beat', '.08');
+          orb.style.setProperty('--orb-scale', '1.006');
+        }
+      }, 105);
+      argusSpeechPulseIndex += 1;
+      const pause = /[.!?]$/.test(word) ? 430 : (/[,:;]$/.test(word) ? 300 : 185 + Math.min(130, word.length * 7));
+      argusSpeechPulseTimer = setTimeout(step, pause);
+    };
+    step();
+  }
+
+  function latestArgusSpokenText() {
+    const sources = [
+      Array.isArray(completionMessages) ? completionMessages : [],
+      (typeof S !== 'undefined' && S && Array.isArray(S.messages)) ? S.messages : [],
+    ];
+    for (const messages of sources) {
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i];
+        if (!message || message.role !== 'assistant') continue;
+        if (argusConversationIdentity(message).key !== 'argus') break;
+        return String(message.spoken_text || message.spoken_reply || '').trim();
+      }
+    }
+    return '';
+  }
+
   function formatReactorModel(model) {
     const raw = String(model || '').trim();
     if (!raw) return '';
@@ -1530,7 +1648,7 @@
   }
 
   async function pollJarvisV6Health() {
-    if (jarvisOrbFlight) return;
+    if (jarvisOrbFlight || argusSpeechPulseSignature) return;
     try {
       const data = await jsonGet(V6_HEALTH_PATH);
       const state = String((data && data.state) || (data && data.online ? 'online' : 'offline'));
@@ -1896,6 +2014,8 @@
     body.scrollTop = body.scrollHeight;
   }
 
+  window.__biggyRenderArgusConversationLaneNow = renderArgusConversationLane;
+
   function installArgusConversationLane(mainChat) {
     const lane = ensureArgusConversationLane(mainChat);
     syncArgusConversationLaneBoundary(lane, mainChat);
@@ -1980,10 +2100,12 @@
     const state = String(data.state || 'offline').toLowerCase();
     const phase = String(data.phase || '').trim();
     const ingesting = state === 'active' || /^(detected|queued|indexing|extracting|embedding|active)$/i.test(phase);
+    const reconnecting = state === 'monitor_offline' || phase === 'reconnecting';
     const issue = !data.ok || state === 'error' || /^(failed|quarantined)$/i.test(phase);
-    const stateClass = issue ? 'is-issue' : (ingesting ? 'is-ingesting' : 'is-ready');
+    const stateClass = issue ? 'is-issue' : ((ingesting || reconnecting) ? 'is-ingesting' : 'is-ready');
     const stateText = issue ? 'INGEST STATUS UNAVAILABLE'
-      : (ingesting ? `INGESTING${phase ? ` // ${phase.toUpperCase()}` : ''}` : 'INGEST READY');
+      : (reconnecting ? 'INGEST MONITOR RECONNECTING'
+        : (ingesting ? `INGESTING${phase ? ` // ${phase.toUpperCase()}` : ''}` : 'INGEST READY'));
     const metric = (value) => Number.isFinite(Number(value)) ? Number(value).toLocaleString() : '—';
     const latency = Number.isFinite(Number(data.latency_ms)) ? `${Math.round(Number(data.latency_ms))} ms` : '—';
     const currentSource = String(data.last_file || '').replace(/\\/g, '/').replace(/^.*?\/Library\//, '').replace(/^\/+/, '');
@@ -1993,7 +2115,12 @@
       phase: phase || 'ingesting', reason: '', current: true,
     } : null;
     const recent = Array.isArray(data.recent) ? data.recent.slice() : [];
-    const remaining = recent.filter((row) => String(row && row.source || '') !== currentSource);
+    // Only remove last_file when it is separately represented by the active
+    // ingestion row. In ready state last_file is historical evidence and must
+    // remain, otherwise a five-row backend radar renders as four.
+    const remaining = currentRow
+      ? recent.filter((row) => String(row && row.source || '') !== currentSource)
+      : recent;
     const failures = remaining.filter((row) => String(row && row.state || '').toLowerCase() === 'issue');
     const completed = remaining.filter((row) => String(row && row.state || '').toLowerCase() !== 'issue');
     // This is intentional operator ordering, not chronological ordering:
@@ -2175,7 +2302,7 @@
     header.innerHTML =
       `<div class="biggy-brand-controls">` +
       `<button id="biggyPtt" type="button" data-testid="biggy-ptt" title="Foot-pedal PTT status">● PTT</button>` +
-      `<button id="biggyAudioRoute" type="button" data-testid="biggy-audio-route" title="Toggle headset / room audio">ROOM</button>` +
+      `<button id="biggyAudioRoute" type="button" data-testid="biggy-audio-route" title="Cycle Room / Headset / Mute audio">ROOM</button>` +
       `</div>` +
       `<div class="biggy-brand-status" aria-label="A.R.G.U.S. model">` +
       `<div id="j-brain"><span id="j-brain-chip" data-testid="biggy-jarvis-model">—</span></div>` +
@@ -3023,7 +3150,18 @@
       const hasVisual = [mvm, rvm, tpm, lvm, avm].some((vm) => vm && typeof vm === 'object');
       // Only the latest completed assistant turn is eligible.  Do not walk
       // back through history: a RAG result must never resurrect travel cards.
-      if (!hasVisual) return false;
+      if (!hasVisual) {
+        // A completed corpus/document response owns the right-hand workspace
+        // even when retrieval failed and produced no citation.  Close and
+        // invalidate any older travel generation so an asynchronous Mapbox
+        // completion cannot reopen the prior trip over this RAG turn.
+        if (isGalaxyTraceEligibleMessage(m) || m.document_route
+            || m.active_document_review || m.engineering_rag_answer
+            || m.jarvis_ii_generic_rag_vnext) {
+          invalidateTravelVisuals();
+        }
+        return false;
+      }
 
       // A travel/action response owns the dock, never the corpus graph.  An
       // earlier document trace must be cleared before the new cards render.

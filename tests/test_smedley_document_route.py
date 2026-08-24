@@ -150,8 +150,10 @@ def test_generic_vnext_wiring_contract_returns_one_natural_reply_and_page_link(m
     monkeypatch.setattr(docroute, "_load_jarvis_n8n_propose_token", lambda: "test-token")
     monkeypatch.setattr(docroute.urllib.request, "urlopen", fake_urlopen)
 
+    query = "Find the wiring schematic for an obsolete custom panel"
     result = docroute.try_document_route(
-        "Ask Jarvis for a wiring schematic for a 1756-IB32", public_origin=ORIGIN,
+        query,
+        public_origin=ORIGIN,
         allow_ask_jarvis=True,
     )
 
@@ -160,7 +162,7 @@ def test_generic_vnext_wiring_contract_returns_one_natural_reply_and_page_link(m
     assert result["spoken_reply"] == payload["answer"]
     assert result["reply"].count("Open wiring page") == 1
     assert result["active_document"]["url"] == ORIGIN + payload["citations"][0]["url"]
-    assert sent["body"]["query"].endswith("1756-IB32")
+    assert sent["body"]["query"] == query
     assert sent["auth"] == "Bearer test-token"
 
 
@@ -186,7 +188,10 @@ def test_generic_vnext_replaces_loopback_citation_origin(monkeypatch):
     monkeypatch.setenv(docroute.PUBLIC_ORIGIN_ENV, ORIGIN)
     monkeypatch.setattr(docroute, "_load_jarvis_n8n_propose_token", lambda: "test-token")
     monkeypatch.setattr(docroute.urllib.request, "urlopen", lambda *_args, **_kwargs: Response())
-    result = docroute.try_document_route("Find a wiring schematic for 1756-OW16I", public_origin="http://127.0.0.1:8787")
+    result = docroute.try_document_route(
+        "Find the wiring schematic for an obsolete custom panel",
+        public_origin="http://127.0.0.1:8787",
+    )
 
     assert result and result["handled"] is True
     assert "127.0.0.1" not in result["reply"]
@@ -702,6 +707,10 @@ def test_webui_chat_start_and_messages_wire_document_route():
     # Session binding must clear on index-only / no-manual document turns.
     assert "s.active_document = None" in routes
     assert "window.__biggyHandleDocumentResult(startData)" in messages
+    assert "window.__biggyRenderArgusConversationLaneNow()" in messages
+    assert messages.index("window.__biggyRenderArgusConversationLaneNow()") < messages.index(
+        "window.__biggyHandleDocumentResult(startData)"
+    )
     assert "startData.tts_server_handled || startData.tts_final_queued" in messages
 
     brand = (Path(__file__).resolve().parents[1] / "static" / "biggy-brand.js").read_text(
@@ -712,6 +721,11 @@ def test_webui_chat_start_and_messages_wire_document_route():
     assert "window.__biggyHandleDocumentResult" in brand
     assert "traceFromRagPayload(payload)" in brand
     assert "window.__biggyHandleDocumentResult(latestAssistant)" in brand
+    assert "startArgusSpeechPulse(latestArgusSpokenText())" in brand
+    assert "orb.style.setProperty('--beat'" in brand
+    assert "orb.style.setProperty('--orb-scale'" in brand
+    assert "if (ours && phase === 'speaking')" in brand
+    assert "const remaining = currentRow" in brand
 
 
 def test_duplicate_manual_exports_prefer_extractable_pdf():
@@ -749,6 +763,165 @@ def test_pdf_preference_does_not_override_stronger_title_match():
         [pdf, word], query=query
     )
     assert selected is word
+
+
+def test_word_only_retrieval_promotes_existing_same_name_pdf(tmp_path, monkeypatch):
+    source = "Vendor Data/Honeywell/Honeywell Edge UIO/User-manual.doc"
+    pdf = tmp_path / "Vendor Data/Honeywell/Honeywell Edge UIO/User-manual.pdf"
+    pdf.parent.mkdir(parents=True)
+    pdf.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(docroute, "library_root", lambda: str(tmp_path))
+    selected, _index = docroute.select_operator_document_match(
+        [{"source": source, "score": 0.75, "snippet": "900G02-0102"}],
+        query="Ask Argus for a Honeywell 900G02-0102 schematic",
+    )
+    assert selected["source"].endswith("User-manual.pdf")
+    assert selected["url"] == ""
+
+
+def test_hc900_catalog_part_seeds_authoritative_manual_and_verified_page(tmp_path, monkeypatch):
+    correct = (
+        tmp_path
+        / "Vendor Data/Honeywell/Honeywell Edge UIO"
+        / "ControlEdge HC900 IO Modules Specifications.pdf"
+    )
+    correct.parent.mkdir(parents=True)
+    correct.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(docroute, "library_root", lambda: str(tmp_path))
+
+    seeds = docroute._seed_authoritative_manuals_for_part(
+        "900G02-0102",
+        query="Morning Biggy, ask Argus for the 900G02-0102 schematic",
+    )
+
+    assert len(seeds) == 1
+    assert seeds[0]["source"].endswith("ControlEdge HC900 IO Modules Specifications.pdf")
+    assert seeds[0]["part_number"] == "900G02-0102"
+    assert seeds[0]["pdf_page"] == 18
+    assert seeds[0]["printed_page"] == 18
+
+
+def test_hc900_relay_schematic_uses_verified_rtp_diagram_not_compatibility_table(tmp_path, monkeypatch):
+    correct = (
+        tmp_path
+        / "Vendor Data/Honeywell/Honeywell Edge UIO"
+        / "ControlEdge HC900 IO Modules Specifications.pdf"
+    )
+    correct.parent.mkdir(parents=True)
+    correct.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(docroute, "library_root", lambda: str(tmp_path))
+
+    seeds = docroute._seed_authoritative_manuals_for_part(
+        "900H01-0202",
+        query="Ask Argus for the 900H01-0202 relay output wiring schematic",
+    )
+
+    assert len(seeds) == 1
+    assert seeds[0]["pdf_page"] == 38
+    assert seeds[0]["printed_page"] == 38
+
+
+def test_hc900_authoritative_seed_beats_wrong_uoc_and_generic_manual(tmp_path, monkeypatch):
+    correct = (
+        tmp_path
+        / "Vendor Data/Honeywell/Honeywell Edge UIO"
+        / "ControlEdge HC900 IO Modules Specifications.pdf"
+    )
+    correct.parent.mkdir(parents=True)
+    correct.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(docroute, "library_root", lambda: str(tmp_path))
+    query = "Ask Argus for a schematic for Honeywell 900G02-0102"
+    matches = [
+        {
+            "source": "Vendor Data/Honeywell/Honeywell Edge UIO/Unit Operations Controller Specifications.pdf",
+            "score": 0.98,
+            "snippet": "Honeywell controller specifications",
+        },
+        {
+            "source": "Vendor Data/Honeywell/Honeywell Edge UIO/User-manual.pdf",
+            "score": 0.97,
+            "snippet": "Honeywell Edge UIO general user manual",
+        },
+    ]
+    matches[:0] = docroute._seed_authoritative_manuals_for_part("900G02-0102", query=query)
+
+    selected, _index = docroute.select_operator_document_match(matches, query=query)
+
+    assert selected["source"].endswith("ControlEdge HC900 IO Modules Specifications.pdf")
+    assert selected["page_hint"] == 18
+
+    active = docroute.active_document_from_matches([selected], query=query)
+    assert active["source"].endswith("ControlEdge HC900 IO Modules Specifications.pdf")
+    assert active["page_hint"] == 18
+    assert active["pdf_page"] == 18
+    assert active["printed_page"] == 18
+
+
+def test_exact_hc900_catalog_route_binds_before_vnext_or_semantic_retrieval(
+    tmp_path, monkeypatch
+):
+    correct = (
+        tmp_path
+        / "Vendor Data/Honeywell/Honeywell Edge UIO"
+        / "ControlEdge HC900 IO Modules Specifications.pdf"
+    )
+    correct.parent.mkdir(parents=True)
+    correct.write_bytes(b"%PDF-1.4\n")
+    monkeypatch.setattr(docroute, "library_root", lambda: str(tmp_path))
+
+    def unexpected_vnext(*_args, **_kwargs):
+        raise AssertionError("authoritative catalog route must run before vNext")
+
+    def unexpected_semantic(*_args, **_kwargs):
+        raise AssertionError("authoritative catalog route must not need semantic retrieval")
+
+    monkeypatch.setattr(docroute, "try_jarvis_ii_generic_rag_vnext", unexpected_vnext)
+    monkeypatch.setattr(docroute, "retrieve_documents", unexpected_semantic)
+
+    result = docroute.try_document_route(
+        "Morning Biggy, ask Argus for the 900G02-0102 schematic",
+        allow_ask_jarvis=True,
+        public_origin=ORIGIN,
+    )
+
+    receipt = result["retrieval_receipt"]
+    active = result["active_document"]
+    assert result["retrieval"] == "smedley_authoritative_seed"
+    assert receipt["source"].endswith("ControlEdge HC900 IO Modules Specifications.pdf")
+    assert receipt["document_identity"]["doc_no"] == "51-52-03-41"
+    assert receipt["pdf_page"] == 18
+    assert receipt["printed_page"] == 18
+    assert active["source"] == receipt["source"]
+    assert active["pdf_page"] == receipt["pdf_page"]
+    assert active["printed_page"] == receipt["printed_page"]
+
+
+def test_unknown_engineering_document_request_still_uses_vnext(monkeypatch):
+    expected = {
+        "handled": True,
+        "reply": "No verified evidence.",
+        "matches": [],
+        "jarvis_ii_generic_rag_vnext": True,
+    }
+    monkeypatch.setattr(
+        docroute,
+        "try_jarvis_ii_generic_rag_vnext",
+        lambda *_args, **_kwargs: expected,
+    )
+    monkeypatch.setattr(
+        docroute,
+        "retrieve_documents",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("a handled vNext response must remain terminal")
+        ),
+    )
+
+    result = docroute.try_document_route(
+        "Find the wiring schematic for the obsolete custom panel",
+        public_origin=ORIGIN,
+    )
+
+    assert result is expected
 
 
 def test_electrical_fuse_question_is_source_gated_not_free_chat():
@@ -1294,6 +1467,13 @@ def test_index_only_document_route_clears_manual_binding(monkeypatch):
             "matches": [ab_index, unrelated_manual],
             "collection": "jarvis_kb",
         },
+    )
+    # Isolate the index-only fallback. Exact catalog identities with an
+    # authoritative on-disk manual are intentionally bound before retrieval.
+    monkeypatch.setattr(
+        docroute,
+        "_seed_authoritative_manuals_for_part",
+        lambda *_args, **_kwargs: [],
     )
     result = docroute.try_document_route(
         "Find the wiring schematic for Allen Bradley 1756-OW16I",

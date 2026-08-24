@@ -138,6 +138,22 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     idleContrastInstalled = true;
     return true;
   }
+  function restoreBaseGalaxyVisibility() {
+    const os = window.__os || {};
+    const hadNativeFocus = !!(os.focusNode || os.litSet || os.pathInfo || os.isolateOn);
+    // V6's native click-focus intentionally dims every node outside the
+    // selected neighbourhood.  A Biggy trace is an overlay on the full
+    // corpus, not an isolate operation, so clear that native state before a
+    // trace and again on HOME.  Re-apply our room-readable idle accessors only
+    // when clearFocus() actually refreshed V6's native colors and widths.
+    if (hadNativeFocus && typeof os.clearFocus === 'function') {
+      os.clearFocus();
+      if (typeof os.hideNodeCard === 'function') os.hideNodeCard();
+      idleContrastInstalled = false;
+      installIdleContrast();
+    }
+    return hadNativeFocus;
+  }
   function nodePath(node) {
     const match = /^key:(?:dir|doc):(.+)$/.exec(String(node && node.p || ''));
     return match ? match[1] : '';
@@ -175,6 +191,15 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     const showCard = window.__os && window.__os.showNodeCard;
     if (typeof focus === 'function') {
       g.onNodeClick((node, event) => {
+        const rel = nodePath(node);
+        // The verified winner is already the terminal focus of the retrieval.
+        // Open it at the bound page on a normal click; do not invoke V6's
+        // neighbourhood-focus routine, which would make the rest of the
+        // galaxy go dark and destroy the meaning of the visible route.
+        if (String(node && node.g) === 'document' && rel && activePages.has(rel)) {
+          openNode(node);
+          return;
+        }
         focus(node, event);
         if (typeof showCard === 'function' && !(event && event.shiftKey)) {
           showCard(node, event); addNodeAction(node);
@@ -392,12 +417,14 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     stopWinnerPulse();
     clearTraceOverlay();
     activePages.clear();
+    restoreBaseGalaxyVisibility();
     resetLandingCamera();
   }
   function apply(trace) {
     const g = graph();
     if (!g) { setTimeout(() => apply(trace), 180); return; }
     installIdleContrast();
+    restoreBaseGalaxyVisibility();
     const resolved = routeFor(trace && trace.source);
     const route = resolved.ids;
     if (route.length < 2) {
@@ -963,12 +990,27 @@ def _ingest_overview(ledger_path: Path | None) -> dict[str, Any]:
 def ingest_status() -> dict[str, Any]:
     """Return the public RAG state used by the Galaxy and ARGUS overview."""
     started = time.monotonic()
+    overview = _ingest_overview(resolve_rag_ingest_ledger())
     try:
         with urlopen(DEFAULT_RAG_STATUS_URL, timeout=2.5) as response:
             raw = response.read(64 * 1024)
         payload = json.loads(raw.decode("utf-8"))
     except (OSError, URLError, ValueError, json.JSONDecodeError):
-        return {"ok": False, "state": "offline"}
+        # The watcher and Biggy can restart independently.  Its live monitor
+        # being briefly unavailable does not mean the durable ingest ledger
+        # or the RAG store disappeared.  Keep the operator's counts/radar on
+        # glass and expose a reconnecting state instead of a false red alarm.
+        return {
+            "ok": True,
+            "state": "monitor_offline",
+            "phase": "reconnecting",
+            "last_file": "",
+            "last_error": "",
+            "indicator": "amber",
+            "monitor_online": False,
+            "latency_ms": round((time.monotonic() - started) * 1000, 1),
+            **overview,
+        }
     if not isinstance(payload, dict):
         return {"ok": False, "state": "error"}
     last_file = str(payload.get("last_file") or "")
@@ -977,7 +1019,6 @@ def ingest_status() -> dict[str, Any]:
     # to guess a branch when duplicate filenames exist.
     if last_file and "/" not in last_file.replace("\\", "/"):
         last_file = _ledger_source_for_basename(last_file) or last_file
-    overview = _ingest_overview(resolve_rag_ingest_ledger())
     return {
         "ok": True,
         "state": str(payload.get("status") or "unknown"),
@@ -985,6 +1026,7 @@ def ingest_status() -> dict[str, Any]:
         "last_file": last_file,
         "last_error": str(payload.get("last_error") or ""),
         "indicator": str(payload.get("indicator") or ""),
+        "monitor_online": True,
         "latency_ms": round((time.monotonic() - started) * 1000, 1),
         **overview,
     }
