@@ -14,6 +14,7 @@ GREETING = "Mornin Smedley"
 HEALTH = "check service health"
 RAG = "What is the fuse rating for a 1756-IF16 analog input module?"
 DOC = "Pull the document 02-315"
+INGEST = "Please check the ingest state of CR194 Limit Amp Starter.pdf that the RAG has flagged as detected."
 
 
 def test_primary_glass_zero_tools_truthful_unavailable():
@@ -125,6 +126,184 @@ def test_normal_rag_and_document_routing_unchanged():
     assert docroute.is_document_request(DOC) is True
     assert fast.is_primary_glass_request(RAG) is False
     assert fast.is_explicit_service_health_request(RAG) is False
+
+
+def test_ingest_status_uses_one_authoritative_call_and_stops():
+    calls = []
+
+    def ingest_get():
+        calls.append("ingest")
+        return {
+            "ok": True,
+            "state": "idle",
+            "monitor_online": True,
+            "recent": [
+                {
+                    "file": "CR194 Limit Amp Starter.pdf",
+                    "source": "Vendor Data/GE/CR194 Limit Amp Starter.pdf",
+                    "state": "ingesting",
+                    "phase": "detected",
+                    "reason": "",
+                },
+                {
+                    "file": "Limit Amp Starter.pdf",
+                    "state": "complete",
+                    "phase": "indexed",
+                },
+            ],
+        }
+
+    result = try_smedley_fast_route(INGEST, ingest_status_get=ingest_get, environ={})
+    assert result is not None
+    assert result["route"] == "ingest_status"
+    assert result["tool_calls"] == 0
+    assert result["provider_calls"] == 1
+    assert calls == ["ingest"]
+    assert "CR194 Limit Amp Starter.pdf" in result["reply"]
+    assert "detected" in result["reply"].lower()
+    assert "ingest radar" in result["reply"].lower()
+
+
+def test_ingest_status_typo_reports_the_single_attention_item_without_agent_search():
+    def ingest_get():
+        return {
+            "ok": True,
+            "state": "idle",
+            "monitor_online": True,
+            "recent": [
+                {
+                    "file": "CR194 Limit Amp Starter.pdf",
+                    "state": "ingesting",
+                    "phase": "detected",
+                    "reason": "",
+                },
+                {"file": "Other.pdf", "state": "complete", "phase": "indexed"},
+            ],
+        }
+
+    result = try_smedley_fast_route(
+        "Check the ingest issue with VR194 Limit Amp Starter.pdf",
+        ingest_status_get=ingest_get,
+        environ={},
+    )
+    assert result is not None
+    assert result["provider_calls"] == 1
+    assert "CR194 Limit Amp Starter.pdf" in result["reply"]
+    assert "VR194" not in result["reply"]
+
+
+def test_ingest_status_provider_failure_terminates_and_argus_rag_is_not_swallowed():
+    def boom():
+        raise RuntimeError("ledger unavailable")
+
+    result = try_smedley_fast_route(
+        "Biggy, what is the RAG ingestion status?",
+        ingest_status_get=boom,
+        environ={},
+    )
+    assert result is not None
+    assert result["route"] == "ingest_status"
+    assert result["tool_calls"] == 0
+    assert result["provider_calls"] == 1
+    assert "unavailable" in result["reply"].lower()
+
+    assert (
+        try_smedley_fast_route(
+            "Ask Argus to find the wiring schematic in the ingested manuals",
+            ingest_status_get=lambda: (_ for _ in ()).throw(
+                AssertionError("ordinary Argus RAG must not hit ingest status")
+            ),
+            environ={},
+        )
+        is None
+    )
+
+
+def test_explicit_reingest_command_executes_one_bounded_action_and_stops():
+    calls = []
+
+    def ingest_get():
+        calls.append("status")
+        return {
+            "ok": True,
+            "monitor_online": True,
+            "recent": [
+                {
+                    "file": "CR194 Limit Amp Starter.pdf",
+                    "source": "Vendor Data/GE/CR194 Limit Amp Starter.pdf",
+                    "state": "ingesting",
+                    "phase": "detected",
+                    "reason": "",
+                }
+            ],
+        }
+
+    def retry(source):
+        calls.append(("retry", source))
+        return {"ok": True, "file": "CR194 Limit Amp Starter.pdf", "state": "queued"}
+
+    result = try_smedley_fast_route(
+        "Can you re-ingest the CR194 pdf yourself?",
+        ingest_status_get=ingest_get,
+        ingest_retry=retry,
+        environ={},
+    )
+    assert result is not None
+    assert result["route"] == "ingest_action"
+    assert result["tool_calls"] == 0
+    assert result["provider_calls"] == 2
+    assert calls == ["status", ("retry", "Vendor Data/GE/CR194 Limit Amp Starter.pdf")]
+    assert "queued" in result["reply"].lower()
+
+
+def test_reingest_without_one_resolvable_issue_terminates_without_mutation():
+    retried = []
+    result = try_smedley_fast_route(
+        "Please start the re-ingest.",
+        ingest_status_get=lambda: {
+            "ok": True,
+            "recent": [
+                {"file": "a.pdf", "source": "A/a.pdf", "state": "issue", "phase": "failed"},
+                {"file": "b.pdf", "source": "B/b.pdf", "state": "issue", "phase": "failed"},
+            ],
+        },
+        ingest_retry=lambda source: retried.append(source),
+        environ={},
+    )
+    assert result is not None
+    assert result["route"] == "ingest_action"
+    assert result["tool_calls"] == 0
+    assert result["provider_calls"] == 1
+    assert retried == []
+    assert "which file" in result["reply"].lower()
+
+
+def test_reingest_duplicate_reconciles_without_claiming_it_was_queued():
+    result = try_smedley_fast_route(
+        "Re-ingest CR194.pdf",
+        ingest_status_get=lambda: {
+            "ok": True,
+            "recent": [
+                {
+                    "file": "CR194.pdf",
+                    "source": "Vendor Data/CR194.pdf",
+                    "state": "ingesting",
+                    "phase": "detected",
+                }
+            ],
+        },
+        ingest_retry=lambda _source: {
+            "ok": True,
+            "file": "CR194.pdf",
+            "state": "duplicate",
+            "queued": False,
+        },
+        environ={},
+    )
+    assert result is not None
+    assert result["route"] == "ingest_action"
+    assert "reconciled the duplicate" in result["reply"].lower()
+    assert "queued" not in result["reply"].lower()
 
 
 QUICK_STATUS_EXACT = "Yeah, just doing a quick systems check."

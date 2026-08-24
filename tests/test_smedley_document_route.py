@@ -721,10 +721,12 @@ def test_webui_chat_start_and_messages_wire_document_route():
     assert "window.__biggyHandleDocumentResult" in brand
     assert "traceFromRagPayload(payload)" in brand
     assert "window.__biggyHandleDocumentResult(latestAssistant)" in brand
-    assert "startArgusSpeechPulse(latestArgusSpokenText())" in brand
+    assert "startArgusSpeechPulse(meter)" in brand
+    assert "pollArgusSpeechMeter" in brand
+    assert "requestAnimationFrame(renderArgusSpeechFrame)" in brand
     assert "orb.style.setProperty('--beat'" in brand
     assert "orb.style.setProperty('--orb-scale'" in brand
-    assert "if (ours && phase === 'speaking')" in brand
+    assert "word.length / 28" not in brand
     assert "const remaining = currentRow" in brand
 
 

@@ -229,6 +229,61 @@ def test_retry_is_confined_to_a_ledger_known_failed_file(tmp_path, monkeypatch):
         raise AssertionError("traversal source was accepted")
 
 
+def test_detected_ledger_file_can_be_explicitly_requeued(tmp_path, monkeypatch):
+    root = tmp_path / "Library"
+    document = root / "Alpha" / "detected.pdf"
+    document.parent.mkdir(parents=True)
+    document.write_bytes(b"%PDF-test")
+    ledger = tmp_path / "ingest_ledger.json"
+    ledger.write_text(
+        '{"files":{"row":{"source":"Alpha/detected.pdf","phase":"detected"}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(world, "resolve_rag_ingest_ledger", lambda: ledger)
+    monkeypatch.setattr(world, "resolve_rag_library_root", lambda: root)
+    import api.jarvis_rag_ingest_events as events
+
+    seen = []
+    monkeypatch.setattr(events, "requeue_ingest_source", lambda path: seen.append(path) or {"status": "queued", "queued": True})
+    result = world.retry_ingest_source("Alpha/detected.pdf")
+    assert result["ok"] is True
+    assert result["state"] == "queued"
+    assert seen == [str(document.resolve())]
+
+
+def test_operator_can_resolve_known_ingest_issue(tmp_path, monkeypatch):
+    root = tmp_path / "Library"
+    document = root / "Alpha" / "problem.pdf"
+    document.parent.mkdir(parents=True)
+    document.write_bytes(b"%PDF-test")
+    ledger = tmp_path / "ingest_ledger.json"
+    ledger.write_text(
+        '{"files":{"row":{"source":"Alpha/problem.pdf","phase":"failed"}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(world, "resolve_rag_ingest_ledger", lambda: ledger)
+    monkeypatch.setattr(world, "resolve_rag_library_root", lambda: root)
+    import api.jarvis_rag_ingest_events as events
+
+    seen = []
+    monkeypatch.setattr(events, "resolve_ingest_source", lambda path: seen.append(path) or {"status": "resolved"})
+    result = world.disposition_ingest_source("Alpha/problem.pdf", "resolve")
+    assert result["ok"] is True
+    assert result["state"] == "resolved"
+    assert seen == [str(document.resolve())]
+
+
+def test_ingest_radar_exposes_clickable_disposition_for_detected_and_failed_rows():
+    assert "V6_WORLD_DISPOSITION_PATH" in BIGGY_JS
+    assert "data-argus-ingest-action" in BIGGY_JS
+    assert "Single-click for ingestion actions" in BIGGY_JS
+    assert "event.stopPropagation()" in BIGGY_JS
+    assert "button[data-argus-ingest-action]" in BIGGY_CSS
+    assert "RESOLVE" in BIGGY_JS
+    assert "RE-INGEST" in BIGGY_JS
+    assert "detected|failed|quarantined" in BIGGY_JS
+
+
 def test_rag_navigation_is_ledger_scoped_and_never_traverses(tmp_path, monkeypatch):
     root = tmp_path / "Library"
     document = root / "Vendor Data/Allen Bradley/manual.pdf"
@@ -359,7 +414,7 @@ def test_saved_travel_cards_are_not_replayed_into_clean_boot():
     assert "dlg.__biggySetCollapsed(true)" in boot_scan
     assert "setTimeout(scanMessagesForMapModel" not in BIGGY_JS
     assert "AUGMENTED RETRIEVAL &amp; GROUNDED UNDERSTANDING SYSTEM" in BIGGY_JS
-    assert "data-argus-ingest-issue" in BIGGY_JS
+    assert "data-argus-ingest-action" in BIGGY_JS
 
 
 def test_biggy_root_boot_does_not_restore_native_or_private_saved_session():

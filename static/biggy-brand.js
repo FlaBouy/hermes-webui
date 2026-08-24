@@ -13,12 +13,14 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260824-argus-orb-radar-2';
+  const BUILD_ID = '20260824-argus-audio-sync-2';
+  const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
   const V6_WORLD_PATH = '/api/biggy/v6/world';
   const V6_WORLD_STATUS_PATH = '/api/biggy/v6/world/status';
   const V6_WORLD_RETRY_PATH = '/api/biggy/v6/world/retry';
+  const V6_WORLD_DISPOSITION_PATH = '/api/biggy/v6/world/disposition';
   const ORB_STATES = Object.freeze([
     'offline', 'online', 'thinking', 'speaking', 'tool-running', 'error',
   ]);
@@ -1100,6 +1102,8 @@
     let lastProgressHydrationAt = 0;
     let routePending = false;
     let pttPollInFlight = false;
+    let speechMeterPollInFlight = false;
+    let speechMeterKnownGeneration = '';
 
     function applyAudioRouteStatus(status) {
       const active = String(status.active_route || 'room').toLowerCase();
@@ -1181,12 +1185,42 @@
       // authoritative speaking phase, not pedal connectivity.
       if (ours && phase === 'speaking') {
         setJarvisOrbState('speaking', 'Alistar voice active');
-        startArgusSpeechPulse(latestArgusSpokenText());
       } else if (argusSpeechPulseSignature) {
         stopArgusSpeechPulse();
         if (!jarvisOrbFlight) pollJarvisV6Health().catch(() => {});
       }
       applyAudioRouteStatus(status);
+    }
+
+    async function pollArgusSpeechMeter() {
+      if (speechMeterPollInFlight) return;
+      speechMeterPollInFlight = true;
+      try {
+        const suffix = speechMeterKnownGeneration
+          ? `?generation=${encodeURIComponent(speechMeterKnownGeneration)}`
+          : '';
+        const meter = await proxyJson(`/ptt/speech-meter${suffix}`);
+        if (meter && meter.active) {
+          const generation = String(meter.generation || '');
+          if (Array.isArray(meter.envelope) && meter.envelope.length) {
+            startArgusSpeechPulse(meter);
+            speechMeterKnownGeneration = generation;
+          }
+          setJarvisOrbState('speaking', 'Alistar voice active');
+        } else {
+          speechMeterKnownGeneration = '';
+          if (argusSpeechPulseSignature) {
+            stopArgusSpeechPulse();
+            if (!jarvisOrbFlight) pollJarvisV6Health().catch(() => {});
+          }
+        }
+      } catch (_) {
+        // A transient status miss must not jerk the orb out of a real utterance.
+        // The audio-duration guard in renderArgusSpeechFrame still guarantees
+        // cleanup if the sidecar disappears during playback.
+      } finally {
+        speechMeterPollInFlight = false;
+      }
     }
 
     async function syncActiveSession(fallbackSid) {
@@ -1335,7 +1369,11 @@
     }
 
     pollPttStatus();
+    pollArgusSpeechMeter();
     setInterval(() => { pollPttStatus().catch(() => {}); }, 1500);
+    // The speech meter is tiny and local. An 80 ms cadence removes the
+    // quarter-second visual discovery lag without coupling it to galaxy work.
+    setInterval(() => { pollArgusSpeechMeter().catch(() => {}); }, 80);
   }
 
   async function refreshIdentity() {
@@ -1472,15 +1510,40 @@
     }
   }
 
-  let argusSpeechPulseTimer = null;
+  let argusSpeechPulseFrame = null;
   let argusSpeechPulseSignature = '';
-  let argusSpeechPulseIndex = 0;
+  let argusSpeechPulseEnvelope = [];
+  let argusSpeechPulseStartedAt = 0;
+  let argusSpeechPulseSampleMs = 40;
+  let argusSpeechPulseGain = 1;
+  let argusSpeechPulseLeadMs = 80;
+
+  function loadArgusSpeechSyncSettings() {
+    try {
+      const saved = JSON.parse(localStorage.getItem(ARGUS_SYNC_STORAGE_KEY) || '{}');
+      const gain = Number(saved.gain);
+      const leadMs = Number(saved.lead_ms);
+      if (Number.isFinite(gain)) argusSpeechPulseGain = Math.max(.5, Math.min(2, gain));
+      if (Number.isFinite(leadMs)) argusSpeechPulseLeadMs = Math.max(-250, Math.min(300, leadMs));
+    } catch (_) {}
+  }
+
+  function saveArgusSpeechSyncSettings() {
+    try {
+      localStorage.setItem(ARGUS_SYNC_STORAGE_KEY, JSON.stringify({
+        gain: argusSpeechPulseGain,
+        lead_ms: argusSpeechPulseLeadMs,
+      }));
+    } catch (_) {}
+  }
 
   function stopArgusSpeechPulse() {
-    if (argusSpeechPulseTimer) clearTimeout(argusSpeechPulseTimer);
-    argusSpeechPulseTimer = null;
+    if (argusSpeechPulseFrame) cancelAnimationFrame(argusSpeechPulseFrame);
+    argusSpeechPulseFrame = null;
     argusSpeechPulseSignature = '';
-    argusSpeechPulseIndex = 0;
+    argusSpeechPulseEnvelope = [];
+    argusSpeechPulseStartedAt = 0;
+    argusSpeechPulseSampleMs = 40;
     const orb = document.getElementById('j-orb');
     if (orb) {
       orb.style.setProperty('--beat', '0');
@@ -1488,47 +1551,73 @@
     }
   }
 
-  function startArgusSpeechPulse(text) {
-    const spoken = String(text || '').trim();
-    const signature = spoken || 'argus-speaking';
-    if (argusSpeechPulseTimer && signature === argusSpeechPulseSignature) return;
-    stopArgusSpeechPulse();
-    argusSpeechPulseSignature = signature;
-    const words = spoken.match(/\S+/g) || ['speaking'];
-    const step = () => {
-      const orb = document.getElementById('j-orb');
-      if (!orb || !argusSpeechPulseSignature) return;
-      const word = words[argusSpeechPulseIndex % words.length];
-      const emphasis = /[.!?]$/.test(word) ? 1 : (/[,:;]$/.test(word) ? .78 : .58 + Math.min(.32, word.length / 28));
-      orb.style.setProperty('--beat', String(emphasis));
-      orb.style.setProperty('--orb-scale', String(1.018 + (emphasis * .072)));
-      setTimeout(() => {
-        if (argusSpeechPulseSignature) {
-          orb.style.setProperty('--beat', '.08');
-          orb.style.setProperty('--orb-scale', '1.006');
-        }
-      }, 105);
-      argusSpeechPulseIndex += 1;
-      const pause = /[.!?]$/.test(word) ? 430 : (/[,:;]$/.test(word) ? 300 : 185 + Math.min(130, word.length * 7));
-      argusSpeechPulseTimer = setTimeout(step, pause);
-    };
-    step();
+  function renderArgusSpeechFrame() {
+    const orb = document.getElementById('j-orb');
+    if (!orb || !argusSpeechPulseSignature) return;
+    const elapsed = Date.now() - argusSpeechPulseStartedAt + argusSpeechPulseLeadMs;
+    const index = Math.floor(Math.max(0, elapsed) / argusSpeechPulseSampleMs);
+    if (index >= argusSpeechPulseEnvelope.length) {
+      stopArgusSpeechPulse();
+      if (!jarvisOrbFlight) pollJarvisV6Health().catch(() => {});
+      return;
+    }
+    const measured = Number(argusSpeechPulseEnvelope[index] || 0);
+    const rawLevel = Math.max(0, Number.isFinite(measured) ? measured : 0);
+    const level = Math.max(0, Math.min(1, rawLevel * argusSpeechPulseGain));
+    // The real RMS envelope controls a restrained core glow and 0–2.8% scale.
+    // This reads as speech energy without turning the reactor into a bounce.
+    orb.style.setProperty('--beat', String(level * .82));
+    orb.style.setProperty('--orb-scale', String(1 + (level * .028)));
+    argusSpeechPulseFrame = requestAnimationFrame(renderArgusSpeechFrame);
   }
 
-  function latestArgusSpokenText() {
-    const sources = [
-      Array.isArray(completionMessages) ? completionMessages : [],
-      (typeof S !== 'undefined' && S && Array.isArray(S.messages)) ? S.messages : [],
-    ];
-    for (const messages of sources) {
-      for (let i = messages.length - 1; i >= 0; i--) {
-        const message = messages[i];
-        if (!message || message.role !== 'assistant') continue;
-        if (argusConversationIdentity(message).key !== 'argus') break;
-        return String(message.spoken_text || message.spoken_reply || '').trim();
-      }
-    }
-    return '';
+  function startArgusSpeechPulse(meter) {
+    const generation = String((meter && meter.generation) || '').trim();
+    const envelope = Array.isArray(meter && meter.envelope) ? meter.envelope : [];
+    if (!generation || !envelope.length) return;
+    if (argusSpeechPulseFrame && generation === argusSpeechPulseSignature) return;
+    stopArgusSpeechPulse();
+    argusSpeechPulseSignature = generation;
+    argusSpeechPulseEnvelope = envelope.map((value) => Number(value) || 0);
+    argusSpeechPulseStartedAt = Number(meter.started_at || 0) * 1000;
+    argusSpeechPulseSampleMs = Math.max(20, Math.min(200, Number(meter.sample_ms || 40)));
+    argusSpeechPulseFrame = requestAnimationFrame(renderArgusSpeechFrame);
+  }
+
+  function installArgusSpeechSyncTuner(dock) {
+    if (!dock || dock.dataset.syncTunerInstalled === '1') return;
+    dock.dataset.syncTunerInstalled = '1';
+    loadArgusSpeechSyncSettings();
+    const toggle = dock.querySelector('#argusSpeechSyncToggle');
+    const panel = dock.querySelector('#argusSpeechSyncPanel');
+    const gain = dock.querySelector('#argusSpeechSyncGain');
+    const lead = dock.querySelector('#argusSpeechSyncLead');
+    const gainOut = dock.querySelector('#argusSpeechSyncGainOut');
+    const leadOut = dock.querySelector('#argusSpeechSyncLeadOut');
+    if (!toggle || !panel || !gain || !lead || !gainOut || !leadOut) return;
+
+    const render = () => {
+      gain.value = String(argusSpeechPulseGain);
+      lead.value = String(argusSpeechPulseLeadMs);
+      gainOut.textContent = `${Math.round(argusSpeechPulseGain * 100)}%`;
+      leadOut.textContent = `${argusSpeechPulseLeadMs >= 0 ? '+' : ''}${Math.round(argusSpeechPulseLeadMs)} ms`;
+    };
+    render();
+    toggle.addEventListener('click', () => {
+      const open = panel.hidden;
+      panel.hidden = !open;
+      toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    gain.addEventListener('input', () => {
+      argusSpeechPulseGain = Math.max(.5, Math.min(2, Number(gain.value) || 1));
+      saveArgusSpeechSyncSettings();
+      render();
+    });
+    lead.addEventListener('input', () => {
+      argusSpeechPulseLeadMs = Math.max(-250, Math.min(300, Number(lead.value) || 0));
+      saveArgusSpeechSyncSettings();
+      render();
+    });
   }
 
   function formatReactorModel(model) {
@@ -2060,15 +2149,39 @@
     if (!dialog || !row) return;
     const source = String(row.source || '');
     const file = String(row.file || source || 'unknown file');
-    const reason = String(row.reason || row.phase || 'ingestion issue');
+    const phase = String(row.phase || row.state || 'ingestion issue');
+    const reason = String(row.reason || phase);
     dialog.dataset.source = source;
     dialog.hidden = false;
-    dialog.innerHTML = '<div class="biggy-argus-ingest-dialog-kicker">ARGUS // INGEST EXCEPTION</div>'
+    dialog.innerHTML = '<div class="biggy-argus-ingest-dialog-kicker">ARGUS // INGEST ACTION</div>'
       + `<strong>${esc(file)}</strong><small>${esc(source)}</small>`
       + `<p>${esc(reason)}</p><div class="biggy-argus-ingest-dialog-actions">`
       + '<button type="button" data-argus-ingest-disposition="keep">KEEP ON RADAR</button>'
+      + '<button type="button" data-argus-ingest-disposition="resolve">RESOLVE</button>'
       + '<button type="button" data-argus-ingest-disposition="retry">RE-INGEST</button></div>';
     dialog.querySelector('[data-argus-ingest-disposition="keep"]').addEventListener('click', closeArgusIngestDialog);
+    dialog.querySelector('[data-argus-ingest-disposition="resolve"]').addEventListener('click', async (event) => {
+      const button = event.currentTarget;
+      button.disabled = true;
+      button.textContent = 'RESOLVING…';
+      try {
+        const response = await fetch(V6_WORLD_DISPOSITION_PATH, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source, action: 'resolve' }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) throw new Error(payload.error || 'disposition unavailable');
+        dialog.innerHTML = '<div class="biggy-argus-ingest-dialog-kicker">ARGUS // ISSUE RESOLVED</div>'
+          + `<strong>${esc(file)}</strong><p>The operator disposition is recorded. The row will age out normally.</p>`
+          + '<div class="biggy-argus-ingest-dialog-actions"><button type="button" data-argus-ingest-disposition="keep">CLOSE</button></div>';
+        dialog.querySelector('[data-argus-ingest-disposition="keep"]').addEventListener('click', closeArgusIngestDialog);
+        pollRagWorldState().catch(() => {});
+      } catch (error) {
+        button.disabled = false;
+        button.textContent = 'RESOLVE';
+        dialog.querySelector('p').textContent = `Unable to resolve: ${String(error.message || error)}`;
+      }
+    });
     dialog.querySelector('[data-argus-ingest-disposition="retry"]').addEventListener('click', async (event) => {
       const button = event.currentTarget;
       button.disabled = true;
@@ -2128,13 +2241,16 @@
     const cards = (currentRow ? [currentRow] : []).concat(failures, completed).slice(0, 5);
     const radar = cards.length ? cards.map((row) => {
       const rowState = String(row && row.state || 'complete').toLowerCase();
+      const rowPhase = String(row && row.phase || '').toLowerCase();
       const file = String(row && row.file || row && row.source || 'unknown file');
       const detail = rowState === 'issue'
         ? String(row && (row.reason || row.phase) || 'issue')
-        : (rowState === 'ingesting' ? String(row && row.phase || 'ingesting') : 'indexed');
-      if (rowState === 'issue') {
+        : (rowState === 'ingesting' ? String(row && row.phase || 'ingesting')
+          : (rowPhase === 'resolved' ? 'resolved' : 'indexed'));
+      const actionable = rowState === 'issue' || /^(detected|failed|quarantined|quarantine|error)$/i.test(rowPhase);
+      if (actionable) {
         const encoded = encodeURIComponent(JSON.stringify({ file, source: String(row && row.source || ''), reason: String(row && row.reason || ''), phase: String(row && row.phase || '') }));
-        return `<li class="is-${esc(rowState)}"><button type="button" data-argus-ingest-issue="${encoded}" title="Review ingestion failure"><i>◆</i><b>${esc(file)}</b><small>${esc(detail)}</small></button></li>`;
+        return `<li class="is-${esc(rowState)}"><button type="button" data-argus-ingest-action="${encoded}" title="Single-click for ingestion actions"><i>◆</i><b>${esc(file)}</b><small>${esc(detail)} · ACTION</small></button></li>`;
       }
       return `<li class="is-${esc(rowState)}"><i>◆</i><b>${esc(file)}</b><small>${esc(detail)}</small></li>`;
     }).join('') : '<li class="is-empty"><small>NO RECENT LEDGER EVENTS</small></li>';
@@ -2150,9 +2266,16 @@
       + '</dl>'
       + '<div class="biggy-argus-rag-radar-label">INGEST RADAR // LAST 5</div>'
       + `<ol class="biggy-argus-rag-radar">${radar}</ol>`;
-    hud.querySelectorAll('[data-argus-ingest-issue]').forEach((button) => {
-      button.addEventListener('click', () => {
-        try { openArgusIngestDialog(JSON.parse(decodeURIComponent(button.dataset.argusIngestIssue))); } catch (_) {}
+    hud.querySelectorAll('[data-argus-ingest-action]').forEach((button) => {
+      button.addEventListener('pointerdown', (event) => event.stopPropagation());
+      button.addEventListener('dblclick', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      });
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        try { openArgusIngestDialog(JSON.parse(decodeURIComponent(button.dataset.argusIngestAction))); } catch (_) {}
       });
     });
   }
@@ -2348,7 +2471,13 @@
       `</g>` +
       `</svg>` +
       `</div>` +
-      `<div id="j-state" data-testid="biggy-jarvis-state"><span class="dot"></span><span id="j-state-txt">OFFLINE</span></div>`;
+      `<div id="j-state" data-testid="biggy-jarvis-state"><span class="dot"></span><span id="j-state-txt">OFFLINE</span></div>` +
+      `<div class="biggy-argus-sync-tuner">` +
+      `<button id="argusSpeechSyncToggle" type="button" aria-expanded="false" aria-controls="argusSpeechSyncPanel">SYNC</button>` +
+      `<div id="argusSpeechSyncPanel" class="biggy-argus-sync-panel" hidden>` +
+      `<label>GAIN <input id="argusSpeechSyncGain" type="range" min="0.5" max="2" step="0.05"><output id="argusSpeechSyncGainOut">100%</output></label>` +
+      `<label>LEAD <input id="argusSpeechSyncLead" type="range" min="-250" max="300" step="10"><output id="argusSpeechSyncLeadOut">+80 ms</output></label>` +
+      `</div></div>`;
     return dock;
   }
 
@@ -3266,6 +3395,7 @@
     const reactorDock = makeReactorDock();
     header.insertAdjacentElement('afterend', reactorDock);
     buildReactorHud();
+    installArgusSpeechSyncTuner(reactorDock);
     installPttBridge(header);
     moveCockpitControlsToRightRail(header);
     installJarvisV6Bridge(header);

@@ -26,7 +26,8 @@ FOCUS_FILES = ("1756-td005_-en-e.pdf", "1756-in619_-en-p.pdf")
 PROCESSING = {"detected", "queued", "extracting", "indexing"}
 ACTIONABLE_PHASES = {"failed", "quarantined"}
 INDEXED_PHASES = {"indexed", "indexed_via_sidecar", "duplicate"}
-HIDDEN_CARD_PHASES = PROCESSING | INDEXED_PHASES | {"idle", "running", "absent"}
+RESOLVED_PHASES = {"resolved"}
+HIDDEN_CARD_PHASES = PROCESSING | INDEXED_PHASES | RESOLVED_PHASES | {"idle", "running", "absent"}
 PUB_FILENAME_RE = re.compile(
     r"^1756[-_](td|um|in)0*(\d{1,4})[-_][^\s]+\.(?:pdf|docx?)$",
     re.IGNORECASE,
@@ -231,6 +232,9 @@ def record_file_event(
         entry["indexed_at"] = now
         if phase == "indexed":
             entry["reason"] = None
+    elif phase in RESOLVED_PHASES:
+        entry["resolved_at"] = now
+        entry["reason"] = None
     elif phase in {"failed", "quarantined"}:
         entry["failed_at"] = now
     if chunks is not None:
@@ -261,7 +265,7 @@ def record_file_event(
             clear_error=True,
             current_phase=phase,
         )
-    elif phase in INDEXED_PHASES:
+    elif phase in INDEXED_PHASES | RESOLVED_PHASES:
         write_library_status(
             status="idle",
             last_file=base,
@@ -486,3 +490,85 @@ def retry_quarantine(path: str) -> dict[str, Any]:
         _save(WATCH_STATE, state)
     record_file_event(target, "queued", reason=None)
     return {"path": real, "status": "queued", "queued": True}
+
+
+def requeue_ingest_source(path: str) -> dict[str, Any]:
+    """Requeue one explicit ledger-known detected/failed source.
+
+    Clearing the watch-state entry is what transfers ownership back to the
+    watcher.  Already-indexed content is never forced through a duplicate
+    pass, and quarantined rows retain their dedicated hash cleanup path.
+    """
+    real = os.path.realpath(path)
+    if not os.path.isfile(real):
+        raise ValueError("ingest source file is unavailable")
+    ledger = load_ledger()
+    row = (ledger.get("files") or {}).get(real)
+    if not isinstance(row, dict):
+        row = next(
+            (
+                item
+                for item in (ledger.get("files") or {}).values()
+                if isinstance(item, dict)
+                and os.path.realpath(str(item.get("path") or "")) == real
+            ),
+            None,
+        )
+    phase = str((row or {}).get("phase") or "").strip().lower()
+    if phase in {"quarantined", "quarantine"}:
+        return retry_quarantine(real)
+    if phase not in {"detected", "failed", "error", "queued"}:
+        raise ValueError("ingest record is not actionable")
+
+    meta = _load(WATCH_META, {})
+    if not isinstance(meta, dict):
+        meta = {}
+    digest = file_sha256(real)
+    indexed_path = str((meta.get("hashes") or {}).get(digest) or "") if digest else ""
+    if indexed_path and os.path.realpath(indexed_path) != real:
+        duplicate_of = _rel_from_path(indexed_path)
+        record_file_event(
+            real,
+            "duplicate",
+            reason=None,
+            sha256=digest,
+            reconciliation_reason=f"duplicate-content:{duplicate_of}",
+        )
+        return {
+            "path": real,
+            "status": "duplicate",
+            "queued": False,
+            "duplicate_of": duplicate_of,
+        }
+    if indexed_path and os.path.realpath(indexed_path) == real:
+        record_file_event(
+            real,
+            "indexed",
+            reason=None,
+            sha256=digest,
+            reconciliation_reason="retry-skipped-already-indexed",
+        )
+        return {"path": real, "status": "indexed", "queued": False}
+
+    state = _load(WATCH_STATE, {})
+    if not isinstance(state, dict):
+        state = {}
+    state.pop(real, None)
+    state.pop(path, None)
+    _save(WATCH_STATE, state)
+    record_file_event(real, "queued", reason=None)
+    return {"path": real, "status": "queued", "queued": True}
+
+
+def resolve_ingest_source(path: str) -> dict[str, Any]:
+    """Record an operator disposition without deleting or reindexing data."""
+    real = os.path.realpath(path)
+    if not os.path.isfile(real):
+        raise ValueError("ingest source file is unavailable")
+    record_file_event(
+        real,
+        "resolved",
+        reason=None,
+        reconciliation_reason="operator-resolved",
+    )
+    return {"path": real, "status": "resolved", "queued": False}

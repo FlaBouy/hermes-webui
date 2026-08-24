@@ -160,6 +160,29 @@ def test_retry_clears_bad_hash_before_claiming_queued(monkeypatch, tmp_path: Pat
     assert str(bad) not in json.loads(state_path.read_text())
 
 
+def test_requeue_reconciles_identical_content_instead_of_grinding_again(monkeypatch, tmp_path: Path):
+    meta_path, _state_path = _install_tmp(monkeypatch, tmp_path)
+    indexed = tmp_path / "Limit Amp Starter.pdf"
+    duplicate = tmp_path / "CR194 Limit Amp Starter.pdf"
+    indexed.write_bytes(b"%PDF-1.4 identical-content")
+    duplicate.write_bytes(b"%PDF-1.4 identical-content")
+    digest = ingest.file_sha256(str(indexed))
+    meta_path.write_text(
+        json.dumps({"quarantine": {}, "hashes": {digest: str(indexed)}, "bad_hashes": {}, "strikes": {}})
+    )
+    ingest.record_file_event(str(duplicate), "detected")
+
+    result = ingest.requeue_ingest_source(str(duplicate))
+
+    assert result["queued"] is False
+    assert result["status"] == "duplicate"
+    assert result["duplicate_of"] == indexed.name
+    entry = ingest.load_ledger()["files"][str(duplicate)]
+    assert entry["phase"] == "duplicate"
+    assert "duplicate-content" in entry["reconciliation_reason"]
+    assert ingest.build_queue() == []
+
+
 def test_four_level_picker_source_untouched():
     live = LIVE_EXT.read_text(encoding="utf-8")
     repo = REPO_EXT.read_text(encoding="utf-8")
@@ -176,8 +199,8 @@ def test_four_level_picker_source_untouched():
         assert "refreshSubfolders" in body
         assert "refreshLevel3" in body
         assert "refreshLevel4" in body
-        assert "subfolder.addEventListener('change',refreshLevel3)" in body
-        assert "level3.addEventListener('change',refreshLevel4)" in body
+        assert "subfolder.addEventListener('change',async()=>{await refreshLevel3()" in body
+        assert "level3.addEventListener('change',async()=>{await refreshLevel4()" in body
         assert "status.queue||status.focus" not in body
         assert "isActionableIngestCard" in body
         queue_fn = extract_function(src, "isActionableIngestCard")

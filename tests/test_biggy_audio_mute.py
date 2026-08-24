@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
+import subprocess
+
+from tests.js_source_extract import extract_function
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,3 +68,91 @@ def test_shared_speech_planes_fail_silent_while_muted():
     assert "if speech_cancelled.is_set() or _output_muted():" in pedal
     assert "output_muted_before_playback" in pedal
     assert "playback_stop.set()" in pedal
+
+
+def test_argus_orb_status_tracks_server_owned_alistar_playback():
+    rag = RAG_API.read_text(encoding="utf-8")
+    speaker = (Path.home() / "bin" / "speak_on_smedley.py").read_text(encoding="utf-8")
+    brand = (ROOT / "static" / "biggy-brand.js").read_text(encoding="utf-8")
+
+    assert "def get_public_ptt_status():" in rag
+    assert "get_argus_speech_meter(" in rag
+    assert 'p == "/ptt/speech-meter"' in rag
+    assert 'status["phase"] = "speaking"' in rag
+    assert 'status["ptt_instance"] = "biggy"' in rag
+    assert 'status["speech_owner"] = "argus"' in rag
+    assert 'self._json(200, get_public_ptt_status())' in rag
+    assert "build_argus_audio_envelope" in speaker
+    assert "on_playback_started" in speaker
+    assert "clear_argus_speech_telemetry" in speaker
+    assert "pollArgusSpeechMeter" in brand
+    assert "requestAnimationFrame(renderArgusSpeechFrame)" in brand
+    assert "setInterval(() => { pollArgusSpeechMeter().catch(() => {}); }, 80)" in brand
+    assert "argusSpeechSyncGain" in brand
+    assert "argusSpeechSyncLead" in brand
+    assert "ARGUS_SYNC_STORAGE_KEY" in brand
+    assert "status.speech_meter" not in brand
+    assert "word.length / 28" not in brand
+
+
+def test_argus_orb_renders_measured_audio_level_and_cleans_up():
+    source = (ROOT / "static" / "biggy-brand.js").read_text(encoding="utf-8")
+    functions = "\n".join(
+        extract_function(source, name)
+        for name in (
+            "stopArgusSpeechPulse",
+            "renderArgusSpeechFrame",
+            "startArgusSpeechPulse",
+        )
+    )
+    script = f"""
+const vm = require('vm');
+let now = 100000;
+const style = {{values: {{}}, setProperty(k, v) {{ this.values[k] = String(v); }}}};
+const orb = {{style}};
+let frames = [];
+const sandbox = {{
+  console,
+  Date: {{now: () => now}},
+  Number,
+  Math,
+  Array,
+  document: {{getElementById: (id) => id === 'j-orb' ? orb : null}},
+  requestAnimationFrame: (fn) => {{ frames.push(fn); return frames.length; }},
+  cancelAnimationFrame: () => {{}},
+  jarvisOrbFlight: true,
+  pollJarvisV6Health: () => Promise.resolve(),
+  argusSpeechPulseFrame: null,
+  argusSpeechPulseSignature: '',
+  argusSpeechPulseEnvelope: [],
+  argusSpeechPulseStartedAt: 0,
+  argusSpeechPulseSampleMs: 40,
+  argusSpeechPulseGain: 1.5,
+  argusSpeechPulseLeadMs: 40,
+}};
+vm.createContext(sandbox);
+vm.runInContext({json.dumps(functions)}, sandbox);
+vm.runInContext(`startArgusSpeechPulse({{
+  generation: 'speech-1', started_at: 100, sample_ms: 40,
+  envelope: [0, 0.5, 1.0]
+}})`, sandbox);
+now = 100000;
+frames.shift()();
+const during = {{...style.values}};
+now = 100200;
+frames.shift()();
+const after = {{...style.values}};
+process.stdout.write(JSON.stringify({{during, after}}));
+"""
+    completed = subprocess.run(
+        ["node", "-e", script],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    result = json.loads(completed.stdout)
+    assert float(result["during"]["--beat"]) == 0.615
+    assert float(result["during"]["--orb-scale"]) == 1.021
+    assert result["after"]["--beat"] == "0"
+    assert result["after"]["--orb-scale"] == "1"

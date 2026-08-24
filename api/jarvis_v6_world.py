@@ -880,15 +880,8 @@ def _ledger_sources() -> set[str]:
     }
 
 
-def retry_ingest_source(value: object) -> dict[str, str | bool]:
-    """Explicitly re-queue one ledger-known ingestion failure.
-
-    This is deliberately narrower than a general ingest endpoint: callers can
-    only name a canonical source already recorded in the local ledger, and the
-    resolved file must remain below the configured RAG library root.  The
-    browser never auto-calls this; it is the affirmative action behind an
-    operator's red-card dialog.
-    """
+def _ingest_action_target(value: object) -> tuple[str, Path, dict[str, Any]]:
+    """Resolve one ledger-known source inside the configured library root."""
     rel = _safe_rag_rel(value)
     if not rel or rel not in _ledger_sources():
         raise ValueError("unknown RAG ledger source")
@@ -909,23 +902,64 @@ def retry_ingest_source(value: object) -> dict[str, str | bool]:
     except (OSError, json.JSONDecodeError):
         payload = {}
     records = payload.get("files") if isinstance(payload, dict) else {}
-    row = next((item for item in (records.values() if isinstance(records, dict) else [])
-                if isinstance(item, dict) and _canonical_source(item.get("source") or item.get("path")) == rel), None)
-    phase = str((row or {}).get("phase") or "").lower()
-    if phase not in {"failed", "quarantined", "quarantine", "error"}:
-        raise ValueError("only failed ingestion records can be re-ingested")
+    row = next(
+        (
+            item
+            for item in (records.values() if isinstance(records, dict) else [])
+            if isinstance(item, dict)
+            and _canonical_source(item.get("source") or item.get("path")) == rel
+        ),
+        None,
+    )
+    if not isinstance(row, dict):
+        raise ValueError("unknown RAG ledger source")
+    return rel, target, row
 
-    from api.jarvis_rag_ingest_events import record_file_event, retry_quarantine
-    if phase in {"quarantined", "quarantine"}:
-        result = retry_quarantine(str(target))
-    else:
-        result = record_file_event(str(target), "queued", reason=None)
+
+def retry_ingest_source(value: object) -> dict[str, str | bool]:
+    """Explicitly re-queue one actionable ledger-known ingestion record.
+
+    This is deliberately narrower than a general ingest endpoint: callers can
+    only name a canonical source already recorded in the local ledger, and the
+    resolved file must remain below the configured RAG library root.  The
+    browser never auto-calls this; it is the affirmative action behind an
+    operator's red-card dialog.
+    """
+    rel, target, row = _ingest_action_target(value)
+    phase = str((row or {}).get("phase") or "").lower()
+    if phase not in {"detected", "queued", "failed", "quarantined", "quarantine", "error"}:
+        raise ValueError("ingestion record is not actionable")
+
+    from api.jarvis_rag_ingest_events import requeue_ingest_source
+
+    result = requeue_ingest_source(str(target))
     return {
         "ok": True,
         "source": rel,
         "file": target.name,
         "state": str(result.get("status") or result.get("phase") or "queued"),
         "queued": bool(result.get("queued", True)),
+    }
+
+
+def disposition_ingest_source(value: object, action: object) -> dict[str, str | bool]:
+    """Apply one non-destructive operator disposition to an ingest row."""
+    if str(action or "").strip().lower() != "resolve":
+        raise ValueError("unsupported ingestion disposition")
+    rel, target, row = _ingest_action_target(value)
+    phase = str(row.get("phase") or "").strip().lower()
+    if phase not in {"detected", "queued", "failed", "quarantined", "quarantine", "error"}:
+        raise ValueError("ingestion record is not actionable")
+
+    from api.jarvis_rag_ingest_events import resolve_ingest_source
+
+    result = resolve_ingest_source(str(target))
+    return {
+        "ok": True,
+        "source": rel,
+        "file": target.name,
+        "state": str(result.get("status") or "resolved"),
+        "queued": False,
     }
 
 

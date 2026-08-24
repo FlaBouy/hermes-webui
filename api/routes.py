@@ -14499,6 +14499,22 @@ def handle_post(handler, parsed) -> bool:
             logger.exception("ARGUS ingestion retry failed")
             return bad(handler, "ingestion retry failed", 500)
 
+    if parsed.path == "/api/biggy/v6/world/disposition":
+        try:
+            body = _read_json_request_body(handler)
+            from api.jarvis_v6_world import disposition_ingest_source
+
+            return j(
+                handler,
+                disposition_ingest_source(body.get("source"), body.get("action")),
+                status=200,
+            )
+        except ValueError as exc:
+            return bad(handler, _sanitize_error(exc), 400)
+        except Exception:
+            logger.exception("ARGUS ingestion disposition failed")
+            return bad(handler, "ingestion disposition failed", 500)
+
     if parsed.path == "/api/shutdown":
         return _handle_shutdown(handler)
 
