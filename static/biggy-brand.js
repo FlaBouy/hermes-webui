@@ -1904,9 +1904,14 @@
       }
     }
     if (!sessionTraceBaselineReady) {
-      // A saved answer is context, not a new retrieval. Seed its receipt
-      // silently so a clean boot never competes with the initial 3D layout.
-      lastSessionRagTraceKey = sessionRagTraceKey(newestEvidenceMessage);
+      // The Galaxy is an operational state display, not a transcript-only
+      // decoration.  Restore the latest concrete receipt after a reload so a
+      // prior travel card cannot remain mounted and an older trace cannot
+      // masquerade as the current RAG answer.
+      if (newestEvidenceMessage) {
+        hideTravelMap();
+        traceFromSessionMessage(newestEvidenceMessage);
+      }
       sessionTraceBaselineReady = true;
     } else if (newestEvidenceMessage) {
       // A concrete document receipt starts a new RAG visual state.  Collapse

@@ -273,8 +273,8 @@ def test_trace_waits_for_world_ready_and_does_not_replay_saved_receipt_on_boot()
     assert "pendingRagTrace = trace" in BIGGY_JS
     assert "data.type === 'biggy-rag-world-ready'" in BIGGY_JS
     assert "parent.postMessage({ type: 'biggy-rag-world-ready' }" in world._TRACE_RUNTIME
-    assert "lastSessionRagTraceKey = sessionRagTraceKey(newestEvidenceMessage)" in BIGGY_JS
-    assert "A saved answer is context, not a new retrieval" in BIGGY_JS
+    assert "Restore the latest concrete receipt after a reload" in BIGGY_JS
+    assert "hideTravelMap();" in BIGGY_JS
     assert "function clearRagTrace()" in BIGGY_JS
     assert "frame.removeAttribute('data-rag-trace')" in BIGGY_JS
     assert "biggy-rag-trace-cleared" in BIGGY_JS
