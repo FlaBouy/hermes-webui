@@ -1198,6 +1198,11 @@ _UI_META_RES = (
     re.compile(r"(?i)\b(?:card title|source pill|owner\s*ack)\b\s*:?"),
 )
 
+# Gateway and pedal answers may be much longer than a document-route result.
+# Keep display text intact, but bound the separate spoken envelope so one
+# ordinary response cannot monopolize the room audio channel.
+GATEWAY_SPOKEN_MAX_CHARS = 700
+
 
 def _strip_retrieval_payload(value: str) -> str:
     """Drop raw RAG/retrieve JSON blobs and leftover retrieval field chrome."""
@@ -1265,6 +1270,7 @@ def sanitize_for_spoken_output(text: object) -> str:
     value = re.sub(r"`[^`]+`", " ", value)
     value = re.sub(r"\*\*(.+?)\*\*", r"\1", value)
     value = re.sub(r"\*(.+?)\*", r"\1", value)
+    value = re.sub(r"[()]", " ", value)
     value = re.sub(r"<[^>]+>", " ", value)
     value = re.sub(
         r"[\U0001F300-\U0001F9FF\U0001FA00-\U0001FAFF\u2600-\u27BF\uFE0F\u200D📄]",
@@ -1276,9 +1282,54 @@ def sanitize_for_spoken_output(text: object) -> str:
     value = re.sub(r"\n+", ". ", value)
     value = re.sub(r"\s+", " ", value)
     value = re.sub(r"\s+([,.;:!?])", r"\1", value)
+    value = re.sub(r"[:;,]\s*\.", ".", value)
     value = re.sub(r"([.!?])\1+", r"\1", value)
     value = re.sub(r"\.\s*\.", ".", value)
     return value.strip(" \t.-")
+
+
+def spoken_text_for_gateway_reply(text: object) -> str:
+    """Create a compact, voice-safe envelope for ordinary Gateway/PTT replies.
+
+    This does not change the visible response.  A leading italic stage direction
+    is presentation-only and is omitted, while a closing operator question is
+    retained even when the body needs to be capped.
+    """
+    original = str(text or "").strip()
+    # Preserve a short, already-plain fast-route reply verbatim.  This keeps
+    # its natural terminal punctuation while the richer gateway/PTT replies
+    # below still receive the full voice-safe normalization.
+    if (
+        original
+        and "\n" not in original
+        and not re.search(r"[\[\]()`*]|https?://|\b\w+\.(?:pdf|docx?|xlsx?)\b", original, re.I)
+    ):
+        return original[:GATEWAY_SPOKEN_MAX_CHARS]
+    raw = re.sub(r"(?m)^\s*\*[^*\n]+\*\s*", " ", original)
+    spoken = sanitize_for_spoken_output(raw)
+    if len(spoken) <= GATEWAY_SPOKEN_MAX_CHARS:
+        return spoken
+    questions = re.findall(r"[^?]{1,260}\?", spoken)
+    closing = questions[-1].strip() if questions else ""
+    if closing:
+        room = max(0, GATEWAY_SPOKEN_MAX_CHARS - len(closing) - 2)
+        prefix = spoken[:room].rsplit(" ", 1)[0].rstrip(" ,.;:")
+        return f"{prefix}. {closing}".strip()
+    return spoken[:GATEWAY_SPOKEN_MAX_CHARS].rsplit(" ", 1)[0].rstrip(" ,.;:")
+
+
+def attach_spoken_text_to_last_assistant(messages: object) -> str:
+    """Attach the derived spoken envelope to the newest assistant turn."""
+    if not isinstance(messages, list):
+        return ""
+    for message in reversed(messages):
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        spoken = spoken_text_for_gateway_reply(message.get("content"))
+        if spoken:
+            message["spoken_text"] = spoken
+        return spoken
+    return ""
 
 
 def rag_retrieve_url() -> str:
