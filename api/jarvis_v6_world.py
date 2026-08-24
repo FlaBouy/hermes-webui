@@ -125,13 +125,16 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     const idleColor = link => {
       const a = nodeFor(link.source), b = nodeFor(link.target);
       return (a && b && (a.g === 'router' || b.g === 'router' || (a.g === 'folder' && b.g === 'folder')))
-        ? '#32978a' : '#276274';
+        ? '#54d9c2' : '#3f94ae';
     };
     const idleWidth = link => {
       const a = nodeFor(link.source), b = nodeFor(link.target);
-      return (a && b && (a.g === 'router' || b.g === 'router' || (a.g === 'folder' && b.g === 'folder'))) ? 0.95 : 0.5;
+      return (a && b && (a.g === 'router' || b.g === 'router' || (a.g === 'folder' && b.g === 'folder'))) ? 1.25 : 0.78;
     };
-    g.linkColor(idleColor).linkWidth(idleWidth).linkOpacity(0.74);
+    // Keep inactive corpus routes legible from the room; the active trace is
+    // still brighter and thicker, but the rest of the graph must not vanish.
+    g.linkColor(idleColor).linkWidth(idleWidth).linkOpacity(0.92);
+    if (typeof g.nodeOpacity === 'function') g.nodeOpacity(0.94);
     idleContrastInstalled = true;
     return true;
   }
@@ -278,7 +281,7 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
         if (!pulseScale) pulseScale = object.scale.clone();
         // Slow, restrained breathing pulse: the selected file remains easy to
         // spot without turning the 1,100-node scene into a flashing display.
-        const factor = 1.08 + 0.18 * (0.5 + 0.5 * Math.sin((now - begin) / 520));
+        const factor = 1.08 + 0.18 * (0.5 + 0.5 * Math.sin((now - begin) / 220));
         object.scale.set(pulseScale.x * factor, pulseScale.y * factor, pulseScale.z * factor);
       }
       pulseFrame = requestAnimationFrame(animate);

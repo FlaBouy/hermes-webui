@@ -261,6 +261,9 @@ def test_browser_trace_forwards_verified_page_metadata_only():
     assert "message.map_view_model" in BIGGY_JS
     assert "message.trip_plan_view_model" in BIGGY_JS
     assert "clearRagTrace();\n\n      let recInfo" in BIGGY_JS
+    assert "galaxyTraceCitation(message)" in BIGGY_JS
+    assert "message.retrieval_receipt" in BIGGY_JS
+    assert "must never resurrect travel cards" in BIGGY_JS
 
 
 def test_trace_waits_for_world_ready_and_does_not_replay_saved_receipt_on_boot():
@@ -281,6 +284,10 @@ def test_trace_waits_for_world_ready_and_does_not_replay_saved_receipt_on_boot()
     assert "controls.autoRotate = false" in world._TRACE_RUNTIME
     assert "liveControls.autoRotate = true" in world._TRACE_RUNTIME
     assert "activePages.clear();" in world._TRACE_RUNTIME
+    assert "g.nodeOpacity(0.94)" in world._TRACE_RUNTIME
+    assert "'#54d9c2'" in world._TRACE_RUNTIME
+    assert "'#3f94ae'" in world._TRACE_RUNTIME
+    assert "/ 220" in world._TRACE_RUNTIME
     assert "Keep the evidence path available for inspection" in world._TRACE_RUNTIME
 
 

@@ -23225,6 +23225,9 @@ def _handle_chat_start(handler, body, diag=None):
                                     else None,
                                     "_correlation_id": correlation_id,
                                     "_receipt": ask_jarvis.get("receipt"),
+                                    "retrieval_receipt": ask_jarvis.get("retrieval_receipt")
+                                    if isinstance(ask_jarvis.get("retrieval_receipt"), dict)
+                                    else None,
                                     "_response_channel": ask_jarvis.get("response_channel"),
                                     "_transport": ask_jarvis.get("transport"),
                                     "_correlation_timing": ask_jarvis.get("correlation_timing"),
@@ -24379,6 +24382,9 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
         else None,
         "_correlation_id": corr,
         "_receipt": ask_jarvis.get("receipt"),
+        "retrieval_receipt": ask_jarvis.get("retrieval_receipt")
+        if isinstance(ask_jarvis.get("retrieval_receipt"), dict)
+        else None,
         "_response_channel": ask_jarvis.get("response_channel"),
         "_transport": ask_jarvis.get("transport") or "api_chat_sync_ptt",
         "_correlation_timing": ask_jarvis.get("correlation_timing"),

@@ -376,11 +376,12 @@
     const mobile = isPhoneOrTabletClient();
     window.__biggyAudioSink = mobile ? 'local' : 'smedley';
     document.body.dataset.biggyAudioSink = window.__biggyAudioSink;
-    if (mobile) return; // phones/tablets keep local Biggy Voice / browser TTS
 
     // Desktop/remote GUIs: never play Biggy on the viewing machine.
     // Spoken output is Smedley room (soundbar/speakers) or headset via pedal TTS.
-    try {
+    // Tablets retain their local voice controls, but still install the Argus
+    // guard below so browser auto-read cannot replace Alistar with Austin.
+    if (!mobile) try {
       if (window.speechSynthesis && !window.__biggySpeechSynthPatched) {
         const synth = window.speechSynthesis;
         const origSpeak = synth.speak.bind(synth);
@@ -424,20 +425,14 @@
           if (jarvisMsg) {
             // Pending working bubble has no spoken_text; never invent/speak it.
             if (jarvisMsg.ask_jarvis_pending) return;
-            // Server already queued Alistar (and Austin ack) — no client duplicate.
-            if (jarvisMsg._tts_final_server_queued || jarvisMsg._tts_ack_server_queued) {
-              if (jarvisMsg._tts_final_server_queued) return;
-            }
-            const spoken = String(jarvisMsg.spoken_text || jarvisMsg.spoken_reply || '').trim();
-            if (spoken) {
-              // Final only: Alistar. Never speak Austin ack from client.
-              if (String(jarvisMsg.tts_voice_profile || '') === 'biggy_austin_ack') return;
-              const voiceId = jarvisMsg.tts_voice_id || 'rvugSNzdY0NcpG2PKe4B';
-              speakOnSmedley(spoken, { voice_id: voiceId });
-              return;
-            }
+            // A hard-bound final is always server-owned Alistar speech.  This
+            // includes tablets: auto-read otherwise uses the browser's Austin
+            // selection and can read the long display answer instead.
             return;
           }
+          // Preserve the tablet's normal local auto-read behavior for ordinary
+          // Biggy responses; only hard-bound Argus finals are server-owned.
+          if (mobile) return prior.apply(this, arguments);
           const rows = document.querySelectorAll('.msg-row[data-role="assistant"], .assistant-segment[data-raw-text]');
           const last = rows.length ? rows[rows.length - 1] : null;
           const raw = last && (last.dataset.rawText || last.textContent) || '';
@@ -463,7 +458,7 @@
     }
 
     const note = document.getElementById('biggyHeaderNote');
-    if (note && !note.textContent) {
+    if (!mobile && note && !note.textContent) {
       note.textContent = 'Audio → Smedley room/headset';
       setTimeout(() => {
         if (note.textContent === 'Audio → Smedley room/headset') note.textContent = '';
@@ -1690,10 +1685,7 @@
 
   function traceFromSessionMessage(message) {
     if (!isGalaxyTraceEligibleMessage(message)) return;
-    const evidence = message.rag_evidence && typeof message.rag_evidence === 'object'
-      ? message.rag_evidence : null;
-    const citations = evidence && Array.isArray(evidence.citations) ? evidence.citations : [];
-    const citation = citations.find((item) => item && typeof item === 'object' && item.source);
+    const citation = galaxyTraceCitation(message);
     if (!citation) return;
     const source = String(citation.source || '').trim();
     const pdfPage = Number(citation.pdf_page || citation.page_hint || 0);
@@ -1727,12 +1719,22 @@
     ].some((model) => model && typeof model === 'object');
   }
 
-  function sessionRagTraceKey(message) {
-    if (!isGalaxyTraceEligibleMessage(message)) return '';
-    const evidence = message.rag_evidence && typeof message.rag_evidence === 'object'
+  function galaxyTraceCitation(message) {
+    const evidence = message && message.rag_evidence && typeof message.rag_evidence === 'object'
       ? message.rag_evidence : null;
     const citations = evidence && Array.isArray(evidence.citations) ? evidence.citations : [];
     const citation = citations.find((item) => item && typeof item === 'object' && item.source);
+    if (citation) return citation;
+    // Deterministic document routing stores its concrete retrieval receipt
+    // separately from general PA evidence.  It is equally traceable and, most
+    // importantly, belongs to this exact session correlation.
+    const receipt = message && message.retrieval_receipt;
+    return receipt && typeof receipt === 'object' && receipt.source ? receipt : null;
+  }
+
+  function sessionRagTraceKey(message) {
+    if (!isGalaxyTraceEligibleMessage(message)) return '';
+    const citation = galaxyTraceCitation(message);
     if (!citation) return '';
     const source = String(citation.source || '').trim();
     const pdfPage = Number(citation.pdf_page || citation.page_hint || 0);
@@ -1890,6 +1892,10 @@
     }
     let newestEvidenceMessage = null;
     for (let i = visible.length - 1; i >= 0; i--) {
+      if (visible[i].role === 'assistant' && visible[i].ask_jarvis_pending) {
+        clearRagTrace();
+        break;
+      }
       if (sessionRagTraceKey(visible[i])) {
         newestEvidenceMessage = visible[i];
         break;
@@ -3026,7 +3032,9 @@
       const lvm = m.lodging_view_model;
       const avm = m.visual_action_view_model;
       const hasVisual = [mvm, rvm, tpm, lvm, avm].some((vm) => vm && typeof vm === 'object');
-      if (!hasVisual) continue;
+      // Only the latest completed assistant turn is eligible.  Do not walk
+      // back through history: a RAG result must never resurrect travel cards.
+      if (!hasVisual) return false;
 
       // A travel/action response owns the dock, never the corpus graph.  An
       // earlier document trace must be cleared before the new cards render.
