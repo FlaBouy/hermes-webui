@@ -25,6 +25,47 @@ def test_is_document_request_detects_pull_find_link_intents():
     )
 
 
+def test_is_document_request_detects_governing_site_document_question():
+    assert docroute.is_document_request(
+        "Ask Argus what the site-specific GP Bruton document is that covers "
+        "specifications for excavations and backfill.",
+        allow_ask_jarvis=True,
+    )
+    assert not docroute.is_document_request("What is voltage drop on a 480V feeder?")
+
+
+def test_1756_ia16_schematic_enriches_existing_manual_instead_of_returning_index(monkeypatch):
+    query = "Ask Argus to find me the schematic for a 1756 IA16 and show me the PDF."
+    monkeypatch.delenv(docroute.JARVIS_II_GENERIC_RAG_VNEXT_ENABLED_ENV, raising=False)
+    monkeypatch.setattr(
+        docroute,
+        "retrieve_documents",
+        lambda *_args, **_kwargs: {
+            "matches": [
+                {
+                    "source": docroute._AB_WIRING_INDEX_SOURCE,
+                    "score": 0.91,
+                    "snippet": "1756-IA16 lookup result",
+                },
+                {
+                    "source": docroute._AB_DIGITAL_IO_MANUAL_SOURCES[0],
+                    "score": 0.72,
+                    "snippet": "ControlLogix digital I/O modules",
+                },
+            ]
+        },
+    )
+    monkeypatch.setattr(docroute, "library_root", lambda: "/tmp")
+    monkeypatch.setattr(docroute.os.path, "isfile", lambda path: path.endswith("1756-um058_-en-p.pdf"))
+
+    result = docroute.try_document_route(query, allow_ask_jarvis=True, public_origin=ORIGIN)
+
+    assert result and result["handled"] is True
+    assert result["active_document"]["source"].endswith("1756-um058_-en-p.pdf")
+    assert result["active_document"]["part_number"] == "1756-IA16"
+    assert "lookup index, not" not in result["reply"]
+
+
 def test_hc900_edge_schematic_request_routes_to_the_hc900_manual(monkeypatch):
     query = "Hey Smedley, ask Jarvis to get me a schematic on a Honeywell Edge 900A16-0103 analog input module."
     assert docroute.is_document_request(query, allow_ask_jarvis=True)

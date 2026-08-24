@@ -118,6 +118,16 @@ _DOCUMENT_REQUEST_RES = (
         rf"\b(?:need|want)\b.{{0,100}}\b(?:{_DOC_NOUN}|wiring|schematics?|pinouts?)\b",
         re.IGNORECASE | re.DOTALL,
     ),
+    # “What is the site-specific document that covers excavation and
+    # backfill?” is a request to identify the governing source, not a generic
+    # engineering question.  Keep the document noun mandatory so ordinary
+    # “what is voltage drop” questions remain on chat.
+    re.compile(
+        rf"\b(?:what|which)\b.{{0,120}}\b{_DOC_NOUN}\b.{{0,120}}"
+        rf"\b(?:cover(?:s|ed|ing)?|contain(?:s|ed|ing)?|govern(?:s|ed|ing)?|"
+        rf"specif(?:y|ies|ied)|address(?:es|ed|ing)?)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
     re.compile(rf"\b{_LINK_ASK}\b.{{0,80}}\b{_DOC_NOUN}\b", re.IGNORECASE | re.DOTALL),
     re.compile(rf"\b{_LINK_ASK}\b.{{0,80}}{_DOCNUM.pattern}", re.IGNORECASE),
     re.compile(
@@ -1065,6 +1075,12 @@ def build_retrieval_receipt(matches: object, *, query: object = "") -> dict[str,
         "document_identity": ident or None,
         "revision": top.get("revision"),
         "page_hint": top.get("page_hint"),
+        # Keep both page identities in the internal receipt.  ``pdf_page`` is
+        # the browser-addressable page used by the galaxy file node; the
+        # printed page remains useful operator evidence when a manual's
+        # internal numbering differs from the PDF index.
+        "pdf_page": top.get("pdf_page") or top.get("page_hint"),
+        "printed_page": top.get("printed_page"),
         "index_href": top.get("index_href"),
         "index_formats": top.get("index_formats"),
         "source": top.get("source"),
@@ -3357,7 +3373,16 @@ def try_document_route(
     # session. Preserve the caller's raw origin here; legacy retrieval below
     # retains its existing normalized Smedley-public-origin behavior.
     vnext = try_jarvis_ii_generic_rag_vnext(msg, public_origin=public_origin)
-    if vnext is not None:
+    # Preserve VNext fail-closed behavior for unknown requests.  For a
+    # recognized catalog family, however, NO_VERIFIED_EVIDENCE can still be
+    # resolved by the same local library's curated authoritative manual map.
+    # That is a bounded hybrid fallback, not an LLM guess.
+    known_catalog_request = bool(_AB_PART.search(msg) or _HW_PART.search(msg) or _HC900_PART.search(msg))
+    if vnext is not None and not (
+        known_catalog_request
+        and not vnext.get("active_document")
+        and (vnext.get("error") or not vnext.get("matches"))
+    ):
         return vnext
     try:
         retrieval_query = project_spec_lookup_query(msg) if is_specification_number_request(msg) else msg
@@ -3384,14 +3409,33 @@ def try_document_route(
     # the authoritative digital I/O manual before semantic ranking.  The AB
     # workbook remains a lookup index for IFM pairing; it must not displace the
     # manual that contains the actual wiring diagram.
+    wants_wiring_document = bool(
+        re.search(r"\b(?:wiring|schematic|connection\s+diagram|pinout)\b", msg, re.I)
+    )
     for part in extract_query_part_numbers(msg):
         for seed in _seed_authoritative_manuals_for_part(part, query=msg):
             source = str(seed.get("source") or "").replace("\\", "/")
-            if source and not any(
-                str(item.get("source") or "").replace("\\", "/") == source
-                for item in matches
-                if isinstance(item, dict)
-            ):
+            existing = next(
+                (
+                    item for item in matches if isinstance(item, dict)
+                    and str(item.get("source") or "").replace("\\", "/") == source
+                ),
+                None,
+            )
+            if source and isinstance(existing, dict) and seed.get("page_hint"):
+                # Semantic retrieval often finds UM058 but omits the catalog
+                # identity needed by the family gate.  Enrich that same match
+                # with a verified catalog-to-page seed instead of suppressing
+                # it as a duplicate and accidentally promoting the XLSX index.
+                existing.update(seed)
+                matches.remove(existing)
+                matches.insert(0, existing)
+            elif source and isinstance(existing, dict):
+                # A family-level manual without a curated page is not enough
+                # to overrule an exact index hit; retain the previous
+                # fail-closed behavior for that case.
+                continue
+            elif source and (seed.get("page_hint") or not wants_wiring_document):
                 matches.insert(0, seed)
     if is_specification_number_request(msg):
         matches = prioritize_gp_brewton_spec_matches(matches, msg)

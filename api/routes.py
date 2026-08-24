@@ -12791,6 +12791,19 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/realtime/status":
         return _handle_realtime_voice_status(handler)
 
+    if parsed.path == "/api/biggy/fleet/status":
+        try:
+            from api.biggy_fleet import fleet_status
+
+            return j(handler, fleet_status(), status=200)
+        except Exception:
+            logger.exception("biggy fleet status failed")
+            return j(
+                handler,
+                {"schema": "biggy.fleet_status.v1", "machines": [], "error": "fleet status unavailable"},
+                status=500,
+            )
+
     if parsed.path in ("/api/biggy/v6/health", "/api/biggy/v6/status"):
         try:
             from api.jarvis_v6_bridge import JarvisBridge
@@ -23001,11 +23014,7 @@ def _handle_chat_start(handler, body, diag=None):
                 if is_ask_jarvis_command(msg) or _jarvis_followup_objective:
                     _jarvis_objective = _jarvis_followup_objective or msg
                     _jarvis_document_vnext = False
-                    if (
-                        _ask_jarvis_document_fast_path
-                        and not _jarvis_pa_core_enabled
-                        and not _jarvis_followup_objective
-                    ):
+                    if not _jarvis_followup_objective:
                         try:
                             from api.smedley_document_route import is_document_request
 

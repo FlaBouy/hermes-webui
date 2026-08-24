@@ -56,10 +56,16 @@
   let diagTimer = null;
   let ragWorldTimer = null;
   let conversationLaneTimer = null;
+  let conversationLaneRenderQueued = false;
   let completionMessages = [];
   let completionMessagesSessionId = '';
   let ragTraceObserverInstalled = false;
   let ragTraceStatusListenerInstalled = false;
+  let lastSessionRagTraceKey = '';
+  let sessionTraceBaselineReady = false;
+  let sessionTraceBaselineSessionId = '';
+  let ragWorldReady = false;
+  let pendingRagTrace = null;
   let started = false;
   let pttInstalled = false;
   let sessionEnsurePromise = null;
@@ -487,6 +493,137 @@
     if (composer.getAttribute('placeholder') !== PLACEHOLDER) {
       composer.setAttribute('placeholder', PLACEHOLDER);
     }
+  }
+
+  const FLEET_STATUS_PATH = '/api/biggy/fleet/status';
+  let fleetStatusTimer = 0;
+
+  function fleetButtonTitle(machine) {
+    const state = String(machine.state || 'offline').toUpperCase();
+    const worker = machine.worker_state ? ` · worker ${machine.worker_state}` : '';
+    const action = machine.kind === 'rdp' ? 'Open remote desktop'
+      : machine.kind === 'hermes' ? 'Open Smedley Hermes GUI'
+      : 'Open TrueNAS login';
+    return `${machine.id} · ${state}${worker} · ${action}`;
+  }
+
+  function launchFleetMachine(machine) {
+    if (!machine) return;
+    if (machine.kind === 'hermes') {
+      openSmedleyGui();
+      return;
+    }
+    const target = String(machine.launch_url || '');
+    if (!target) return;
+    if (machine.kind === 'web') {
+      window.open(target, 'biggy-plato-truenas', 'noopener,noreferrer');
+      return;
+    }
+    // Windows App registers the rdp: protocol on Smedley. Assigning the URL
+    // from a direct user click preserves browser gesture authority.
+    window.location.href = target;
+  }
+
+  function resetBiggyWorkspace() {
+    clearRagTrace();
+
+    const dlg = document.getElementById('biggyTravelMapDialog');
+    if (dlg) {
+      if (typeof dlg.__biggySetCollapsed === 'function') dlg.__biggySetCollapsed(true);
+      dlg.removeAttribute('data-rec-category');
+      dlg.removeAttribute('data-active-category');
+      dlg.classList.remove('has-lodging');
+      const cards = dlg.querySelector('#biggyTravelLodgingCards');
+      const rec = dlg.querySelector('#biggyTravelLodging');
+      const actions = dlg.querySelector('#biggyTravelMapActions');
+      const note = dlg.querySelector('#biggyTravelMapNote');
+      const empty = dlg.querySelector('#biggyTravelEmptyCat');
+      if (cards) cards.innerHTML = '';
+      if (rec) {
+        rec.hidden = true;
+        rec.removeAttribute('data-rec-category');
+        rec.setAttribute('data-has-cards', '0');
+      }
+      if (actions) {
+        actions.innerHTML = '';
+        actions.removeAttribute('data-action-category');
+      }
+      if (note) note.textContent = '';
+      if (empty) empty.hidden = true;
+      dlg.querySelectorAll('.biggy-category-rail-btn').forEach((button) => {
+        button.classList.remove('is-active');
+        button.setAttribute('aria-pressed', 'false');
+      });
+    }
+
+    Object.keys(recommendationModelsByCategory).forEach((key) => {
+      delete recommendationModelsByCategory[key];
+    });
+    lastMapModelKey = '';
+    if (mapInstance) {
+      try { mapInstance.remove(); } catch (_) {}
+      mapInstance = null;
+    }
+  }
+
+  function renderFleetStrip(strip, payload) {
+    if (!strip || !payload || !Array.isArray(payload.machines)) return;
+    const machines = payload.machines;
+    strip.innerHTML = '<span class="biggy-fleet-strip-label">FLEET</span>';
+    const home = el('button', 'biggy-fleet-machine biggy-fleet-home is-online');
+    home.type = 'button';
+    home.dataset.machine = 'HOME';
+    home.title = 'Reset galaxy and clear PA cards';
+    home.setAttribute('aria-label', home.title);
+    home.innerHTML = '<span class="biggy-fleet-state" aria-hidden="true"></span><span>HOME</span>';
+    home.addEventListener('click', (event) => {
+      event.preventDefault();
+      resetBiggyWorkspace();
+    });
+    strip.appendChild(home);
+    machines.forEach((machine) => {
+      const button = el('button', `biggy-fleet-machine is-${machine.state || 'offline'}`);
+      button.type = 'button';
+      button.dataset.machine = machine.id;
+      button.dataset.kind = machine.kind;
+      button.title = fleetButtonTitle(machine);
+      button.setAttribute('aria-label', button.title);
+      button.innerHTML = `<span class="biggy-fleet-state" aria-hidden="true"></span><span>${machine.label}</span>`;
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        launchFleetMachine(machine);
+      });
+      strip.appendChild(button);
+    });
+  }
+
+  async function refreshFleetStrip(strip) {
+    if (!strip || !strip.isConnected || document.hidden) return;
+    try {
+      const response = await fetch(FLEET_STATUS_PATH, { credentials: 'same-origin', cache: 'no-store' });
+      if (!response.ok) throw new Error(`fleet status ${response.status}`);
+      renderFleetStrip(strip, await response.json());
+    } catch (_) {
+      strip.querySelectorAll('.biggy-fleet-machine').forEach((button) => {
+        button.classList.remove('is-online', 'is-busy', 'is-error');
+        button.classList.add('is-offline');
+      });
+    }
+  }
+
+  function installFleetStrip() {
+    const composer = document.getElementById('composerWrap');
+    if (!composer) return null;
+    document.querySelectorAll('.biggy-fleet-strip').forEach((node) => node.remove());
+    const strip = el('nav', 'biggy-fleet-strip');
+    strip.id = 'biggyFleetStrip';
+    strip.setAttribute('aria-label', 'Fleet machine status and launch controls');
+    strip.setAttribute('data-testid', 'biggy-fleet-strip');
+    composer.appendChild(strip);
+    refreshFleetStrip(strip).catch(() => {});
+    if (fleetStatusTimer) window.clearInterval(fleetStatusTimer);
+    fleetStatusTimer = window.setInterval(() => refreshFleetStrip(strip).catch(() => {}), 15000);
+    return strip;
   }
 
   // Keep cockpit controls in the persistent right-hand cockpit rail, clear of
@@ -930,6 +1067,7 @@
     let progressHydrationPromise = null;
     let lastProgressHydrationAt = 0;
     let routePending = false;
+    let pttPollInFlight = false;
 
     function applyAudioRouteStatus(status) {
       const active = String(status.active_route || 'room').toLowerCase();
@@ -1095,6 +1233,12 @@
     }
 
     async function pollPttStatus() {
+      // A status tick can trigger session hydration while a turn is active.
+      // Never queue a second complete poll behind a slow tablet/network hop:
+      // stale concurrent polls were able to multiply work for the one active
+      // turn and starve the renderer after the first ask.
+      if (pttPollInFlight) return;
+      pttPollInFlight = true;
       try {
         const status = await proxyJson('/ptt/status');
         applyPttStatus(status);
@@ -1123,6 +1267,8 @@
         ptt.classList.add('down');
         routeBtn.classList.remove('ok', 'active');
         routeBtn.classList.add('down');
+      } finally {
+        pttPollInFlight = false;
       }
     }
 
@@ -1489,10 +1635,23 @@
 
   function postRagTrace(trace) {
     const frame = document.getElementById('biggyV6World');
+    if (!ragWorldReady) {
+      pendingRagTrace = trace;
+      return;
+    }
     try {
       if (frame && frame.contentWindow) {
         frame.contentWindow.postMessage({ type: 'biggy-rag-trace', trace }, window.location.origin);
       }
+    } catch (_) {}
+  }
+
+  function clearRagTrace() {
+    pendingRagTrace = null;
+    const frame = document.getElementById('biggyV6World');
+    if (!ragWorldReady || !frame || !frame.contentWindow) return;
+    try {
+      frame.contentWindow.postMessage({ type: 'biggy-rag-trace-clear' }, window.location.origin);
     } catch (_) {}
   }
 
@@ -1503,25 +1662,80 @@
     const active = payload.active_document && typeof payload.active_document === 'object'
       ? payload.active_document : null;
     const source = String((receipt && receipt.source) || (active && active.source) || '').trim();
+    const pdfPage = Number((receipt && (receipt.pdf_page || receipt.page_hint))
+      || (active && active.page_hint) || 0);
+    const printedPage = Number((receipt && receipt.printed_page) || 0);
     // A green route is earned only by a concrete retrieval receipt.  A red
     // segment needs a concrete file path as well; we never invent one for a
     // no-match answer because that would falsely accuse a document branch.
     if (receipt && source) {
-      postRagTrace({ state: payload.error ? 'failed' : 'complete', source });
+      postRagTrace({
+        state: payload.error ? 'failed' : 'complete',
+        source,
+        pdfPage: Number.isFinite(pdfPage) && pdfPage > 0 ? pdfPage : null,
+        printedPage: Number.isFinite(printedPage) && printedPage > 0 ? printedPage : null,
+      });
     } else if (payload.document_route && payload.error && source) {
-      postRagTrace({ state: 'failed', source });
+      postRagTrace({
+        state: 'failed', source,
+        pdfPage: Number.isFinite(pdfPage) && pdfPage > 0 ? pdfPage : null,
+        printedPage: Number.isFinite(printedPage) && printedPage > 0 ? printedPage : null,
+      });
     }
+  }
+
+  function traceFromSessionMessage(message) {
+    if (!message || message.role !== 'assistant' || message.ask_jarvis_pending) return;
+    const evidence = message.rag_evidence && typeof message.rag_evidence === 'object'
+      ? message.rag_evidence : null;
+    const citations = evidence && Array.isArray(evidence.citations) ? evidence.citations : [];
+    const citation = citations.find((item) => item && typeof item === 'object' && item.source);
+    if (!citation) return;
+    const source = String(citation.source || '').trim();
+    const pdfPage = Number(citation.pdf_page || citation.page_hint || 0);
+    const printedPage = Number(citation.printed_page || 0);
+    const key = [message._correlation_id || message.timestamp || '', source, pdfPage || ''].join('|');
+    if (!source || key === lastSessionRagTraceKey) return;
+    lastSessionRagTraceKey = key;
+    postRagTrace({
+      state: message.error ? 'failed' : 'complete',
+      source,
+      pdfPage: Number.isFinite(pdfPage) && pdfPage > 0 ? pdfPage : null,
+      printedPage: Number.isFinite(printedPage) && printedPage > 0 ? printedPage : null,
+    });
+  }
+
+  function sessionRagTraceKey(message) {
+    if (!message || message.role !== 'assistant' || message.ask_jarvis_pending) return '';
+    const evidence = message.rag_evidence && typeof message.rag_evidence === 'object'
+      ? message.rag_evidence : null;
+    const citations = evidence && Array.isArray(evidence.citations) ? evidence.citations : [];
+    const citation = citations.find((item) => item && typeof item === 'object' && item.source);
+    if (!citation) return '';
+    const source = String(citation.source || '').trim();
+    const pdfPage = Number(citation.pdf_page || citation.page_hint || 0);
+    return source
+      ? [message._correlation_id || message.timestamp || '', source, pdfPage || ''].join('|')
+      : '';
   }
 
   function installRagTraceObserver() {
     if (ragTraceObserverInstalled || typeof window.fetch !== 'function') return;
     ragTraceObserverInstalled = true;
     const nativeFetch = window.fetch.bind(window);
+    // Biggy's native `/api/chat/start` endpoint owns its streaming/session
+    // lifecycle.  Do not clone, parse, or otherwise observe it here: doing so
+    // puts visual tracing on the synchronous path of the primary composer.
+    // The V6 bridge response is a small JSON contract, which is the only
+    // response this observer is allowed to inspect.
+    const isTraceableRequest = (request) => request.includes(V6_CHAT_PATH);
     window.fetch = async (...args) => {
+      const request = String(args[0] && (args[0].url || args[0]) || '');
+      const traceable = isTraceableRequest(request);
+      if (traceable) clearRagTrace();
       const response = await nativeFetch(...args);
       try {
-        const request = String(args[0] && (args[0].url || args[0]) || '');
-        if (/\/api\/(?:chat|ask-jarvis|biggy\/v6\/chat)/.test(request)) {
+        if (traceable) {
           response.clone().json().then(traceFromRagPayload).catch(() => {});
         }
       } catch (_) {}
@@ -1532,9 +1746,22 @@
       window.addEventListener('message', (event) => {
         if (event.origin !== window.location.origin) return;
         const data = event.data || {};
-        if (data.type !== 'biggy-rag-trace-applied') return;
         const frame = document.getElementById('biggyV6World');
-        if (frame) frame.dataset.ragTrace = JSON.stringify(data.trace || {});
+        if (data.type === 'biggy-rag-world-ready') {
+          ragWorldReady = true;
+          if (pendingRagTrace && frame && frame.contentWindow) {
+            const trace = pendingRagTrace;
+            pendingRagTrace = null;
+            frame.contentWindow.postMessage(
+              { type: 'biggy-rag-trace', trace },
+              window.location.origin,
+            );
+          }
+          return;
+        }
+        if (data.type === 'biggy-rag-trace-applied' && frame) {
+          frame.dataset.ragTrace = JSON.stringify(data.trace || {});
+        }
       });
     }
   }
@@ -1617,7 +1844,6 @@
   function renderArgusConversationLane() {
     const lane = ensureArgusConversationLane();
     if (!lane) return;
-    syncArgusConversationLaneBoundary(lane);
     const activeSid = currentHermesSessionId();
     const source = (
       completionMessagesSessionId
@@ -1629,6 +1855,29 @@
     const visible = source.filter((message) => message
       && (message.role === 'user' || message.role === 'assistant')
       && !message.tool_only && !message._hidden);
+    // The PA path returns immediately and persists its verified RAG evidence
+    // later through the session stream. Feed that final authoritative citation
+    // into the same galaxy trace used by synchronous document responses.
+    if (sessionTraceBaselineSessionId !== activeSid) {
+      sessionTraceBaselineSessionId = activeSid;
+      sessionTraceBaselineReady = false;
+      lastSessionRagTraceKey = '';
+    }
+    let newestEvidenceMessage = null;
+    for (let i = visible.length - 1; i >= 0; i--) {
+      if (sessionRagTraceKey(visible[i])) {
+        newestEvidenceMessage = visible[i];
+        break;
+      }
+    }
+    if (!sessionTraceBaselineReady) {
+      // A saved answer is context, not a new retrieval. Seed its receipt
+      // silently so a clean boot never competes with the initial 3D layout.
+      lastSessionRagTraceKey = sessionRagTraceKey(newestEvidenceMessage);
+      sessionTraceBaselineReady = true;
+    } else if (newestEvidenceMessage) {
+      traceFromSessionMessage(newestEvidenceMessage);
+    }
     const turns = visible.slice(-8).flatMap((message, index) => {
       const identity = argusConversationIdentity(message);
       const pending = !!(message.ask_jarvis_pending || message._live);
@@ -1645,6 +1894,10 @@
     const signature = JSON.stringify(turns.map((turn) => [turn.identity.key, turn.pending, turn.text]));
     if (lane.dataset.signature === signature) return;
     lane.dataset.signature = signature;
+    // Measuring the composer forces a complete layout pass. Do it only when
+    // the visible transcript actually changed, never on the background
+    // heartbeat while the 3D canvas is rendering.
+    syncArgusConversationLaneBoundary(lane);
     lane.hidden = turns.length === 0;
     const body = lane.querySelector('.biggy-argus-conversation-turns');
     if (!body) return;
@@ -1660,7 +1913,17 @@
     syncArgusConversationLaneBoundary(lane, mainChat);
     renderArgusConversationLane();
     if (conversationLaneTimer) clearInterval(conversationLaneTimer);
-    conversationLaneTimer = setInterval(renderArgusConversationLane, 500);
+    // Hermes owns the live transcript. This is merely a low-frequency safety
+    // reconciliation for alternate clients/PTT, deliberately not a 500 ms
+    // render loop competing with the galaxy on a tablet.
+    conversationLaneTimer = setInterval(() => {
+      if (conversationLaneRenderQueued) return;
+      conversationLaneRenderQueued = true;
+      requestAnimationFrame(() => {
+        conversationLaneRenderQueued = false;
+        renderArgusConversationLane();
+      });
+    }, 2500);
   }
 
   function ensureArgusIngestDialog(mainChat) {
@@ -1816,6 +2079,8 @@
 
   function installBiggyV6World(mainChat) {
     if (!mainChat) return;
+    ragWorldReady = false;
+    pendingRagTrace = null;
     mainChat.querySelectorAll('.biggy-v6-world, .biggy-v6-world-fallback')
       .forEach((node) => node.remove());
 
@@ -1923,7 +2188,6 @@
       `<div class="biggy-brand-controls">` +
       `<button id="biggyPtt" type="button" data-testid="biggy-ptt" title="Foot-pedal PTT status">● PTT</button>` +
       `<button id="biggyAudioRoute" type="button" data-testid="biggy-audio-route" title="Toggle headset / room audio">ROOM</button>` +
-      `<button id="biggyOpenSmedley" type="button" data-testid="biggy-open-smedley" title="Open Smedley GUI (RAG + electrical tools)">SMEDLEY</button>` +
       `</div>` +
       `<div class="biggy-brand-status" aria-label="A.R.G.U.S. model">` +
       `<div id="j-brain"><span id="j-brain-chip" data-testid="biggy-jarvis-model">—</span></div>` +
@@ -2819,6 +3083,7 @@
     document.querySelectorAll('.biggy-brand-header').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-jarvis-transplant').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-composer-controls').forEach((node) => node.remove());
+    document.querySelectorAll('.biggy-fleet-strip').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-right-cockpit-controls').forEach((node) => node.remove());
     mainChat.querySelectorAll('.biggy-argus-rag-overview').forEach((node) => node.remove());
     mainChat.querySelectorAll('.biggy-argus-conversation-lane').forEach((node) => node.remove());
@@ -2832,7 +3097,6 @@
     header.insertAdjacentElement('afterend', reactorDock);
     buildReactorHud();
     installPttBridge(header);
-    installSmedleyButton(header);
     moveCockpitControlsToRightRail(header);
     installJarvisV6Bridge(header);
     installRagTraceObserver();
@@ -2842,6 +3106,7 @@
     installGreetingAck();
     installDocumentTitle();
     installComposerBranding();
+    installFleetStrip();
     forceChromeLabels();
     installJarvisResponseLabels();
     removeCaduceus();

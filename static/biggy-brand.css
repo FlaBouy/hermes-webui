@@ -73,12 +73,6 @@ body.biggy-brand > .app-titlebar{display:none!important}
 .biggy-brand-controls button.ok{border-color:#2f7d42;color:#55c96b;background:#0d1a10}
 .biggy-brand-controls button.active{border-color:#b0882e;color:#f0c14b;background:#1a1200}
 .biggy-brand-controls button.down{border-color:#8b3030;color:#f06b64;background:#1a0d0d}
-.biggy-brand-controls #biggyOpenSmedley{
-  border-color:#6e3b1e;color:#e6b800;background:#1a1208;
-}
-.biggy-brand-controls #biggyOpenSmedley:hover{
-  border-color:#e6b800;color:#f0c14b;background:#24180a;
-}
 .biggy-brand-header-note{
   position:absolute;left:0;top:calc(100% + 4px);
   font:700 8px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -122,6 +116,36 @@ body.biggy-brand > .app-titlebar{display:none!important}
 #mainChat.biggy-brand-iwo .composer-wrap{background:rgba(13,17,23,.82);padding-right:84px;pointer-events:auto}
 #mainChat.biggy-brand-iwo #profileChipWrap{display:none!important}
 .biggy-composer-controls{display:flex;align-items:center;gap:7px;flex:0 0 auto;margin-left:6px;pointer-events:auto}
+.biggy-fleet-strip{
+  position:absolute;left:50%;bottom:calc(100% + 8px);z-index:118;
+  transform:translateX(-50%);
+  display:flex;align-items:center;gap:5px;max-width:calc(100% - 24px);
+  padding:5px 7px;border:1px solid rgba(78,204,163,.25);border-radius:7px;
+  background:rgba(5,10,14,.90);backdrop-filter:blur(8px);
+  box-shadow:0 8px 24px rgba(0,0,0,.24);pointer-events:auto;
+}
+.biggy-fleet-strip-label{
+  color:#6f8794;font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+  letter-spacing:.14em;padding:0 4px 0 2px;
+}
+.biggy-fleet-machine{
+  appearance:none;display:inline-flex;align-items:center;gap:6px;min-height:25px;
+  padding:5px 8px;border:1px solid rgba(148,163,184,.24);border-radius:5px;
+  background:rgba(13,17,23,.78);color:#aab8c4;cursor:pointer;
+  font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+  letter-spacing:.06em;text-transform:uppercase;white-space:nowrap;
+}
+.biggy-fleet-machine:hover{color:#e2e8f0;border-color:rgba(148,163,184,.55);background:rgba(23,32,43,.92)}
+.biggy-fleet-state{width:7px;height:7px;border-radius:50%;background:#64748b;box-shadow:0 0 7px rgba(100,116,139,.55)}
+.biggy-fleet-machine.is-online .biggy-fleet-state{background:#34d399;box-shadow:0 0 8px rgba(52,211,153,.9)}
+.biggy-fleet-machine.is-busy .biggy-fleet-state{background:#f0b429;box-shadow:0 0 8px rgba(240,180,41,.9)}
+.biggy-fleet-machine.is-error .biggy-fleet-state,
+.biggy-fleet-machine.is-offline .biggy-fleet-state{background:#f06464;box-shadow:0 0 8px rgba(240,100,100,.8)}
+@media (max-width:900px){
+  .biggy-fleet-strip{gap:3px;padding:4px 5px}
+  .biggy-fleet-machine{padding:5px 6px;font-size:8px}
+  .biggy-fleet-strip-label{display:none}
+}
 
 /* Jarvis V6 3D graph/galaxy — occupies the full center canvas behind the
    conversation surface, replacing the static Iwo background image. Iframe

@@ -227,6 +227,56 @@ def test_renderer_copy_preserves_prompt_fixed_coordinates():
     assert "biggy-argus-rag-overview" in BIGGY_JS
 
 
+def test_receipt_driven_trace_walks_to_folder_frames_family_and_pulses_file():
+    runtime = world._TRACE_RUNTIME
+    assert "for (let i = 0; i < route.length - 1; i++)" in runtime
+    assert "frameDestination(resolved.folder)" in runtime
+    assert "destinationFamily(folderId)" in runtime
+    assert "ForceGraph3D.zoomToFit still walks the complete" in runtime
+    assert "g.cameraPosition({" in runtime
+    assert "startWinnerPulse(resolved.document, token)" in runtime
+    assert "The dormant galaxy already owns ambient particles" in runtime
+    assert "drawTraceOverlay(route, failed)" in runtime
+    assert "new THREE.CylinderGeometry" in runtime
+    assert "traceGroup.name = 'biggy-rag-trace'" in runtime
+    assert "window.__os = { Graph, data, THREE," in world._patch_index_html(
+        b"window.__os = { Graph, data,"
+    ).decode()
+    assert "Never call a ForceGraph link" in runtime
+    assert "accessor setter here" in runtime
+    assert "key === failed ? '#ef4444' : '#34d399'" in runtime
+    assert "activePages.set(resolved.rel" in runtime
+    assert "#page=${Math.floor(page)}" in runtime
+
+
+def test_browser_trace_forwards_verified_page_metadata_only():
+    assert "receipt.pdf_page || receipt.page_hint" in BIGGY_JS
+    assert "active && active.page_hint" in BIGGY_JS
+    assert "printedPage" in BIGGY_JS
+    assert "if (receipt && source)" in BIGGY_JS
+    assert "traceFromSessionMessage" in BIGGY_JS
+    assert "message.rag_evidence" in BIGGY_JS
+    assert "citation.pdf_page || citation.page_hint" in BIGGY_JS
+
+
+def test_trace_waits_for_world_ready_and_does_not_replay_saved_receipt_on_boot():
+    assert "if (!ragWorldReady)" in BIGGY_JS
+    assert "pendingRagTrace = trace" in BIGGY_JS
+    assert "data.type === 'biggy-rag-world-ready'" in BIGGY_JS
+    assert "parent.postMessage({ type: 'biggy-rag-world-ready' }" in world._TRACE_RUNTIME
+    assert "lastSessionRagTraceKey = sessionRagTraceKey(newestEvidenceMessage)" in BIGGY_JS
+    assert "A saved answer is context, not a new retrieval" in BIGGY_JS
+    assert "function clearRagTrace()" in BIGGY_JS
+    assert "clearRagTrace();" in BIGGY_JS
+    assert "resetLandingCamera();" in world._TRACE_RUNTIME
+    assert "controls.target.set(0, 0, 0)" in world._TRACE_RUNTIME
+    assert "const LANDING_CAMERA = Object.freeze({ x: 0, y: 0, z: 1120 })" in world._TRACE_RUNTIME
+    assert "controls.autoRotate = false" in world._TRACE_RUNTIME
+    assert "liveControls.autoRotate = true" in world._TRACE_RUNTIME
+    assert "activePages.clear();" in world._TRACE_RUNTIME
+    assert "Keep the evidence path available for inspection" in world._TRACE_RUNTIME
+
+
 def test_saved_travel_cards_are_not_replayed_into_clean_boot():
     start = BIGGY_JS.index("async function scanMessagesForMapModel()")
     end = BIGGY_JS.index("\n  function applyShell()", start)
@@ -259,7 +309,7 @@ def test_operational_cards_use_large_responsive_workspace():
 def test_right_rail_utility_labels_remain_canonical():
     assert "routeBtn.textContent = 'ROOM'" in BIGGY_JS
     assert '>● PTT</button>' in BIGGY_JS
-    assert '>SMEDLEY</button>' in BIGGY_JS
+    assert 'id="biggyOpenSmedley"' not in BIGGY_JS
 
 
 def test_argus_conversation_lane_mirrors_existing_message_state():

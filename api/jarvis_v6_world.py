@@ -76,10 +76,18 @@ _BASE_HREF = '<base href="/api/biggy/v6/world/">'
 _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
 (() => {
   'use strict';
-  let original = null;
-  let clearTimer = null;
+  let traceToken = 0;
+  let pulseFrame = 0;
+  let pulseNode = null;
+  let pulseScale = null;
+  let destinationTimer = null;
+  let traceGroup = null;
+  const activePages = new Map();
   let idleContrastInstalled = false;
   let landingZoomApplied = false;
+  let landingCameraPosition = null;
+  let landingResetTimer = null;
+  const LANDING_CAMERA = Object.freeze({ x: 0, y: 0, z: 1120 });
   const edge = (a, b) => `${Math.min(a,b)}:${Math.max(a,b)}`;
   const canonicalSource = value => String(value || '').replace(/\\/g, '/').replace(/^.*?\/Library\//, '').replace(/^\/+/, '');
   function graph() { return window.__os && window.__os.Graph; }
@@ -134,7 +142,11 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
   function nodeUrl(node) {
     const rel = nodePath(node);
     if (!rel) return '';
-    if (String(node.g) === 'document') return `/api/biggy/rag-file?path=${encodeURIComponent(rel)}`;
+    if (String(node.g) === 'document') {
+      const page = Number(activePages.get(rel) || 0);
+      const fragment = Number.isFinite(page) && page > 0 ? `#page=${Math.floor(page)}` : '';
+      return `/api/biggy/rag-file?path=${encodeURIComponent(rel)}${fragment}`;
+    }
     if (String(node.g) === 'folder') return `/api/biggy/rag-browse?path=${encodeURIComponent(rel)}`;
     return '';
   }
@@ -221,7 +233,7 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
   }
   function routeFor(source) {
     const rel = canonicalSource(source);
-    if (!rel) return [];
+    if (!rel) return { ids: [], rel: '', folder: undefined, document: undefined };
     const keys = ['prompt:argus'];
     const parts = rel.split('/').filter(Boolean);
     let cursor = '';
@@ -231,41 +243,191 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     }
     keys.push(`doc:${rel}`);
     const ids = mapNodes();
-    return keys.map(key => ids.get(key)).filter(id => id !== undefined);
+    const route = [];
+    for (const key of keys) {
+      const id = ids.get(key);
+      if (id === undefined) break;
+      route.push(id);
+    }
+    return {
+      ids: route,
+      rel,
+      folder: keys.length > 1 ? ids.get(keys[keys.length - 2]) : undefined,
+      document: ids.get(keys[keys.length - 1]),
+    };
+  }
+  function stopWinnerPulse() {
+    if (pulseFrame) cancelAnimationFrame(pulseFrame);
+    pulseFrame = 0;
+    if (pulseNode && pulseNode.__threeObj && pulseScale) {
+      pulseNode.__threeObj.scale.copy(pulseScale);
+    }
+    pulseNode = null;
+    pulseScale = null;
+  }
+  function startWinnerPulse(nodeId, token) {
+    stopWinnerPulse();
+    const winner = nodeFor(nodeId);
+    if (!winner) return;
+    pulseNode = winner;
+    const begin = performance.now();
+    const animate = now => {
+      if (token !== traceToken || !pulseNode) return stopWinnerPulse();
+      const object = pulseNode.__threeObj;
+      if (object && object.scale) {
+        if (!pulseScale) pulseScale = object.scale.clone();
+        // Slow, restrained breathing pulse: the selected file remains easy to
+        // spot without turning the 1,100-node scene into a flashing display.
+        const factor = 1.08 + 0.18 * (0.5 + 0.5 * Math.sin((now - begin) / 520));
+        object.scale.set(pulseScale.x * factor, pulseScale.y * factor, pulseScale.z * factor);
+      }
+      pulseFrame = requestAnimationFrame(animate);
+    };
+    pulseFrame = requestAnimationFrame(animate);
+  }
+  function destinationFamily(folderId) {
+    const data = window.__os && window.__os.data;
+    const folder = nodeFor(folderId);
+    const folderPath = nodePath(folder);
+    if (!folderPath) return new Set();
+    const ids = new Set([folderId]);
+    for (const node of (data && data.nodes) || []) {
+      if (String(node && node.g) !== 'document') continue;
+      const path = nodePath(node);
+      if (path && path.slice(0, path.lastIndexOf('/')) === folderPath) ids.add(node.id);
+    }
+    return ids;
+  }
+  function frameDestination(folderId) {
+    const g = graph();
+    const family = destinationFamily(folderId);
+    if (!g || !family.size) return;
+    // Frame the terminal folder and all of its file leaves after the route
+    // arrives. This is the visual handoff from directory navigation to the
+    // exact document choice. ForceGraph3D.zoomToFit still walks the complete
+    // Three.js scene before applying its filter; on the full RAG pool that can
+    // trip Chrome's watchdog. Compute the small destination-family bounds
+    // directly from graph coordinates instead.
+    const nodes = Array.from(family).map(nodeFor).filter(node => node
+      && Number.isFinite(node.x) && Number.isFinite(node.y) && Number.isFinite(node.z));
+    if (!nodes.length) return;
+    const center = nodes.reduce((sum, node) => ({
+      x: sum.x + node.x, y: sum.y + node.y, z: sum.z + node.z,
+    }), { x: 0, y: 0, z: 0 });
+    center.x /= nodes.length; center.y /= nodes.length; center.z /= nodes.length;
+    const radius = Math.max(42, ...nodes.map(node => Math.hypot(
+      node.x - center.x, node.y - center.y, node.z - center.z,
+    )));
+    const camera = g.cameraPosition();
+    const controls = g.controls && g.controls();
+    const target = controls && controls.target ? controls.target : { x: 0, y: 0, z: 0 };
+    let dx = Number(camera && camera.x) - Number(target.x || 0);
+    let dy = Number(camera && camera.y) - Number(target.y || 0);
+    let dz = Number(camera && camera.z) - Number(target.z || 0);
+    const length = Math.hypot(dx, dy, dz) || 1;
+    dx /= length; dy /= length; dz /= length;
+    const distance = Math.max(150, radius * 3.2);
+    g.cameraPosition({
+      x: center.x + dx * distance,
+      y: center.y + dy * distance,
+      z: center.z + dz * distance,
+    }, center, 1100);
+  }
+  function clearTraceOverlay() {
+    const g = graph();
+    if (!traceGroup) return;
+    if (g && typeof g.scene === 'function') g.scene().remove(traceGroup);
+    traceGroup.traverse(object => {
+      if (object.geometry && typeof object.geometry.dispose === 'function') object.geometry.dispose();
+      const materials = Array.isArray(object.material) ? object.material : (object.material ? [object.material] : []);
+      for (const material of materials) if (material && typeof material.dispose === 'function') material.dispose();
+    });
+    traceGroup = null;
+  }
+  function addTraceSegment(group, from, to, color) {
+    const THREE = window.__os && window.__os.THREE;
+    if (!THREE || !group || !from || !to) return false;
+    const start = new THREE.Vector3(from.x, from.y, from.z);
+    const end = new THREE.Vector3(to.x, to.y, to.z);
+    const direction = end.clone().sub(start);
+    const length = direction.length();
+    if (!Number.isFinite(length) || length <= 0) return false;
+    const place = (radius, opacity) => {
+      const geometry = new THREE.CylinderGeometry(radius, radius, length, 8, 1, true);
+      const material = new THREE.MeshBasicMaterial({
+        color, transparent: opacity < 1, opacity, depthWrite: opacity >= 1,
+      });
+      const mesh = new THREE.Mesh(geometry, material);
+      mesh.position.copy(start).add(end).multiplyScalar(0.5);
+      mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), direction.clone().normalize());
+      mesh.renderOrder = 90;
+      group.add(mesh);
+    };
+    place(2.15, 0.16);
+    place(0.72, 1);
+    return true;
+  }
+  function drawTraceOverlay(route, failed) {
+    clearTraceOverlay();
+    const g = graph();
+    const THREE = window.__os && window.__os.THREE;
+    if (!g || !THREE || !Array.isArray(route) || route.length < 2) return false;
+    traceGroup = new THREE.Group();
+    traceGroup.name = 'biggy-rag-trace';
+    for (let i = 0; i < route.length - 1; i++) {
+      const from = nodeFor(route[i]), to = nodeFor(route[i + 1]);
+      const key = edge(route[i], route[i + 1]);
+      addTraceSegment(traceGroup, from, to, key === failed ? '#ef4444' : '#34d399');
+    }
+    g.scene().add(traceGroup);
+    return true;
   }
   function restore() {
-    const g = graph();
-    if (!g || !original) return;
-    g.linkColor(original.color).linkWidth(original.width)
-      .linkDirectionalParticles(original.particles)
-      .linkDirectionalParticleColor(original.particleColor)
-      .linkDirectionalParticleWidth(original.particleWidth);
-    original = null;
+    traceToken += 1;
+    if (destinationTimer) clearTimeout(destinationTimer);
+    destinationTimer = null;
+    stopWinnerPulse();
+    clearTraceOverlay();
+    activePages.clear();
+    resetLandingCamera();
   }
   function apply(trace) {
     const g = graph();
     if (!g) { setTimeout(() => apply(trace), 180); return; }
     installIdleContrast();
-    const route = routeFor(trace && trace.source);
+    const resolved = routeFor(trace && trace.source);
+    const route = resolved.ids;
     if (route.length < 2) return;
-    if (!original) {
-      original = { color: g.linkColor(), width: g.linkWidth(), particles: g.linkDirectionalParticles(), particleColor: g.linkDirectionalParticleColor(), particleWidth: g.linkDirectionalParticleWidth() };
-    }
-    const active = new Set();
-    for (let i = 0; i < route.length - 1; i++) active.add(edge(route[i], route[i + 1]));
+    const token = ++traceToken;
+    const page = Number(trace && trace.pdfPage || 0);
+    if (resolved.rel && Number.isFinite(page) && page > 0) activePages.set(resolved.rel, Math.floor(page));
     const failed = trace && trace.state === 'failed' ? edge(route[route.length - 2], route[route.length - 1]) : '';
-    const paint = link => {
-      const key = edge(idOf(link.source), idOf(link.target));
-      if (key === failed) return '#ef4444';
-      if (active.has(key)) return '#34d399';
-      return 'rgba(32,55,64,.24)';
-    };
-    g.linkColor(paint).linkWidth(link => active.has(edge(idOf(link.source), idOf(link.target))) ? 2.6 : 0)
-      .linkDirectionalParticles(link => active.has(edge(idOf(link.source), idOf(link.target))) ? 5 : 0)
-      .linkDirectionalParticleColor(paint).linkDirectionalParticleWidth(2.2);
-    parent.postMessage({ type: 'biggy-rag-trace-applied', trace: { state: trace && trace.state || 'complete', source: trace && trace.source || '', segments: route.length - 1 } }, location.origin);
-    if (clearTimer) clearTimeout(clearTimer);
-    clearTimer = setTimeout(restore, trace && trace.state === 'failed' ? 18000 : 12000);
+    drawTraceOverlay(route, failed);
+    // The dormant galaxy already owns ambient particles. Query evidence is a
+    // separate solid path, so do not rebuild all 1,104 native link/particle
+    // objects here. Give the lightweight overlay one paint frame before moving
+    // the camera and pulsing the winning file. Never call a ForceGraph link
+    // accessor setter here: each setter rebuilds material state for the entire
+    // corpus and can crash Chrome's renderer during a response.
+    destinationTimer = setTimeout(() => {
+      if (token !== traceToken) return;
+      frameDestination(resolved.folder);
+      destinationTimer = setTimeout(() => {
+        if (token === traceToken && !failed && resolved.document !== undefined) {
+          startWinnerPulse(resolved.document, token);
+        }
+      }, 700);
+    }, 700);
+    parent.postMessage({ type: 'biggy-rag-trace-applied', trace: {
+      state: trace && trace.state || 'complete',
+      source: trace && trace.source || '',
+      pdfPage: Number.isFinite(page) && page > 0 ? Math.floor(page) : null,
+      printedPage: Number(trace && trace.printedPage || 0) || null,
+      segments: route.length - 1,
+    } }, location.origin);
+    // Keep the evidence path available for inspection and file-node clicks.
+    // The parent clears it when the next prompt begins (or explicitly asks
+    // for biggy-rag-trace-clear), then the next verified receipt replaces it.
   }
   addEventListener('message', event => {
     if (event.origin !== location.origin) return;
@@ -285,6 +447,35 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
       if (controls) controls.autoRotate = true;
     }
   });
+  const resetLandingCamera = () => {
+    const g = graph();
+    if (!g) return false;
+    const anchor = preparePromptAnchor();
+    if (!anchor) return false;
+    const controls = g.controls && g.controls();
+    if (controls && controls.target) {
+      // OrbitControls and an animated ForceGraph camera transition fight each
+      // other when auto-rotate is already running.  That race occasionally
+      // left HOME looking at empty space.  Settle one deterministic camera
+      // first, then restore dormant rotation.
+      controls.autoRotate = false;
+      controls.target.set(0, 0, 0);
+      controls.update();
+    }
+    if (typeof g.resumeAnimation === 'function') g.resumeAnimation();
+    landingCameraPosition = Object.assign({}, LANDING_CAMERA);
+    g.cameraPosition(Object.assign({}, landingCameraPosition), { x: 0, y: 0, z: 0 }, 0);
+    if (landingResetTimer) clearTimeout(landingResetTimer);
+    landingResetTimer = setTimeout(() => {
+      const liveControls = g.controls && g.controls();
+      if (liveControls && liveControls.target) {
+        liveControls.target.set(0, 0, 0);
+        liveControls.autoRotate = true;
+        liveControls.update();
+      }
+    }, 240);
+    return true;
+  };
   const applyLandingCamera = () => {
     const g = graph();
     if (!g || landingZoomApplied) return false;
@@ -304,11 +495,8 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     // The original V6 intro-fit is intentionally disabled for an embedded
     // corpus. Biggy owns one immediate, readable landing distance instead of
     // a second zoom several seconds after the page appears.
-    g.cameraPosition({
-      x: c.x * 0.38,
-      y: c.y * 0.38,
-      z: c.z * 0.38,
-    }, { x: 0, y: 0, z: 0 }, 900);
+    landingCameraPosition = Object.assign({}, LANDING_CAMERA);
+    g.cameraPosition(Object.assign({}, landingCameraPosition), { x: 0, y: 0, z: 0 }, 0);
     return true;
   };
   const waitForGraph = () => {
@@ -317,6 +505,7 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     requestAnimationFrame(() => {
       if (!applyLandingCamera()) { setTimeout(waitForGraph, 180); return; }
       window.__biggyRagTraceReady = true;
+      parent.postMessage({ type: 'biggy-rag-world-ready' }, location.origin);
     });
   };
   waitForGraph();
@@ -463,6 +652,11 @@ def _patch_index_html(data: bytes) -> bytes:
         "fx: n.fx, fy: n.fy, fz: n.fz })),",
         1,
     )
+    # Export the viewer's existing Three.js module instance through the same
+    # private seam as Graph/data. The trace runtime can then add a handful of
+    # lightweight route cylinders without traversing or rebuilding 1,104
+    # native link objects during a response.
+    text = text.replace("window.__os = { Graph, data,", "window.__os = { Graph, data, THREE,", 1)
     # Biggy embeds only the force graph.  Prevent the standalone V6 shell from
     # issuing requests for chrome that Biggy deliberately does not serve.  The
     # rejected promise follows V6's existing catch path, which hides its own
