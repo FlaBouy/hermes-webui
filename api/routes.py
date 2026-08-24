@@ -22955,6 +22955,10 @@ def _handle_chat_start(handler, body, diag=None):
                             "spoken_text": spoken,
                             "tts_voice_id": "rvugSNzdY0NcpG2PKe4B",
                             "tts_voice_profile": "argus_alistar",
+                            "active_document": s.active_document,
+                            "retrieval_receipt": jarvis_document.get("retrieval_receipt")
+                            if isinstance(jarvis_document.get("retrieval_receipt"), dict)
+                            else None,
                         },
                     ]
                 )
@@ -24763,6 +24767,9 @@ def _handle_chat_sync(handler, body):
              "document_route": True, "assistant_identity": "jarvis", "jarvis_response": True, "ask_jarvis_hard_bind": True,
              "spoken_reply": spoken, "spoken_text": spoken,
              "tts_voice_id": "rvugSNzdY0NcpG2PKe4B", "tts_voice_profile": "argus_alistar",
+             "active_document": s.active_document,
+             "retrieval_receipt": ask_document.get("retrieval_receipt")
+             if isinstance(ask_document.get("retrieval_receipt"), dict) else None,
              "smedley_document_sidecar": "governed_document_route"},
         ])
         s.pending_user_message = None

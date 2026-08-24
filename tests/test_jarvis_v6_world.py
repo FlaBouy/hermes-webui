@@ -263,7 +263,9 @@ def test_browser_trace_forwards_verified_page_metadata_only():
     assert "clearRagTrace();\n\n      let recInfo" in BIGGY_JS
     assert "galaxyTraceCitation(message)" in BIGGY_JS
     assert "message.retrieval_receipt" in BIGGY_JS
+    assert "message.active_document" in BIGGY_JS
     assert "must never resurrect travel cards" in BIGGY_JS
+    assert "hideTravelMap();" in BIGGY_JS
 
 
 def test_trace_waits_for_world_ready_and_does_not_replay_saved_receipt_on_boot():

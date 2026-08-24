@@ -1729,7 +1729,9 @@
     // separately from general PA evidence.  It is equally traceable and, most
     // importantly, belongs to this exact session correlation.
     const receipt = message && message.retrieval_receipt;
-    return receipt && typeof receipt === 'object' && receipt.source ? receipt : null;
+    if (receipt && typeof receipt === 'object' && receipt.source) return receipt;
+    const active = message && message.active_document;
+    return active && typeof active === 'object' && active.source ? active : null;
   }
 
   function sessionRagTraceKey(message) {
@@ -1907,6 +1909,9 @@
       lastSessionRagTraceKey = sessionRagTraceKey(newestEvidenceMessage);
       sessionTraceBaselineReady = true;
     } else if (newestEvidenceMessage) {
+      // A concrete document receipt starts a new RAG visual state.  Collapse
+      // any old travel map before its trace can frame the current directory.
+      hideTravelMap();
       traceFromSessionMessage(newestEvidenceMessage);
     }
     const turns = visible.slice(-8).flatMap((message, index) => {
