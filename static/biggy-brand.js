@@ -560,10 +560,10 @@
       delete recommendationModelsByCategory[key];
     });
     lastMapModelKey = '';
-    if (mapInstance) {
-      try { mapInstance.remove(); } catch (_) {}
-      mapInstance = null;
-    }
+    // Home must also resume the iframe if a route map was in the middle of
+    // initializing.  Removing Mapbox alone leaves the Galaxy's renderer in
+    // its paused state.
+    releaseTravelMap();
   }
 
   function renderFleetStrip(strip, payload) {
@@ -1649,6 +1649,10 @@
   function clearRagTrace() {
     pendingRagTrace = null;
     const frame = document.getElementById('biggyV6World');
+    // The receipt is display state, not durable session state.  Remove it
+    // immediately so Home cannot leave stale evidence attached to the frame
+    // while the iframe processes the clear request.
+    if (frame) frame.removeAttribute('data-rag-trace');
     if (!ragWorldReady || !frame || !frame.contentWindow) return;
     try {
       frame.contentWindow.postMessage({ type: 'biggy-rag-trace-clear' }, window.location.origin);
@@ -1685,7 +1689,7 @@
   }
 
   function traceFromSessionMessage(message) {
-    if (!message || message.role !== 'assistant' || message.ask_jarvis_pending) return;
+    if (!isGalaxyTraceEligibleMessage(message)) return;
     const evidence = message.rag_evidence && typeof message.rag_evidence === 'object'
       ? message.rag_evidence : null;
     const citations = evidence && Array.isArray(evidence.citations) ? evidence.citations : [];
@@ -1705,8 +1709,26 @@
     });
   }
 
+  function isGalaxyTraceEligibleMessage(message) {
+    if (!message || message.role !== 'assistant' || message.ask_jarvis_pending) return false;
+    const identity = String(message.assistant_identity || '').toLowerCase();
+    const isArgus = identity === 'argus' || identity === 'jarvis'
+      || message.ask_jarvis_hard_bind || message.jarvis_response || message.jarvis_v6;
+    if (!isArgus) return false;
+    // Travel and other action cards can legitimately carry agent evidence for
+    // their own response.  They are not corpus-navigation results, so they
+    // must never refocus or recolor the RAG galaxy.
+    return ![
+      message.map_view_model,
+      message.recommendation_view_model,
+      message.trip_plan_view_model,
+      message.lodging_view_model,
+      message.visual_action_view_model,
+    ].some((model) => model && typeof model === 'object');
+  }
+
   function sessionRagTraceKey(message) {
-    if (!message || message.role !== 'assistant' || message.ask_jarvis_pending) return '';
+    if (!isGalaxyTraceEligibleMessage(message)) return '';
     const evidence = message.rag_evidence && typeof message.rag_evidence === 'object'
       ? message.rag_evidence : null;
     const citations = evidence && Array.isArray(evidence.citations) ? evidence.citations : [];
@@ -1761,6 +1783,9 @@
         }
         if (data.type === 'biggy-rag-trace-applied' && frame) {
           frame.dataset.ragTrace = JSON.stringify(data.trace || {});
+        }
+        if (data.type === 'biggy-rag-trace-cleared' && frame) {
+          frame.removeAttribute('data-rag-trace');
         }
       });
     }
@@ -3002,6 +3027,10 @@
       const avm = m.visual_action_view_model;
       const hasVisual = [mvm, rvm, tpm, lvm, avm].some((vm) => vm && typeof vm === 'object');
       if (!hasVisual) continue;
+
+      // A travel/action response owns the dock, never the corpus graph.  An
+      // earlier document trace must be cleared before the new cards render.
+      clearRagTrace();
 
       let recInfo = { rendered: false, count: 0, category: null };
       let visualActionOk = false;

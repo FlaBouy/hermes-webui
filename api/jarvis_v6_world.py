@@ -433,7 +433,10 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     if (event.origin !== location.origin) return;
     const data = event.data || {};
     if (data.type === 'biggy-rag-trace') apply(data.trace || {});
-    if (data.type === 'biggy-rag-trace-clear') restore();
+    if (data.type === 'biggy-rag-trace-clear') {
+      restore();
+      parent.postMessage({ type: 'biggy-rag-trace-cleared' }, location.origin);
+    }
     if (data.type === 'biggy-world-pause') {
       const g = graph();
       const controls = g && g.controls && g.controls();

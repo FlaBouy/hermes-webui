@@ -257,6 +257,10 @@ def test_browser_trace_forwards_verified_page_metadata_only():
     assert "traceFromSessionMessage" in BIGGY_JS
     assert "message.rag_evidence" in BIGGY_JS
     assert "citation.pdf_page || citation.page_hint" in BIGGY_JS
+    assert "function isGalaxyTraceEligibleMessage(message)" in BIGGY_JS
+    assert "message.map_view_model" in BIGGY_JS
+    assert "message.trip_plan_view_model" in BIGGY_JS
+    assert "clearRagTrace();\n\n      let recInfo" in BIGGY_JS
 
 
 def test_trace_waits_for_world_ready_and_does_not_replay_saved_receipt_on_boot():
@@ -267,6 +271,9 @@ def test_trace_waits_for_world_ready_and_does_not_replay_saved_receipt_on_boot()
     assert "lastSessionRagTraceKey = sessionRagTraceKey(newestEvidenceMessage)" in BIGGY_JS
     assert "A saved answer is context, not a new retrieval" in BIGGY_JS
     assert "function clearRagTrace()" in BIGGY_JS
+    assert "frame.removeAttribute('data-rag-trace')" in BIGGY_JS
+    assert "biggy-rag-trace-cleared" in BIGGY_JS
+    assert "biggy-rag-trace-cleared" in world._TRACE_RUNTIME
     assert "clearRagTrace();" in BIGGY_JS
     assert "resetLandingCamera();" in world._TRACE_RUNTIME
     assert "controls.target.set(0, 0, 0)" in world._TRACE_RUNTIME
