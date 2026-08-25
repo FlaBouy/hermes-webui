@@ -299,6 +299,65 @@ def test_rag_navigation_is_ledger_scoped_and_never_traverses(tmp_path, monkeypat
     assert world.resolve_rag_document("../private.pdf") is None
 
 
+def test_rag_directory_tree_matches_the_bounded_world_projection(tmp_path, monkeypatch):
+    ledger = tmp_path / "ingest_ledger.json"
+    ledger.write_text(
+        '{"files":{'
+        '"a":{"source":"Vendor Data/Allen Bradley/1756/manual.pdf","updated_at":"2026-08-21T12:00:00Z"},'
+        '"b":{"source":"Electrical Resources/NFPA/code.pdf","updated_at":"2026-08-21T13:00:00Z"}'
+        '}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(world, "resolve_rag_ingest_ledger", lambda: ledger)
+    tree = world.rag_directory_tree()
+    assert tree["schema"] == "biggy.rag_tree.v1"
+    assert tree["root"]["path"] == ""
+    top = {child["path"]: child for child in tree["root"]["children"]}
+    assert set(top) == {"Electrical Resources", "Vendor Data"}
+    vendor = top["Vendor Data"]
+    allen = vendor["children"][0]
+    assert allen["path"] == "Vendor Data/Allen Bradley"
+    assert allen["children"][0]["path"] == "Vendor Data/Allen Bradley/1756"
+    assert allen["children"][0]["children"][0] == {
+        "name": "manual.pdf",
+        "path": "Vendor Data/Allen Bradley/1756/manual.pdf",
+        "kind": "document",
+    }
+
+
+def test_filter_rail_tree_and_iframe_subtree_contracts_are_present():
+    categories = BIGGY_JS.split("const TRAVEL_CATEGORIES = [", 1)[1].split("];", 1)[0]
+    assert categories.index("'Filter'") < categories.index("'Travel'")
+    assert "V6_WORLD_TREE_PATH" in BIGGY_JS
+    assert 'id="biggyGalaxyFilterState"' in BIGGY_JS
+    assert "refreshGalaxyFilterPanel(dlg)" in BIGGY_JS
+    assert "biggy-galaxy-filter-focus" in BIGGY_JS
+    assert "biggy-galaxy-filter-focused" in BIGGY_JS
+    assert "if (c === 'filter') return 'filter';" in BIGGY_JS
+    assert "biggy-galaxy-filter-toggle" in BIGGY_JS
+    assert "childGroup.hidden = !nextExpanded" in BIGGY_JS
+    assert "biggy-galaxy-filter-children[hidden]" in BIGGY_CSS
+    runtime = world._TRACE_RUNTIME
+    assert "function applyDirectoryFilter(path)" in runtime
+    assert "g.nodeVisibility(node =>" in runtime
+    assert "g.linkVisibility(link =>" in runtime
+    assert "nodePath(node).startsWith(`${rel}/`)" in runtime
+    assert "frameFilteredSubtree(selected, visible)" in runtime
+    assert "directoryFilterPath" in runtime
+    assert "if (directoryFilterPath && String(node && node.g) === 'folder')" in runtime
+    assert "if (directoryFilterPath && String(node && node.g) === 'document')" in runtime
+
+
+def test_home_restores_full_galaxy_after_directory_filter():
+    runtime = world._TRACE_RUNTIME
+    restore = runtime.split("function restore()", 1)[1].split("function apply(trace)", 1)[0]
+    assert "restoreDirectoryFilter();" in restore
+    assert "g.nodeVisibility(nativeNodeVisibility" in runtime
+    assert "g.linkVisibility(nativeLinkVisibility" in runtime
+    assert "resetLandingCamera();" in restore
+    assert "controls.target.set(0, 0, 0)" in runtime
+
+
 def test_world_csp_allows_same_origin_framing_and_esm_cdn():
     assert "frame-ancestors 'self'" in world.WORLD_CSP
     assert "https://esm.sh" in world.WORLD_CSP
@@ -545,6 +604,7 @@ def test_argus_browser_voice_fallback_is_alistar():
 
 def test_routes_wire_world_endpoint():
     assert "/api/biggy/v6/world" in ROUTES
+    assert "/api/biggy/v6/world/tree" in ROUTES
     assert "jarvis_v6_world" in ROUTES
     # Must not reuse the shared DENY/frame-ancestors-none security headers,
     # which would prevent the same-origin iframe from ever loading.

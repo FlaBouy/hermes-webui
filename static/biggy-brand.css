@@ -453,6 +453,7 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo > .biggy-category-ra
 #mainChat.biggy-brand-iwo .biggy-travel-map-note[hidden],
 #mainChat.biggy-brand-iwo .biggy-calendar-state[hidden],
 #mainChat.biggy-brand-iwo .biggy-weather-state[hidden],
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-state[hidden],
 #mainChat.biggy-brand-iwo .biggy-operator-state[hidden],
 #mainChat.biggy-brand-iwo .biggy-operator-panel[hidden],
 #mainChat.biggy-brand-iwo .biggy-travel-empty-cat[hidden]{display:none!important}
@@ -489,6 +490,44 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo > .biggy-category-ra
 #mainChat.biggy-brand-iwo .biggy-weather-status{margin-top:10px;color:#64748b;font:10px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace}
 #mainChat.biggy-brand-iwo .biggy-weather-status.is-loading{color:#7dd3fc}
 #mainChat.biggy-brand-iwo .biggy-weather-status.is-warning{color:#f4c579}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-state{
+  display:flex;flex:1 1 auto;min-height:0;flex-direction:column;padding:10px 8px 10px;color:#cbd5e1;
+}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-status{
+  flex:0 0 auto;margin:0 2px 9px;padding:8px 9px;border:1px solid rgba(52,211,153,.28);border-radius:5px;
+  background:rgba(3,13,19,.82);color:#6ee7b7;font:700 10px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
+  letter-spacing:.025em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-tree{
+  flex:1 1 auto;min-height:0;overflow:auto;padding:1px 2px 12px;scrollbar-color:rgba(103,232,249,.42) transparent;
+}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-entry{display:block;min-width:0}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-line{display:flex;align-items:center;min-width:0}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-children[hidden]{display:none!important}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-toggle,
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-toggle-spacer{
+  box-sizing:border-box;flex:0 0 22px;width:22px;height:29px;margin:0;padding:0;
+}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-toggle{
+  appearance:none;border:0;background:transparent;color:#67e8f9;cursor:pointer;
+  font:800 13px/29px ui-monospace,SFMono-Regular,Menlo,monospace;text-align:center;
+}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-toggle:hover{color:#ecfeff;background:rgba(30,58,78,.48)}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-toggle:focus-visible{outline:1px solid rgba(103,232,249,.72);outline-offset:-2px}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-row{
+  appearance:none;box-sizing:border-box;display:flex;align-items:center;gap:7px;flex:1 1 auto;min-width:0;min-height:29px;
+  margin:0;padding:5px 8px;border:0;border-left:2px solid transparent;
+  border-radius:3px;background:transparent;text-align:left;cursor:pointer;color:#9fb5c7;
+  font:650 10px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-row:hover{background:rgba(30,58,78,.52);color:#ecfeff}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-row.is-folder{color:#67e8f9}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-row.is-document{color:#c4b5fd}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-row.is-selected{
+  border-left-color:#34d399;background:rgba(6,78,59,.34);color:#6ee7b7;
+}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-marker{flex:0 0 10px;color:currentColor;text-align:center}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #mainChat.biggy-brand-iwo .biggy-operator-state{padding:12px 12px 14px;overflow:auto;max-height:min(57vh,560px)}
 #mainChat.biggy-brand-iwo .biggy-operator-panel-title{margin:1px 0 10px;color:#c4b5fd;font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase}
 #mainChat.biggy-brand-iwo .biggy-operator-message{margin:0;color:#94a3b8;font:13px/1.55 ui-sans-serif,system-ui,sans-serif}

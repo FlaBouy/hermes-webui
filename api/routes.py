@@ -12863,6 +12863,15 @@ def handle_get(handler, parsed) -> bool:
             logger.exception("jarvis v6 world status failed")
             return j(handler, {"ok": False, "state": "error"}, status=200)
 
+    if parsed.path == "/api/biggy/v6/world/tree":
+        try:
+            from api.jarvis_v6_world import rag_directory_tree
+
+            return j(handler, rag_directory_tree(), status=200)
+        except Exception:
+            logger.exception("jarvis v6 world directory tree failed")
+            return j(handler, {"schema": "biggy.rag_tree.v1", "error": "directory tree unavailable"}, status=500)
+
     if parsed.path == "/api/biggy/v6/world" or parsed.path.startswith("/api/biggy/v6/world/"):
         return _handle_biggy_v6_world_asset(handler, parsed)
 

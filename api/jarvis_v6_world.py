@@ -83,6 +83,11 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
   let destinationTimer = null;
   let traceGroup = null;
   const activePages = new Map();
+  let directoryFilterPath = '';
+  let directoryFilterIds = null;
+  let nativeNodeVisibility = null;
+  let nativeLinkVisibility = null;
+  let filterCameraTimer = null;
   let idleContrastInstalled = false;
   let landingZoomApplied = false;
   let landingCameraPosition = null;
@@ -205,6 +210,103 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     const url = nodeUrl(node);
     if (url) window.open(url, '_blank', 'noopener');
   }
+  function visibleThrough(accessor, value) {
+    try {
+      return (typeof accessor === 'function' ? accessor(value) : accessor) !== false;
+    } catch (_) {
+      return true;
+    }
+  }
+  function frameFilteredSubtree(selected, visible) {
+    const g = graph();
+    if (!g || !selected || !visible || !visible.size) return;
+    const nodes = Array.from(visible).map(nodeFor).filter(node => node
+      && Number.isFinite(node.x) && Number.isFinite(node.y) && Number.isFinite(node.z));
+    if (!nodes.length) return;
+    const center = { x: selected.x, y: selected.y, z: selected.z };
+    const radius = Math.max(50, ...nodes.map(node => Math.hypot(
+      node.x - center.x, node.y - center.y, node.z - center.z,
+    )));
+    const current = g.cameraPosition();
+    const controls = g.controls && g.controls();
+    const priorTarget = controls && controls.target ? controls.target : { x: 0, y: 0, z: 0 };
+    let dx = Number(current && current.x) - Number(priorTarget.x || 0);
+    let dy = Number(current && current.y) - Number(priorTarget.y || 0);
+    let dz = Number(current && current.z) - Number(priorTarget.z || 0);
+    const length = Math.hypot(dx, dy, dz) || 1;
+    dx /= length; dy /= length; dz /= length;
+    if (controls) controls.autoRotate = false;
+    const distance = Math.max(190, Math.min(1800, radius * 2.35));
+    g.cameraPosition({
+      x: center.x + dx * distance,
+      y: center.y + dy * distance,
+      z: center.z + dz * distance,
+    }, center, 850);
+    if (filterCameraTimer) clearTimeout(filterCameraTimer);
+    filterCameraTimer = setTimeout(() => {
+      const live = g.controls && g.controls();
+      if (live && live.target && directoryFilterPath) {
+        live.target.set(center.x, center.y, center.z);
+        live.autoRotate = true;
+        live.update();
+      }
+    }, 900);
+  }
+  function restoreDirectoryFilter() {
+    const g = graph();
+    if (filterCameraTimer) clearTimeout(filterCameraTimer);
+    filterCameraTimer = null;
+    if (!directoryFilterPath && !directoryFilterIds) return false;
+    directoryFilterPath = '';
+    directoryFilterIds = null;
+    if (g) {
+      if (nativeNodeVisibility !== null) g.nodeVisibility(nativeNodeVisibility);
+      if (nativeLinkVisibility !== null) g.linkVisibility(nativeLinkVisibility);
+      if (typeof g.refresh === 'function') g.refresh();
+    }
+    parent.postMessage({ type: 'biggy-galaxy-filter-restored' }, location.origin);
+    return true;
+  }
+  function applyDirectoryFilter(path) {
+    const g = graph();
+    const rel = canonicalSource(path).replace(/\/+$/, '');
+    const data = window.__os && window.__os.data;
+    if (!g || !rel || !data || !Array.isArray(data.nodes)) return false;
+    const selected = data.nodes.find(node => String(node && node.g) === 'folder' && nodePath(node) === rel);
+    if (!selected) return false;
+    traceToken += 1;
+    if (destinationTimer) clearTimeout(destinationTimer);
+    destinationTimer = null;
+    stopWinnerPulse();
+    clearTraceOverlay();
+    restoreBaseGalaxyVisibility();
+    if (nativeNodeVisibility === null) {
+      const current = g.nodeVisibility();
+      nativeNodeVisibility = current === undefined ? (() => true) : current;
+    }
+    if (nativeLinkVisibility === null) {
+      const current = g.linkVisibility();
+      nativeLinkVisibility = current === undefined ? (() => true) : current;
+    }
+    const visible = new Set();
+    for (const node of data.nodes) {
+      const candidate = nodePath(node);
+      if (candidate === rel || nodePath(node).startsWith(`${rel}/`)) visible.add(idOf(node));
+    }
+    directoryFilterPath = rel;
+    directoryFilterIds = visible;
+    g.nodeVisibility(node => visible.has(idOf(node)) && visibleThrough(nativeNodeVisibility, node));
+    g.linkVisibility(link => visible.has(idOf(link.source)) && visible.has(idOf(link.target))
+      && visibleThrough(nativeLinkVisibility, link));
+    if (typeof g.refresh === 'function') g.refresh();
+    frameFilteredSubtree(selected, visible);
+    parent.postMessage({
+      type: 'biggy-galaxy-filter-focused',
+      path: rel,
+      nodes: visible.size,
+    }, location.origin);
+    return true;
+  }
   function addNodeAction(node) {
     const url = nodeUrl(node), card = document.getElementById('j-nodecard');
     if (!url || !card || card.querySelector('[data-biggy-rag-open]')) return;
@@ -224,6 +326,14 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     if (typeof focus === 'function') {
       g.onNodeClick((node, event) => {
         const rel = nodePath(node);
+        if (directoryFilterPath && String(node && node.g) === 'folder') {
+          applyDirectoryFilter(rel);
+          return;
+        }
+        if (directoryFilterPath && String(node && node.g) === 'document') {
+          openNode(node);
+          return;
+        }
         // The verified winner is already the terminal focus of the retrieval.
         // Open it at the bound page on a normal click; do not invoke V6's
         // neighbourhood-focus routine, which would make the rest of the
@@ -449,12 +559,14 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     stopWinnerPulse();
     clearTraceOverlay();
     activePages.clear();
+    restoreDirectoryFilter();
     restoreBaseGalaxyVisibility();
     resetLandingCamera();
   }
   function apply(trace) {
     const g = graph();
     if (!g) { setTimeout(() => apply(trace), 180); return; }
+    restoreDirectoryFilter();
     installIdleContrast();
     restoreBaseGalaxyVisibility();
     const resolved = routeFor(trace && trace.source);
@@ -509,6 +621,7 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
       restore();
       parent.postMessage({ type: 'biggy-rag-trace-cleared' }, location.origin);
     }
+    if (data.type === 'biggy-galaxy-filter-focus') applyDirectoryFilter(data.path);
     if (data.type === 'biggy-argus-state') setArgusActivityState(data.state);
     if (data.type === 'biggy-world-pause') {
       const g = graph();
@@ -865,6 +978,83 @@ def rag_folder_entries(value: object) -> list[dict[str, str]] | None:
         child_rel = f"{rel}/{name}" if rel else name
         entries[name] = {"name": name, "path": child_rel, "kind": "folder" if separator else "document"}
     return [entries[name] for name in sorted(entries, key=str.casefold)]
+
+
+def rag_directory_tree() -> dict[str, Any]:
+    """Return the exact bounded folder/document hierarchy shown by the world.
+
+    The tree is derived from ``_build_rag_pool_graph`` rather than walking the
+    NAS.  The Filter panel therefore cannot advertise a node that is absent
+    from the current galaxy projection, and reading it never starts ingestion
+    or touches document contents.
+    """
+    root: dict[str, Any] = {
+        "name": "RAG Pool",
+        "path": "",
+        "kind": "folder",
+        "children": [],
+    }
+    ledger = resolve_rag_ingest_ledger()
+    if ledger is None:
+        return {"schema": "biggy.rag_tree.v1", "root": root, "node_count": 0}
+
+    graph = _build_rag_pool_graph(ledger)
+    directories: dict[str, dict[str, Any]] = {"": root}
+    for node in graph.get("nodes", []):
+        if not isinstance(node, dict) or node.get("g") != "folder":
+            continue
+        node_id = str(node.get("id") or "")
+        if not node_id.startswith("dir:"):
+            continue
+        path = node_id[4:]
+        parent_path = path.rsplit("/", 1)[0] if "/" in path else ""
+        parent = directories.get(parent_path)
+        if parent is None:
+            continue
+        item = {
+            "name": str(node.get("label") or Path(path).name),
+            "path": path,
+            "kind": "folder",
+            "children": [],
+        }
+        parent["children"].append(item)
+        directories[path] = item
+
+    for node in graph.get("nodes", []):
+        if not isinstance(node, dict) or node.get("g") != "document":
+            continue
+        node_id = str(node.get("id") or "")
+        if not node_id.startswith("doc:"):
+            continue
+        path = node_id[4:]
+        parent_path = path.rsplit("/", 1)[0] if "/" in path else ""
+        parent = directories.get(parent_path)
+        if parent is None:
+            continue
+        parent["children"].append({
+            "name": str(node.get("label") or Path(path).name),
+            "path": path,
+            "kind": "document",
+        })
+
+    def sort_children(branch: dict[str, Any]) -> None:
+        children = branch.get("children")
+        if not isinstance(children, list):
+            return
+        children.sort(key=lambda item: (
+            item.get("kind") != "folder",
+            str(item.get("name") or "").casefold(),
+        ))
+        for child in children:
+            if child.get("kind") == "folder":
+                sort_children(child)
+
+    sort_children(root)
+    return {
+        "schema": "biggy.rag_tree.v1",
+        "root": root,
+        "node_count": max(0, len(graph.get("nodes", [])) - 1),
+    }
 
 
 def resolve_rag_document(value: object) -> tuple[Path, Path, str, str] | None:

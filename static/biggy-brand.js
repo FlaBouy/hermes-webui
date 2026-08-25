@@ -13,11 +13,12 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260825-argus-activity-1';
+  const BUILD_ID = '20260825-galaxy-filter-2';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
   const V6_WORLD_PATH = '/api/biggy/v6/world';
+  const V6_WORLD_TREE_PATH = '/api/biggy/v6/world/tree';
   const V6_WORLD_STATUS_PATH = '/api/biggy/v6/world/status';
   const V6_WORLD_RETRY_PATH = '/api/biggy/v6/world/retry';
   const V6_WORLD_DISPOSITION_PATH = '/api/biggy/v6/world/disposition';
@@ -560,6 +561,7 @@
 
   function resetBiggyWorkspace() {
     clearRagTrace();
+    markGalaxyFilterSelection('', 0);
 
     const dlg = document.getElementById('biggyTravelMapDialog');
     if (dlg) {
@@ -2004,6 +2006,12 @@
         if (data.type === 'biggy-rag-trace-cleared' && frame) {
           frame.removeAttribute('data-rag-trace');
         }
+        if (data.type === 'biggy-galaxy-filter-focused') {
+          markGalaxyFilterSelection(String(data.path || ''), Number(data.nodes || 0));
+        }
+        if (data.type === 'biggy-galaxy-filter-restored') {
+          markGalaxyFilterSelection('', 0);
+        }
       });
     }
   }
@@ -2580,6 +2588,7 @@
   }
 
   const TRAVEL_CATEGORIES = [
+    'Filter',
     'Travel',
     'Calendar',
     'Mail',
@@ -2750,8 +2759,174 @@
     return String(label || '').trim().toLowerCase();
   }
 
+  let galaxyFilterTreePromise = null;
+  let galaxyFilterSelectedPath = '';
+  let galaxyFilterSelectedCount = 0;
+
+  function galaxyWorldFrame() {
+    return document.getElementById('biggyV6World');
+  }
+
+  function postGalaxyFilterFocus(path) {
+    const frame = galaxyWorldFrame();
+    if (!ragWorldReady || !frame || !frame.contentWindow) return false;
+    frame.contentWindow.postMessage({
+      type: 'biggy-galaxy-filter-focus',
+      path: String(path || ''),
+    }, window.location.origin);
+    return true;
+  }
+
+  function openGalaxyFilterDocument(path) {
+    const rel = String(path || '').trim();
+    if (!rel) return;
+    window.open(`/api/biggy/rag-file?path=${encodeURIComponent(rel)}`, '_blank', 'noopener');
+  }
+
+  function markGalaxyFilterSelection(path, nodeCount) {
+    galaxyFilterSelectedPath = String(path || '');
+    galaxyFilterSelectedCount = galaxyFilterSelectedPath ? Math.max(0, Number(nodeCount || 0)) : 0;
+    const dlg = document.getElementById('biggyTravelMapDialog');
+    if (!dlg) return;
+    const stateEl = dlg.querySelector('#biggyGalaxyFilterStatus');
+    if (stateEl) {
+      stateEl.textContent = galaxyFilterSelectedPath
+        ? `${galaxyFilterSelectedPath} · ${galaxyFilterSelectedCount} nodes`
+        : 'Full galaxy · centered on BIGGY PROMPT';
+    }
+    dlg.querySelectorAll('[data-biggy-filter-path]').forEach((button) => {
+      button.classList.toggle(
+        'is-selected',
+        button.getAttribute('data-biggy-filter-path') === galaxyFilterSelectedPath,
+      );
+    });
+  }
+
+  function appendGalaxyFilterRows(container, branch, depth = 0) {
+    const children = branch && Array.isArray(branch.children) ? branch.children : [];
+    children.forEach((item) => {
+      const path = String(item && item.path || '');
+      const kind = String(item && item.kind || 'folder');
+      const entry = document.createElement('div');
+      entry.className = `biggy-galaxy-filter-entry is-${kind}`;
+      entry.setAttribute('role', 'treeitem');
+      entry.setAttribute('aria-level', String(depth + 1));
+      const line = document.createElement('div');
+      line.className = 'biggy-galaxy-filter-line';
+      line.style.paddingLeft = `${depth * 14}px`;
+      let childGroup = null;
+      if (kind === 'folder') {
+        const expanded = depth === 0 || !!(
+          galaxyFilterSelectedPath &&
+          (galaxyFilterSelectedPath === path || galaxyFilterSelectedPath.startsWith(`${path}/`))
+        );
+        const toggle = document.createElement('button');
+        toggle.type = 'button';
+        toggle.className = 'biggy-galaxy-filter-toggle';
+        toggle.setAttribute('aria-label', `${expanded ? 'Collapse' : 'Expand'} ${path}`);
+        toggle.setAttribute('aria-expanded', String(expanded));
+        toggle.textContent = expanded ? '▾' : '▸';
+        childGroup = document.createElement('div');
+        childGroup.className = 'biggy-galaxy-filter-children';
+        childGroup.setAttribute('role', 'group');
+        childGroup.hidden = !expanded;
+        toggle.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const nextExpanded = childGroup.hidden;
+          childGroup.hidden = !nextExpanded;
+          toggle.setAttribute('aria-expanded', String(nextExpanded));
+          toggle.setAttribute('aria-label', `${nextExpanded ? 'Collapse' : 'Expand'} ${path}`);
+          toggle.textContent = nextExpanded ? '▾' : '▸';
+        });
+        line.appendChild(toggle);
+      } else {
+        const spacer = document.createElement('span');
+        spacer.className = 'biggy-galaxy-filter-toggle-spacer';
+        spacer.setAttribute('aria-hidden', 'true');
+        line.appendChild(spacer);
+      }
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = `biggy-galaxy-filter-row is-${kind}`;
+      button.setAttribute('data-biggy-filter-path', path);
+      button.setAttribute('data-biggy-filter-kind', kind);
+      button.title = kind === 'folder' ? `Focus galaxy on ${path}` : `Open ${path}`;
+      const marker = document.createElement('span');
+      marker.className = 'biggy-galaxy-filter-marker';
+      marker.textContent = kind === 'folder' ? '◆' : '·';
+      const label = document.createElement('span');
+      label.className = 'biggy-galaxy-filter-label';
+      label.textContent = String(item && item.name || path);
+      button.append(marker, label);
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (kind === 'document') {
+          openGalaxyFilterDocument(path);
+          return;
+        }
+        if (!postGalaxyFilterFocus(path)) {
+          const status = document.getElementById('biggyGalaxyFilterStatus');
+          if (status) status.textContent = 'Galaxy is still starting. Try the folder again in a moment.';
+        }
+      });
+      line.appendChild(button);
+      entry.appendChild(line);
+      if (kind === 'folder' && childGroup) {
+        appendGalaxyFilterRows(childGroup, item, depth + 1);
+        entry.appendChild(childGroup);
+      }
+      container.appendChild(entry);
+    });
+  }
+
+  function renderGalaxyFilterPanel(dlg, payload) {
+    const tree = dlg && dlg.querySelector('#biggyGalaxyFilterTree');
+    const status = dlg && dlg.querySelector('#biggyGalaxyFilterStatus');
+    if (!tree || !status) return;
+    tree.replaceChildren();
+    const root = payload && payload.root;
+    if (!root || !Array.isArray(root.children)) {
+      status.textContent = 'Directory tree unavailable.';
+      return;
+    }
+    appendGalaxyFilterRows(tree, root, 0);
+    status.textContent = galaxyFilterSelectedPath
+      ? galaxyFilterSelectedPath
+      : `Full galaxy · ${Number(payload.node_count || 0).toLocaleString()} browsable nodes`;
+    markGalaxyFilterSelection(galaxyFilterSelectedPath, galaxyFilterSelectedCount);
+  }
+
+  async function refreshGalaxyFilterPanel(dlg) {
+    const status = dlg && dlg.querySelector('#biggyGalaxyFilterStatus');
+    if (status) status.textContent = 'Loading bounded RAG directory tree…';
+    if (!galaxyFilterTreePromise) {
+      galaxyFilterTreePromise = fetch(V6_WORLD_TREE_PATH, {
+        credentials: 'same-origin',
+        cache: 'no-store',
+        headers: { Accept: 'application/json' },
+      }).then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(String(payload.error || `HTTP ${response.status}`));
+        return payload;
+      }).catch((error) => {
+        galaxyFilterTreePromise = null;
+        throw error;
+      });
+    }
+    try {
+      renderGalaxyFilterPanel(dlg, await galaxyFilterTreePromise);
+    } catch (error) {
+      if (status) status.textContent = `Directory tree unavailable: ${String(error && error.message || 'unknown error')}`;
+    } finally {
+      galaxyFilterTreePromise = null;
+    }
+  }
+
   function mapRecCategoryToRail(category) {
     const c = String(category || '').trim().toLowerCase();
+    if (c === 'filter') return 'filter';
     if (!c || c === 'travel') return 'travel';
     if (c === 'weather' || c === 'radar') return 'weather';
     if (c === 'lodging' || c === 'hotel') return 'lodging';
@@ -3209,6 +3384,10 @@
       `<div class="biggy-weather-forecast" id="biggyWeatherForecast"></div>` +
       `<div class="biggy-weather-status" id="biggyWeatherStatus">Forecast has not been loaded yet.</div>` +
       `</section>` +
+      `<section class="biggy-galaxy-filter-state" id="biggyGalaxyFilterState" hidden>` +
+      `<div class="biggy-galaxy-filter-status" id="biggyGalaxyFilterStatus">Full galaxy · centered on BIGGY PROMPT</div>` +
+      `<div class="biggy-galaxy-filter-tree" id="biggyGalaxyFilterTree" role="tree" aria-label="RAG directory tree"></div>` +
+      `</section>` +
       `<div class="biggy-operator-state" id="biggyOperatorState" hidden>` +
       `<div class="biggy-operator-panel" data-biggy-operator-panel="calendar" hidden></div>` +
       `<div class="biggy-operator-panel" data-biggy-operator-panel="mail" hidden></div>` +
@@ -3254,21 +3433,24 @@
       const lodging = dlg.querySelector('#biggyTravelLodging');
       const operatorState = dlg.querySelector('#biggyOperatorState');
       const weatherState = dlg.querySelector('#biggyWeatherState');
+      const filterState = dlg.querySelector('#biggyGalaxyFilterState');
       const empty = dlg.querySelector('#biggyTravelEmptyCat');
       const showTravel = key === 'travel';
       const showWeather = key === 'weather';
+      const showFilter = key === 'filter';
       const showOperator = ['calendar', 'mail', 'tasks', 'notes', 'alerts'].includes(key);
       const recommendationKey = lodging
         ? mapRecCategoryToRail(lodging.getAttribute('data-rec-category') || '')
         : '';
       const showRecommendation = !!(
-        lodging && !showTravel && !showWeather && key === recommendationKey &&
+        lodging && !showTravel && !showWeather && !showFilter && key === recommendationKey &&
         lodging.getAttribute('data-has-cards') === '1'
       );
       if (mapCanvas) mapCanvas.hidden = !showTravel;
       if (mapActions) mapActions.hidden = !showTravel;
       if (mapNote) mapNote.hidden = !showTravel;
       if (weatherState) weatherState.hidden = !showWeather;
+      if (filterState) filterState.hidden = !showFilter;
       if (lodging) {
         lodging.hidden = !showRecommendation;
       }
@@ -3279,7 +3461,7 @@
         });
       }
       if (empty) {
-        empty.hidden = showTravel || showWeather || showRecommendation || showOperator;
+        empty.hidden = showTravel || showWeather || showFilter || showRecommendation || showOperator;
       }
       if (open) {
         dlg.hidden = false;
@@ -3297,11 +3479,12 @@
           return;
         }
         const cachedRecommendation = recommendationModelsByCategory[key];
-        if (cachedRecommendation && key !== 'travel' && key !== 'weather') {
+        if (cachedRecommendation && key !== 'travel' && key !== 'weather' && key !== 'filter') {
           renderRecommendationViewModel(cachedRecommendation);
           return;
         }
         setActiveCategory(key, { open: true });
+        if (key === 'filter') refreshGalaxyFilterPanel(dlg);
         if (key === 'weather') refreshWeatherPanel(dlg, savedWeatherZip());
         if (['calendar', 'mail', 'tasks', 'notes', 'alerts'].includes(key)) refreshOperatorPanel(dlg, key);
       });
