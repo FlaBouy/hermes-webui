@@ -48,7 +48,7 @@ DEFAULT_RAG_STATUS_URL = "http://127.0.0.1:5004/ingest-status"
 DEFAULT_RAG_INGEST_LEDGER = Path.home() / ".jarvis_rag_status" / "ingest_ledger.json"
 MAX_WORLD_DOCUMENTS = 4000
 _WORLD_CACHE_TTL_S = 20.0
-_BROWSABLE_DOCUMENT_SUFFIXES = frozenset({".pdf", ".txt", ".md", ".csv", ".json", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"})
+_BROWSABLE_DOCUMENT_SUFFIXES = frozenset({".pdf", ".txt", ".md", ".csv", ".json", ".html", ".htm", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"})
 _world_cache_lock = threading.Lock()
 _world_cache: tuple[float, bytes] | None = None
 
@@ -1074,7 +1074,7 @@ def resolve_rag_document(value: object) -> tuple[Path, Path, str, str] | None:
         return None
     suffix = target.suffix.lower()
     mime = mimetypes.guess_type(target.name)[0] or "application/octet-stream"
-    disposition = "inline" if suffix in {".pdf", ".txt", ".md", ".csv", ".json"} else "attachment"
+    disposition = "inline" if suffix in {".pdf", ".txt", ".md", ".csv", ".json", ".html", ".htm"} else "attachment"
     return root, target, mime, disposition
 
 

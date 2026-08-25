@@ -225,6 +225,58 @@ def test_joplin_api_get_keeps_non_search_token_out_of_url(monkeypatch):
     assert captured["authorization"] == "token secret-token"
 
 
+def test_obsidian_note_create_update_search_and_recoverable_delete(monkeypatch, tmp_path):
+    import pytest
+    from api import routes
+
+    vault = tmp_path / "Biggy Notes"
+    vault.mkdir()
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(vault))
+    monkeypatch.setattr(routes, "_notes_configured_server", lambda _source: {})
+
+    created = routes._obsidian_create_note({"title": "Field note", "body": "Checked the panel."})
+    assert created["id"] == "Inbox/Field note.md"
+    assert (vault / created["id"]).read_text(encoding="utf-8") == "# Field note\n\nChecked the panel.\n"
+    assert routes._obsidian_search_notes("checked panel")[0]["id"] == created["id"]
+
+    updated = routes._obsidian_update_note({
+        "id": created["id"],
+        "title": "Field note revised",
+        "body": "Checked the panel twice.",
+    })
+
+    with pytest.raises(ValueError, match="confirmation"):
+        routes._obsidian_delete_note({"id": created["id"], "confirmed": False})
+    deleted = routes._obsidian_delete_note({"id": created["id"], "confirmed": True})
+
+    assert updated["title"] == "Field note revised"
+    assert deleted == {
+        "ok": True,
+        "deleted": True,
+        "recoverable": True,
+        "id": "Inbox/Field note.md",
+    }
+    assert not (vault / "Inbox" / "Field note.md").exists()
+    assert (vault / ".trash" / "Field note.md").exists()
+
+
+def test_obsidian_note_writes_reject_traversal_and_invalid_fields(monkeypatch, tmp_path):
+    import pytest
+    from api import routes
+
+    vault = tmp_path / "Biggy Notes"
+    vault.mkdir()
+    monkeypatch.setenv("OBSIDIAN_VAULT_PATH", str(vault))
+    monkeypatch.setattr(routes, "_notes_configured_server", lambda _source: {})
+
+    with pytest.raises(ValueError, match="title"):
+        routes._obsidian_create_note({"title": "", "body": "body"})
+    with pytest.raises(ValueError, match="too long"):
+        routes._obsidian_create_note({"title": "title", "body": "x" * 100_001})
+    with pytest.raises(ValueError, match="Invalid Obsidian note path"):
+        routes._obsidian_update_note({"id": "../bad.md", "title": "title", "body": "body"})
+
+
 def test_joplin_recent_ai_notes_uses_configured_prefill_script(monkeypatch, tmp_path):
     from api import routes
 

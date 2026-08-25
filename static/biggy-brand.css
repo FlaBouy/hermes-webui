@@ -536,6 +536,10 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo > .biggy-category-ra
 #mainChat.biggy-brand-iwo .biggy-operator-row{margin:0 0 8px;padding:9px 10px;border:1px solid rgba(95,130,160,.35);border-radius:6px;background:rgba(15,25,39,.78)}
 #mainChat.biggy-brand-iwo .biggy-operator-row.is-ready{border-color:rgba(52,211,153,.26)}
 #mainChat.biggy-brand-iwo .biggy-operator-row.is-warning{border-color:rgba(244,169,58,.42)}
+#mainChat.biggy-brand-iwo .biggy-operator-row.is-actionable{cursor:pointer;transition:border-color .14s ease,background-color .14s ease,opacity .14s ease}
+#mainChat.biggy-brand-iwo .biggy-operator-row.is-actionable:hover,
+#mainChat.biggy-brand-iwo .biggy-operator-row.is-actionable:focus-visible{border-color:rgba(103,232,249,.72);background:rgba(17,36,52,.92);outline:none}
+#mainChat.biggy-brand-iwo .biggy-operator-row.is-actionable.is-loading{opacity:.5;cursor:wait}
 #mainChat.biggy-brand-iwo .biggy-operator-row-title{color:#d9e5ef;font:650 12px/1.35 ui-sans-serif,system-ui,sans-serif}
 #mainChat.biggy-brand-iwo .biggy-operator-row-detail{margin-top:3px;color:#8da4b8;font:11px/1.35 ui-sans-serif,system-ui,sans-serif}
 #mainChat.biggy-brand-iwo .biggy-operator-form{
@@ -550,6 +554,7 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo > .biggy-category-ra
   background:rgba(3,9,18,.88);color:#d9e5ef;padding:7px 8px;font:12px/1.35 ui-sans-serif,system-ui,sans-serif;
 }
 #mainChat.biggy-brand-iwo .biggy-operator-field textarea{min-height:76px;resize:vertical}
+#mainChat.biggy-brand-iwo .biggy-notes-editor .biggy-operator-field textarea{min-height:220px}
 #mainChat.biggy-brand-iwo .biggy-operator-field input:focus,
 #mainChat.biggy-brand-iwo .biggy-operator-field textarea:focus{outline:1px solid rgba(103,232,249,.75);border-color:rgba(103,232,249,.75)}
 #mainChat.biggy-brand-iwo .biggy-operator-actions{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin-top:2px}
@@ -565,6 +570,8 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo > .biggy-category-ra
 #mainChat.biggy-brand-iwo .biggy-operator-form-status{min-height:1.3em;color:#8da4b8;font:11px/1.3 ui-sans-serif,system-ui,sans-serif}
 #mainChat.biggy-brand-iwo .biggy-operator-form-status.is-warning{color:#f4c579}
 #mainChat.biggy-brand-iwo .biggy-operator-form-status.is-loading{color:#7dd3fc}
+#mainChat.biggy-brand-iwo .biggy-notes-home-actions{margin:0 0 10px}
+#mainChat.biggy-brand-iwo .biggy-notes-results>.biggy-operator-panel-title{margin-top:13px}
 #mainChat.biggy-brand-iwo .biggy-operator-draft-body{
   max-height:220px;overflow:auto;white-space:pre-wrap;margin:0 0 8px;padding:10px;border:1px solid rgba(95,130,160,.35);
   border-radius:6px;background:rgba(3,9,18,.88);color:#cbd5e1;font:12px/1.5 ui-sans-serif,system-ui,sans-serif;

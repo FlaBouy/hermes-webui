@@ -10314,21 +10314,38 @@ def _request_browser_origin(handler) -> str:
 _JARVIS_RAG_DOCUMENT_PREFIX = "/api/jarvis-ii/rag-document/"
 _BIGGY_RAG_BROWSE_PATH = "/api/biggy/rag-browse"
 _BIGGY_RAG_FILE_PATH = "/api/biggy/rag-file"
+_BIGGY_RAG_FILE_PREFIX = "/api/biggy/rag-file-path/"
 
 
 def _handle_biggy_rag_navigation(handler, parsed) -> bool:
     """Serve ledger-scoped RAG folder pages and document links for Biggy."""
-    if parsed.path not in {_BIGGY_RAG_BROWSE_PATH, _BIGGY_RAG_FILE_PATH}:
+    is_file_path = parsed.path.startswith(_BIGGY_RAG_FILE_PREFIX)
+    if parsed.path not in {_BIGGY_RAG_BROWSE_PATH, _BIGGY_RAG_FILE_PATH} and not is_file_path:
         return False
     try:
         from api.jarvis_v6_world import rag_folder_entries, resolve_rag_document
 
-        requested = unquote((parse_qs(parsed.query).get("path") or [""])[0])
-        if parsed.path == _BIGGY_RAG_FILE_PATH:
+        requested = (
+            unquote(parsed.path[len(_BIGGY_RAG_FILE_PREFIX) :])
+            if is_file_path
+            else unquote((parse_qs(parsed.query).get("path") or [""])[0])
+        )
+        if parsed.path == _BIGGY_RAG_FILE_PATH or is_file_path:
             resolved = resolve_rag_document(requested)
             if resolved is None:
                 return bad(handler, "document not available", 404)
             root, target, mime, disposition = resolved
+            if target.suffix.lower() in {".html", ".htm"}:
+                parent = requested.rsplit("/", 1)[0] if "/" in requested else ""
+                base_path = parent + "/" if parent else ""
+                return _serve_inline_html_preview(
+                    handler,
+                    target,
+                    "no-store",
+                    csp="sandbox allow-scripts allow-forms allow-popups",
+                    anchor_root=root,
+                    base_href=_BIGGY_RAG_FILE_PREFIX + quote(base_path, safe="/"),
+                )
             return _serve_file_bytes(handler, target, mime, disposition, "no-store", anchor_root=root)
         entries = rag_folder_entries(requested)
         if entries is None:
@@ -14497,6 +14514,13 @@ def handle_post(handler, parsed) -> bool:
         if diag:
             diag.finish()
         return proxy_result
+
+    if parsed.path in {"/api/notes/create", "/api/notes/update", "/api/notes/delete"}:
+        try:
+            body = _read_json_request_body(handler, max_bytes=128 * 1024)
+        except ValueError as exc:
+            return bad(handler, _sanitize_error(exc), 400)
+        return _handle_notes_write(handler, parsed.path, body)
 
     if parsed.path == "/api/biggy/v6/chat":
         try:
@@ -19521,8 +19545,9 @@ def _handle_tts(handler, parsed):
         logger.exception("Edge TTS generation failed")
         from api.helpers import bad as _bad
         return _bad(handler, "TTS generation failed", 500)
-def _html_preview_with_blank_base(raw: bytes) -> bytes:
-    base = '<base target="_blank">'
+def _html_preview_with_blank_base(raw: bytes, base_href: str | None = None) -> bytes:
+    href = f' href="{_html.escape(base_href, quote=True)}"' if base_href else ""
+    base = f'<base{href} target="_blank">'
     text = raw.decode("utf-8", errors="replace")
     if re.search(r"<head(?:\s[^>]*)?>", text, flags=re.IGNORECASE):
         text = re.sub(r"(<head\b[^>]*>)", r"\1" + base, text, count=1, flags=re.IGNORECASE)
@@ -19539,14 +19564,14 @@ def _html_preview_with_blank_base(raw: bytes) -> bytes:
     return text.encode("utf-8")
 
 
-def _serve_inline_html_preview(handler, target: Path, cache_control: str, *, csp: str, anchor_root: Path | None = None):
+def _serve_inline_html_preview(handler, target: Path, cache_control: str, *, csp: str, anchor_root: Path | None = None, base_href: str | None = None):
     """Serve sandboxed workspace HTML preview with links targeting a new tab."""
     fd = None
     try:
         fd = _open_file_read_fd(target, anchor_root)
         with os.fdopen(fd, "rb", closefd=True) as f:
             fd = None
-            body = _html_preview_with_blank_base(f.read())
+            body = _html_preview_with_blank_base(f.read(), base_href=base_href)
     except PermissionError:
         return bad(handler, "Permission denied", 403)
     except FileNotFoundError:
@@ -29139,14 +29164,38 @@ def _handle_notes_sources_list(handler):
     if not tools:
         tools = _mcp_tools_from_registry(server_summaries)
         source = "tool_registry" if tools else "none"
+    sources = _notes_sources_from_mcp_inventory(server_summaries, tools)
+    obsidian_error = ""
+    recent_obsidian_notes = []
+    try:
+        vault = _obsidian_vault_path()
+        recent_obsidian_notes = _obsidian_recent_notes(limit=10)
+        sources = [source for source in sources if str(source.get("name") or "").lower() != "obsidian"]
+        sources.insert(0, {
+            "name": "obsidian",
+            "label": "Obsidian",
+            "enabled": True,
+            "active": True,
+            "status": "healthy",
+            "tool_count": 4,
+            "tool_source": "filesystem_vault",
+            "vault_name": vault.name,
+            "tools": _configured_note_tool_hints("obsidian") + [
+                {"name": "create_note", "description": "Create a Markdown note in the Obsidian vault."},
+                {"name": "update_note", "description": "Update a Markdown note in the Obsidian vault."},
+            ],
+        })
+    except (OSError, ValueError) as exc:
+        obsidian_error = str(exc)
     return j(handler, {
         "enabled": True,
-        "sources": _notes_sources_from_mcp_inventory(server_summaries, tools),
+        "sources": sources,
         "source": source,
         "inventory_scope": "already_known_runtime_only",
         "attach_supported": False,
         "automatic_recall_unchanged": True,
-        "recent_ai_notes": _joplin_recent_ai_notes(limit=6),
+        "recent_ai_notes": recent_obsidian_notes,
+        "obsidian_error": obsidian_error,
     })
 
 
@@ -29162,6 +29211,195 @@ def _notes_configured_server(source: str) -> dict:
     return {}
 
 
+def _obsidian_vault_path() -> Path:
+    """Return the configured, durable Obsidian Markdown vault."""
+    cfg = _notes_configured_server("obsidian")
+    env = cfg.get("env", {}) if isinstance(cfg, dict) else {}
+    if not isinstance(env, dict):
+        env = {}
+    raw = str(env.get("OBSIDIAN_VAULT_PATH") or os.environ.get("OBSIDIAN_VAULT_PATH") or "").strip()
+    if not raw:
+        raise ValueError("Obsidian vault path is not configured")
+    vault = Path(raw).expanduser()
+    try:
+        resolved = vault.resolve(strict=True)
+    except OSError:
+        raise ValueError("Obsidian vault is not available") from None
+    if not resolved.is_dir():
+        raise ValueError("Obsidian vault is not available")
+    return resolved
+
+
+def _validated_obsidian_note_path(value, *, must_exist: bool = True) -> tuple[Path, Path]:
+    vault = _obsidian_vault_path()
+    raw = str(value or "").strip().replace("\\", "/")
+    rel = Path(raw)
+    if (
+        not raw
+        or rel.is_absolute()
+        or rel.suffix.lower() != ".md"
+        or any(part in {"", ".", ".."} or part.startswith(".") for part in rel.parts)
+    ):
+        raise ValueError("Invalid Obsidian note path")
+    target = vault.joinpath(*rel.parts)
+    try:
+        resolved = target.resolve(strict=must_exist)
+        resolved.relative_to(vault)
+    except (OSError, ValueError):
+        raise ValueError("Invalid Obsidian note path") from None
+    if must_exist and (not resolved.is_file() or resolved.is_symlink()):
+        raise ValueError("Obsidian note not found")
+    return vault, resolved
+
+
+def _obsidian_note_title_and_body(path: Path) -> tuple[str, str]:
+    try:
+        raw = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        raise ValueError("Obsidian note could not be read") from None
+    if len(raw) > 100_000:
+        raw = raw[:100_000].rstrip() + "\n\n[Preview truncated at 100,000 characters]"
+    lines = raw.splitlines()
+    title = path.stem
+    if lines and re.match(r"^#\s+\S", lines[0]):
+        title = lines.pop(0)[2:].strip() or title
+        if lines and not lines[0].strip():
+            lines.pop(0)
+    return _mcp_safe_display_text(title, limit=180), "\n".join(lines)
+
+
+def _obsidian_note_result(path: Path, *, query: str = "", include_body: bool = False) -> dict:
+    vault = _obsidian_vault_path()
+    try:
+        rel = path.resolve(strict=True).relative_to(vault).as_posix()
+        stat = path.stat()
+    except (OSError, ValueError):
+        raise ValueError("Obsidian note not found") from None
+    title, body = _obsidian_note_title_and_body(path)
+    result = {
+        "id": rel,
+        "title": title,
+        "snippet": _mcp_safe_display_text(_note_snippet(body, query), limit=260),
+        "updated_time": int(stat.st_mtime * 1000),
+        "created_time": int(stat.st_ctime * 1000),
+        "source": "obsidian",
+    }
+    if include_body:
+        result["body"] = _redact_text(body)
+    return result
+
+
+def _obsidian_markdown_files(*, limit: int = 5000) -> list[Path]:
+    vault = _obsidian_vault_path()
+    rows: list[Path] = []
+    for path in vault.rglob("*.md"):
+        if len(rows) >= limit:
+            break
+        try:
+            rel = path.relative_to(vault)
+            if any(part.startswith(".") for part in rel.parts):
+                continue
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(vault)
+            if resolved.is_file() and not resolved.is_symlink():
+                rows.append(resolved)
+        except (OSError, ValueError):
+            continue
+    return rows
+
+
+def _obsidian_recent_notes(*, limit: int = 10) -> list[dict]:
+    rows = sorted(_obsidian_markdown_files(), key=lambda path: path.stat().st_mtime, reverse=True)
+    return [_obsidian_note_result(path) for path in rows[:max(1, min(int(limit or 10), 50))]]
+
+
+def _obsidian_search_notes(query: str, *, limit: int = 20) -> list[dict]:
+    query = str(query or "").strip()
+    if not query:
+        return []
+    terms = [term.lower() for term in query.split() if term]
+    matches = []
+    for path in _obsidian_markdown_files():
+        try:
+            title, body = _obsidian_note_title_and_body(path)
+        except ValueError:
+            continue
+        haystack = f"{title}\n{body}".lower()
+        if not all(term in haystack for term in terms):
+            continue
+        matches.append((_obsidian_note_result(path, query=query), path.stat().st_mtime))
+    matches.sort(key=lambda row: row[1], reverse=True)
+    return [row[0] for row in matches[:max(1, min(int(limit or 20), 50))]]
+
+
+def _validated_obsidian_note_fields(body: dict) -> tuple[str, str]:
+    title = str(body.get("title") or "").strip()
+    text = str(body.get("body") or "")
+    if not title:
+        raise ValueError("Note title is required")
+    if len(title) > 180:
+        raise ValueError("Note title is too long")
+    if len(text) > 100_000:
+        raise ValueError("Note body is too long")
+    return title, text
+
+
+def _obsidian_note_filename(title: str) -> str:
+    name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', " ", title)
+    name = re.sub(r"\s+", " ", name).strip(" .")[:120]
+    return (name or "Untitled note") + ".md"
+
+
+def _write_obsidian_note(path: Path, title: str, body: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = f"# {title}\n\n{body.rstrip()}\n"
+    temp = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
+    try:
+        temp.write_text(payload, encoding="utf-8")
+        os.replace(temp, path)
+    finally:
+        try:
+            temp.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+
+def _obsidian_create_note(body: dict) -> dict:
+    title, text = _validated_obsidian_note_fields(body)
+    vault = _obsidian_vault_path()
+    inbox = vault / "Inbox"
+    base = _obsidian_note_filename(title)
+    target = inbox / base
+    suffix = 2
+    while target.exists():
+        target = inbox / f"{Path(base).stem} {suffix}.md"
+        suffix += 1
+    _write_obsidian_note(target, title, text)
+    return _obsidian_note_result(target, include_body=True)
+
+
+def _obsidian_update_note(body: dict) -> dict:
+    title, text = _validated_obsidian_note_fields(body)
+    _vault, target = _validated_obsidian_note_path(body.get("id"))
+    _write_obsidian_note(target, title, text)
+    return _obsidian_note_result(target, include_body=True)
+
+
+def _obsidian_delete_note(body: dict) -> dict:
+    if body.get("confirmed") is not True:
+        raise ValueError("Explicit delete confirmation is required")
+    vault, target = _validated_obsidian_note_path(body.get("id"))
+    trash = vault / ".trash"
+    trash.mkdir(parents=True, exist_ok=True)
+    destination = trash / target.name
+    suffix = 2
+    while destination.exists():
+        destination = trash / f"{target.stem} {suffix}{target.suffix}"
+        suffix += 1
+    os.replace(target, destination)
+    return {"ok": True, "deleted": True, "recoverable": True, "id": str(body.get("id") or "")}
+
+
 def _joplin_connection_from_config() -> tuple[str, str]:
     cfg = _notes_configured_server("joplin")
     env = cfg.get("env", {}) if isinstance(cfg, dict) else {}
@@ -29172,7 +29410,16 @@ def _joplin_connection_from_config() -> tuple[str, str]:
     return url, token
 
 
-def _joplin_api_get(path: str, params: dict | None = None) -> dict:
+class _JoplinAPIError(ValueError):
+    """A safe, credential-free Joplin transport or protocol failure."""
+
+
+def _joplin_api_request(
+    method: str,
+    path: str,
+    params: dict | None = None,
+    payload: dict | None = None,
+) -> dict:
     """Call the local Joplin Web Clipper API without logging credentials."""
     from urllib.parse import urlencode
     from urllib.request import Request, urlopen
@@ -29180,7 +29427,10 @@ def _joplin_api_get(path: str, params: dict | None = None) -> dict:
 
     base_url, token = _joplin_connection_from_config()
     if not token:
-        raise ValueError("Joplin token is not configured")
+        raise _JoplinAPIError("Joplin token is not configured")
+    method = str(method or "GET").upper()
+    if method not in {"GET", "POST", "PUT", "DELETE"}:
+        raise ValueError("Unsupported Joplin request method")
     safe_path = "/" + str(path or "").lstrip("/")
     query = dict(params or {})
     # Joplin Web Clipper builds can reject header-only auth on /search even when
@@ -29188,13 +29438,19 @@ def _joplin_api_get(path: str, params: dict | None = None) -> dict:
     # depth and add the query token only for /search compatibility.
     if safe_path == "/search":
         query["token"] = token
-    url = f"{base_url}{safe_path}?{urlencode(query)}"
-    request = Request(url, headers={"Authorization": f"token {token}"})
+    encoded_query = urlencode(query)
+    url = f"{base_url}{safe_path}{'?' + encoded_query if encoded_query else ''}"
+    data = None
+    headers = {"Authorization": f"token {token}"}
+    if payload is not None:
+        data = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+    request = Request(url, data=data, headers=headers, method=method)
     try:
         with urlopen(request, timeout=8) as response:
             raw = response.read(2_000_000).decode("utf-8", errors="replace")
     except HTTPError as exc:
-        raise ValueError(f"Joplin API returned HTTP {exc.code}") from None
+        raise _JoplinAPIError(f"Joplin API returned HTTP {exc.code}") from None
     except (URLError, TimeoutError) as exc:
         # A bare socket-connect TimeoutError from urlopen(timeout=8) is NOT
         # always URLError-wrapped, so catch it explicitly here. Otherwise it
@@ -29202,12 +29458,77 @@ def _joplin_api_get(path: str, params: dict | None = None) -> dict:
         # request dispatch, where the consolidated client-disconnect handler
         # (#3210) would swallow it as a fake disconnect — silent empty response,
         # no log. Convert it to a normal "not reachable" ValueError instead.
-        raise ValueError("Joplin API is not reachable") from None
+        raise _JoplinAPIError("Joplin API is not reachable") from None
+    if not raw.strip():
+        return {}
     try:
         data = json.loads(raw)
     except Exception:
-        raise ValueError("Joplin API returned invalid JSON") from None
+        raise _JoplinAPIError("Joplin API returned invalid JSON") from None
     return data if isinstance(data, dict) else {}
+
+
+def _joplin_api_get(path: str, params: dict | None = None) -> dict:
+    return _joplin_api_request("GET", path, params=params)
+
+
+def _validated_joplin_note_id(value) -> str:
+    note_id = str(value or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9]{16,64}", note_id):
+        raise ValueError("Invalid Joplin note id")
+    return note_id
+
+
+def _validated_joplin_note_fields(body: dict) -> dict:
+    title = str(body.get("title") or "").strip()
+    text = str(body.get("body") or "")
+    if not title:
+        raise ValueError("Note title is required")
+    if len(title) > 180:
+        raise ValueError("Note title is too long")
+    if len(text) > 100_000:
+        raise ValueError("Note body is too long")
+    payload = {"title": title, "body": text}
+    parent_id = str(body.get("parent_id") or "").strip()
+    if parent_id:
+        payload["parent_id"] = _validated_joplin_note_id(parent_id)
+    return payload
+
+
+def _joplin_note_result(data: dict, fallback: dict) -> dict:
+    note_id = _mcp_safe_display_text(data.get("id") or fallback.get("id") or "", limit=64)
+    if not note_id:
+        raise _JoplinAPIError("Joplin did not return a note id")
+    return {
+        "id": note_id,
+        "title": _mcp_safe_display_text(data.get("title") or fallback.get("title") or "Untitled", limit=180),
+        "body": _redact_text(str(data.get("body") if "body" in data else fallback.get("body") or "")),
+        "parent_id": _mcp_safe_display_text(data.get("parent_id") or fallback.get("parent_id") or "", limit=64),
+        "updated_time": data.get("updated_time"),
+        "created_time": data.get("created_time"),
+        "source": "joplin",
+    }
+
+
+def _joplin_create_note(body: dict) -> dict:
+    payload = _validated_joplin_note_fields(body)
+    data = _joplin_api_request("POST", "/notes", payload=payload)
+    return _joplin_note_result(data, payload)
+
+
+def _joplin_update_note(body: dict) -> dict:
+    note_id = _validated_joplin_note_id(body.get("id"))
+    payload = _validated_joplin_note_fields(body)
+    data = _joplin_api_request("PUT", f"/notes/{note_id}", payload=payload)
+    return _joplin_note_result(data, {**payload, "id": note_id})
+
+
+def _joplin_delete_note(body: dict) -> dict:
+    note_id = _validated_joplin_note_id(body.get("id"))
+    if body.get("confirmed") is not True:
+        raise ValueError("Explicit delete confirmation is required")
+    _joplin_api_request("DELETE", f"/notes/{note_id}")
+    return {"ok": True, "deleted": True, "id": note_id}
 
 
 def _note_snippet(body: str, query: str = "", *, limit: int = 220) -> str:
@@ -29257,9 +29578,7 @@ def _joplin_search_notes(query: str, *, limit: int = 20) -> list[dict]:
 
 
 def _joplin_get_note(note_id: str) -> dict:
-    note_id = str(note_id or "").strip()
-    if not re.fullmatch(r"[A-Za-z0-9]{16,64}", note_id):
-        raise ValueError("Invalid Joplin note id")
+    note_id = _validated_joplin_note_id(note_id)
     data = _joplin_api_get(f"/notes/{note_id}", {
         "fields": "id,title,body,parent_id,updated_time,created_time",
     })
@@ -29400,32 +29719,64 @@ def _handle_notes_search(handler, parsed):
     if not _external_notes_sources_enabled():
         return j(handler, {"source": "disabled", "results": [], "error": "External notes sources are disabled."}, status=404)
     query = parse_qs(parsed.query or "")
-    source = str(query.get("source", ["joplin"])[0] or "joplin").strip().lower()
+    source = str(query.get("source", ["obsidian"])[0] or "obsidian").strip().lower()
     q = str(query.get("q", [""])[0] or "").strip()
     try:
         limit = int(query.get("limit", ["20"])[0] or 20)
     except Exception:
         limit = 20
-    if source != "joplin":
-        return j(handler, {"source": source, "results": [], "error": "Search is currently implemented for Joplin sources only."}, status=400)
     try:
-        return j(handler, {"source": "joplin", "query": q, "results": _joplin_search_notes(q, limit=limit)})
+        if source == "obsidian":
+            results = _obsidian_search_notes(q, limit=limit)
+        elif source == "joplin":
+            results = _joplin_search_notes(q, limit=limit)
+        else:
+            return j(handler, {"source": source, "results": [], "error": "Unsupported notes source."}, status=400)
+        return j(handler, {"source": source, "query": q, "results": results})
     except ValueError as exc:
-        return j(handler, {"source": "joplin", "query": q, "results": [], "error": str(exc)}, status=502)
+        return j(handler, {"source": source, "query": q, "results": [], "error": str(exc)}, status=502)
 
 
 def _handle_notes_item(handler, parsed):
     if not _external_notes_sources_enabled():
         return j(handler, {"source": "disabled", "error": "External notes sources are disabled."}, status=404)
     query = parse_qs(parsed.query or "")
-    source = str(query.get("source", ["joplin"])[0] or "joplin").strip().lower()
+    source = str(query.get("source", ["obsidian"])[0] or "obsidian").strip().lower()
     note_id = str(query.get("id", [""])[0] or "").strip()
-    if source != "joplin":
-        return j(handler, {"source": source, "error": "Preview is currently implemented for Joplin sources only."}, status=400)
     try:
-        return j(handler, {"source": "joplin", "note": _joplin_get_note(note_id)})
+        if source == "obsidian":
+            _vault, path = _validated_obsidian_note_path(note_id)
+            note = _obsidian_note_result(path, include_body=True)
+        elif source == "joplin":
+            note = _joplin_get_note(note_id)
+        else:
+            return j(handler, {"source": source, "error": "Unsupported notes source."}, status=400)
+        return j(handler, {"source": source, "note": note})
     except ValueError as exc:
-        return j(handler, {"source": "joplin", "error": str(exc)}, status=502)
+        return j(handler, {"source": source, "error": str(exc)}, status=502)
+
+
+def _handle_notes_write(handler, path: str, body: dict):
+    if not _external_notes_sources_enabled():
+        return j(handler, {"source": "disabled", "error": "External notes sources are disabled."}, status=404)
+    source = str(body.get("source") or "obsidian").strip().lower()
+    if source != "obsidian":
+        return j(handler, {"source": source, "error": "Biggy writes notes to the approved Obsidian vault only."}, status=400)
+    actions = {
+        "/api/notes/create": _obsidian_create_note,
+        "/api/notes/update": _obsidian_update_note,
+        "/api/notes/delete": _obsidian_delete_note,
+    }
+    action = actions.get(path)
+    if action is None:
+        return False
+    try:
+        result = action(body)
+        return j(handler, {"source": "obsidian", **result}, status=200)
+    except OSError:
+        return j(handler, {"source": "obsidian", "error": "Obsidian vault write failed."}, status=502)
+    except ValueError as exc:
+        return j(handler, {"source": "obsidian", "error": str(exc)}, status=400)
 
 
 def _handle_mcp_servers_list(handler):

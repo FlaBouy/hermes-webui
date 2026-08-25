@@ -299,6 +299,31 @@ def test_rag_navigation_is_ledger_scoped_and_never_traverses(tmp_path, monkeypat
     assert world.resolve_rag_document("../private.pdf") is None
 
 
+def test_rag_navigation_opens_ledger_known_html_indexes(tmp_path, monkeypatch):
+    root = tmp_path / "Library"
+    rel = (
+        "Vendor Data/Honeywell/Experian PKS/TDC3000/Honeywell TDC/"
+        "_TDC_INDEX/TDC_Library.html"
+    )
+    document = root / rel
+    document.parent.mkdir(parents=True)
+    document.write_text("<!doctype html><title>TDC Library</title>", encoding="utf-8")
+    ledger = tmp_path / "ingest_ledger.json"
+    ledger.write_text(
+        '{"files":{"tdc":{"source":"' + rel + '"}}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(world, "resolve_rag_ingest_ledger", lambda: ledger)
+    monkeypatch.setattr(world, "resolve_rag_library_root", lambda: root)
+
+    resolved = world.resolve_rag_document(rel)
+
+    assert resolved is not None
+    assert resolved[1] == document.resolve()
+    assert resolved[2] == "text/html"
+    assert resolved[3] == "inline"
+
+
 def test_rag_directory_tree_matches_the_bounded_world_projection(tmp_path, monkeypatch):
     ledger = tmp_path / "ingest_ledger.json"
     ledger.write_text(

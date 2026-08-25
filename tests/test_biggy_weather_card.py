@@ -80,7 +80,9 @@ def test_weather_card_is_persistent_with_zip_and_myradar_controls():
     assert "const BIGGY_DEFAULT_WEATHER_ZIP = '32444'" in BRAND
     assert 'id="biggyWeatherZip"' in BRAND
     assert 'id="biggyWeatherForecast"' in BRAND
-    assert 'href="radar://open"' in BRAND
+    assert 'href="myradar://open"' in BRAND
+    assert 'href="radar://open"' not in BRAND
+    assert "if (href === 'radar://open') return 'myradar://open'" in BRAND
     assert "/api/biggy/pa/weather?zip=" in BRAND
     assert "renderArgusWeatherBriefing" in BRAND
     assert ".biggy-weather-forecast" in CSS

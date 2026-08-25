@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260825-galaxy-filter-2';
+  const BUILD_ID = '20260825-obsidian-notes-1';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
@@ -3175,6 +3175,177 @@
     });
   }
 
+  function notesPanelIsCurrent(dlg) {
+    return dlg && dlg.getAttribute('data-active-category') === 'notes';
+  }
+
+  function appendNotesResult(panel, dlg, note) {
+    const row = appendOperatorRow(
+      panel,
+      String(note && note.title || 'Untitled note'),
+      String(note && (note.snippet || note.updated_time) || ''),
+      'ready',
+    );
+    row.classList.add('is-actionable');
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    row.setAttribute('aria-label', `Open note ${String(note && note.title || 'Untitled note')}`);
+    const open = async () => {
+      if (row.classList.contains('is-loading')) return;
+      row.classList.add('is-loading');
+      try {
+        const id = encodeURIComponent(String(note && note.id || ''));
+        const result = await operatorFetch(`/api/notes/item?source=obsidian&id=${id}`);
+        if (!notesPanelIsCurrent(dlg)) return;
+        renderNotesEditor(panel, dlg, result.note || result);
+      } catch (error) {
+        row.classList.remove('is-loading');
+        const detail = row.querySelector('.biggy-operator-row-detail');
+        if (detail) detail.textContent = String(error && error.message || 'Unable to open note.');
+        row.classList.add('is-warning');
+      }
+    };
+    row.addEventListener('click', open);
+    row.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter' && event.key !== ' ') return;
+      event.preventDefault();
+      open();
+    });
+    return row;
+  }
+
+  function renderNotesEditor(panel, dlg, note = null) {
+    if (!notesPanelIsCurrent(dlg)) return;
+    clearOperatorPanel(panel);
+    const editing = !!(note && note.id);
+    panel.appendChild(operatorHeading(editing ? 'Edit note' : 'New note'));
+    const form = document.createElement('form');
+    form.className = 'biggy-operator-form biggy-notes-editor';
+    form.setAttribute('data-testid', 'biggy-notes-editor');
+    form.appendChild(operatorField('Title', 'title', 'text', note && note.title));
+    form.appendChild(operatorField('Note', 'body', 'textarea', note && note.body));
+    const actions = document.createElement('div');
+    actions.className = 'biggy-operator-actions';
+    const save = operatorButton('Save note', 'primary');
+    save.type = 'submit';
+    const back = operatorButton('Back to notes');
+    actions.append(save, back);
+    if (editing) {
+      const remove = operatorButton('Delete note', 'danger');
+      actions.appendChild(remove);
+      remove.addEventListener('click', async () => {
+        if (!window.confirm(`Delete “${String(note.title || 'this note')}”?`)) return;
+        remove.disabled = true;
+        operatorFormStatus(form, 'Deleting note…', 'loading');
+        try {
+          await operatorFetch('/api/notes/delete', {
+            method: 'POST',
+            body: { source: 'obsidian', id: String(note.id), confirmed: true },
+          });
+          await refreshOperatorPanel(dlg, 'notes');
+        } catch (error) {
+          remove.disabled = false;
+          operatorFormStatus(form, String(error && error.message || 'Delete failed.'), 'warning');
+        }
+      });
+    }
+    form.appendChild(actions);
+    back.addEventListener('click', () => refreshOperatorPanel(dlg, 'notes'));
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const data = new FormData(form);
+      save.disabled = true;
+      operatorFormStatus(form, editing ? 'Saving note…' : 'Creating note…', 'loading');
+      try {
+        const body = {
+          source: 'obsidian',
+          title: String(data.get('title') || '').trim(),
+          body: String(data.get('body') || ''),
+        };
+        if (editing) body.id = String(note.id);
+        const result = await operatorFetch(editing ? '/api/notes/update' : '/api/notes/create', { method: 'POST', body });
+        if (!notesPanelIsCurrent(dlg)) return;
+        renderNotesEditor(panel, dlg, result.note || result);
+        const refreshed = panel.querySelector('.biggy-notes-editor');
+        if (refreshed) operatorFormStatus(refreshed, 'Note saved.', 'ready');
+      } catch (error) {
+        save.disabled = false;
+        operatorFormStatus(form, String(error && error.message || 'Save failed.'), 'warning');
+      }
+    });
+    panel.appendChild(form);
+  }
+
+  function renderNotesWorkspace(panel, dlg, notes) {
+    clearOperatorPanel(panel);
+    panel.appendChild(operatorHeading('Notes'));
+    if (!notes.enabled) {
+      appendOperatorRow(panel, 'Notes source is not connected.', 'Enable the approved PLATO Obsidian vault to use this workspace.', 'warning');
+      return;
+    }
+    const sources = Array.isArray(notes.sources) ? notes.sources : [];
+    const obsidian = sources.find((source) => String(source.name || '').toLowerCase() === 'obsidian');
+    if (!obsidian) {
+      appendOperatorRow(panel, 'Obsidian vault is not connected.', String(notes.obsidian_error || 'Notes remain in the approved PLATO vault; no alternate source will be used.'), 'warning');
+      return;
+    }
+    appendOperatorRow(panel, 'Obsidian vault ready.', `${String(obsidian.vault_name || 'Biggy Notes')} on PLATO is available.`, 'ready');
+    const homeActions = document.createElement('div');
+    homeActions.className = 'biggy-operator-actions biggy-notes-home-actions';
+    const create = operatorButton('New note', 'primary');
+    create.setAttribute('data-testid', 'biggy-notes-new');
+    homeActions.appendChild(create);
+    panel.appendChild(homeActions);
+    create.addEventListener('click', () => renderNotesEditor(panel, dlg));
+
+    const search = document.createElement('form');
+    search.className = 'biggy-operator-form biggy-notes-search';
+    search.setAttribute('data-testid', 'biggy-notes-search');
+    search.appendChild(operatorHeading('Search notes'));
+    search.appendChild(operatorField('Keywords', 'query', 'search'));
+    const searchActions = document.createElement('div');
+    searchActions.className = 'biggy-operator-actions';
+    const submit = operatorButton('Search', 'primary');
+    submit.type = 'submit';
+    searchActions.appendChild(submit);
+    search.appendChild(searchActions);
+    panel.appendChild(search);
+
+    const results = document.createElement('div');
+    results.className = 'biggy-notes-results';
+    results.setAttribute('data-testid', 'biggy-notes-results');
+    panel.appendChild(results);
+    search.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const query = String(new FormData(search).get('query') || '').trim();
+      if (!query) {
+        operatorFormStatus(search, 'Enter one or more search terms.', 'warning');
+        return;
+      }
+      submit.disabled = true;
+      operatorFormStatus(search, 'Searching Obsidian…', 'loading');
+      results.replaceChildren();
+      try {
+        const found = await operatorFetch(`/api/notes/search?source=obsidian&q=${encodeURIComponent(query)}`);
+        if (!notesPanelIsCurrent(dlg)) return;
+        operatorFormStatus(search, '', '');
+        results.appendChild(operatorHeading('Search results'));
+        const items = Array.isArray(found.results) ? found.results : [];
+        if (!items.length) appendOperatorRow(results, 'No matching notes.', 'Try another title or phrase.', 'muted');
+        items.slice(0, 30).forEach((item) => appendNotesResult(results, dlg, item));
+      } catch (error) {
+        operatorFormStatus(search, String(error && error.message || 'Search failed.'), 'warning');
+      } finally {
+        submit.disabled = false;
+      }
+    });
+
+    results.appendChild(operatorHeading('Recent notes'));
+    const recent = Array.isArray(notes.recent_ai_notes) ? notes.recent_ai_notes.slice(0, 10) : [];
+    if (!recent.length) appendOperatorRow(results, 'No recent notes returned.', 'Create a note or search the Obsidian vault.', 'muted');
+    recent.forEach((note) => appendNotesResult(results, dlg, note));
+  }
+
   async function refreshOperatorPanel(dlg, key) {
     const panel = operatorPanel(dlg, key);
     if (!panel) return;
@@ -3280,20 +3451,7 @@
       if (key === 'notes') {
         const notes = await operatorFetch('/api/notes/sources');
         if (!current()) return;
-        clearOperatorPanel(panel);
-        panel.appendChild(operatorHeading('Notes'));
-        if (!notes.enabled) {
-          appendOperatorRow(panel, 'Notes source is not connected.', 'Enable an approved local notes source to display recent notes here.', 'warning');
-          return;
-        }
-        const sources = Array.isArray(notes.sources) ? notes.sources : [];
-        appendOperatorRow(panel, `${sources.length} note source${sources.length === 1 ? '' : 's'} available.`, 'Read-only recent notes are shown below.', 'ready');
-        const recent = Array.isArray(notes.recent_ai_notes) ? notes.recent_ai_notes.slice(0, 5) : [];
-        if (recent.length) {
-          recent.forEach((note) => appendOperatorRow(panel, String(note.title || 'Untitled note'), String(note.updated_time || ''), 'ready'));
-        } else {
-          appendOperatorRow(panel, 'No recent notes returned.', 'The source is connected but has no recent AI notes.', 'muted');
-        }
+        renderNotesWorkspace(panel, dlg, notes);
         return;
       }
       if (key === 'alerts') {
@@ -3378,7 +3536,7 @@
       `<label for="biggyWeatherZip">Weather ZIP</label>` +
       `<input id="biggyWeatherZip" name="zip" inputmode="numeric" autocomplete="postal-code" maxlength="5" pattern="[0-9]{5}" value="${savedWeatherZip()}" aria-label="Weather ZIP code">` +
       `<button type="submit">Load forecast</button>` +
-      `<a class="biggy-weather-radar-link" id="biggyWeatherRadarLink" href="radar://open" data-testid="biggy-weather-myradar-primary" title="Open the local MyRadar app">Open MyRadar</a>` +
+      `<a class="biggy-weather-radar-link" id="biggyWeatherRadarLink" href="myradar://open" data-testid="biggy-weather-myradar-primary" title="Open MyRadar on this device">Open MyRadar</a>` +
       `</form>` +
       `<div class="biggy-weather-current" id="biggyWeatherCurrent"></div>` +
       `<div class="biggy-weather-forecast" id="biggyWeatherForecast"></div>` +
@@ -4012,10 +4170,16 @@
   };
 
   function safeJarvisVisualActionHref(value) {
-    // The PA may only offer the two reviewed, host-local MyRadar launch targets.
+    // The browser resolves this custom protocol on the workstation displaying
+    // Biggy.  Thus a TD browser opens TD's MyRadar, while Smedley opens its own.
     // Never turn arbitrary model text into a custom-protocol launch link.
     const href = String(value || '').trim();
-    return href === 'radar://open' || href === 'radar://primary' ? href : '';
+    if (href === 'myradar://open' || href === 'myradar://primary') return href;
+    // Normalize the retired PA contract so cached/session view models cannot
+    // put the dead `radar://` scheme back onto the weather card.
+    if (href === 'radar://open') return 'myradar://open';
+    if (href === 'radar://primary') return 'myradar://primary';
+    return '';
   }
 
   function renderVisualActionViewModel(vm) {
@@ -4046,8 +4210,8 @@
       a.className = 'biggy-travel-nav-btn';
       a.href = item.href;
       a.textContent = item.label;
-      a.setAttribute('data-testid', item.href === 'radar://primary' ? 'biggy-weather-myradar-primary' : 'biggy-weather-myradar-secondary');
-      a.setAttribute('title', 'Opens local MyRadar only after you click');
+      a.setAttribute('data-testid', item.href === 'myradar://primary' ? 'biggy-weather-myradar-primary' : 'biggy-weather-myradar-secondary');
+      a.setAttribute('title', 'Opens MyRadar on this device after you click');
       actionBox.appendChild(a);
     });
     if (note) {

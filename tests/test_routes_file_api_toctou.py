@@ -93,6 +93,34 @@ def test_inline_html_preview_reads_through_anchor(monkeypatch, tmp_path):
     assert calls == [(workspace, target.resolve(), False)]
 
 
+def test_inline_html_preview_can_anchor_relative_rag_links(monkeypatch, tmp_path):
+    from api import routes
+
+    workspace = tmp_path / "Library"
+    target = workspace / "Vendor Data" / "_INDEX" / "library.html"
+    target.parent.mkdir(parents=True)
+    target.write_text(
+        '<html><head></head><body><a href="../manual.pdf">Manual</a></body></html>',
+        encoding="utf-8",
+    )
+    handler = _FakeHandler()
+
+    routes._serve_inline_html_preview(
+        handler,
+        target,
+        "no-store",
+        csp="sandbox allow-scripts allow-forms allow-popups",
+        anchor_root=workspace,
+        base_href="/api/biggy/rag-file-path/Vendor%20Data/_INDEX/",
+    )
+
+    assert handler.status == 200
+    assert (
+        b'<base href="/api/biggy/rag-file-path/Vendor%20Data/_INDEX/" target="_blank">'
+        in handler.body
+    )
+
+
 def test_editor_file_endpoints_use_anchored_helpers():
     src = ROUTES_PY.read_text(encoding="utf-8")
     delete_body = _func_body(src, "_handle_file_delete")

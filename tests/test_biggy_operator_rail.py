@@ -41,3 +41,19 @@ def test_operator_panels_do_not_take_map_or_galaxy_ownership():
     operator_block = BRAND[start:end]
     assert "setGalaxyRenderPaused" not in operator_block
     assert "renderMapViewModelOnce" not in operator_block
+
+
+def test_notes_panel_is_a_local_obsidian_workspace_not_a_read_only_status_list():
+    assert "/api/notes/search" in BRAND
+    assert "/api/notes/item" in BRAND
+    assert "/api/notes/create" in BRAND
+    assert "/api/notes/update" in BRAND
+    assert "/api/notes/delete" in BRAND
+    assert "New note" in BRAND
+    assert "Search notes" in BRAND
+    assert "Save note" in BRAND
+    assert "Delete “${String(note.title || 'this note')}”?" in BRAND
+    assert "confirmed: true" in BRAND
+    assert "source=obsidian" in BRAND
+    assert "source: 'obsidian'" in BRAND
+    assert "Obsidian vault ready." in BRAND
