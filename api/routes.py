@@ -12804,6 +12804,36 @@ def handle_get(handler, parsed) -> bool:
                 status=500,
             )
 
+    if parsed.path == "/api/biggy/pa/mail":
+        try:
+            from api.biggy_pa_sources import mail_snapshot
+
+            return j(handler, mail_snapshot(), status=200)
+        except Exception:
+            logger.exception("biggy mail source failed")
+            return j(handler, {"schema": "biggy.pa.mail.v1", "connected": False, "messages": [], "error": "mail unavailable"}, status=200)
+
+    if parsed.path == "/api/biggy/pa/calendar":
+        try:
+            from api.biggy_pa_sources import calendar_snapshot
+
+            return j(handler, calendar_snapshot(), status=200)
+        except Exception:
+            logger.exception("biggy calendar source failed")
+            return j(handler, {"schema": "biggy.pa.calendar.v1", "connected": False, "events": [], "error": "calendar unavailable"}, status=200)
+
+    if parsed.path == "/api/biggy/pa/weather":
+        try:
+            from api.biggy_pa_sources import weather_snapshot
+
+            zip_code = parse_qs(parsed.query or "").get("zip", ["32444"])[0]
+            return j(handler, weather_snapshot(zip_code), status=200)
+        except ValueError as exc:
+            return j(handler, {"schema": "biggy.pa.weather.v1", "ok": False, "error": str(exc)}, status=400)
+        except Exception:
+            logger.exception("biggy weather source failed")
+            return j(handler, {"schema": "biggy.pa.weather.v1", "ok": False, "forecast": [], "error": "weather unavailable"}, status=200)
+
     if parsed.path in ("/api/biggy/v6/health", "/api/biggy/v6/status"):
         try:
             from api.jarvis_v6_bridge import JarvisBridge
@@ -14514,6 +14544,30 @@ def handle_post(handler, parsed) -> bool:
         except Exception:
             logger.exception("ARGUS ingestion disposition failed")
             return bad(handler, "ingestion disposition failed", 500)
+
+    pa_google_actions = {
+        "/api/biggy/pa/mail/draft": ("create_mail_draft", "mail draft"),
+        "/api/biggy/pa/mail/send": ("send_mail_draft", "mail send"),
+        "/api/biggy/pa/mail/discard": ("discard_mail_draft", "mail draft discard"),
+        "/api/biggy/pa/calendar/create": ("create_calendar_event", "calendar create"),
+        "/api/biggy/pa/calendar/update": ("update_calendar_event", "calendar update"),
+        "/api/biggy/pa/calendar/delete": ("delete_calendar_event", "calendar delete"),
+    }
+    if parsed.path in pa_google_actions:
+        function_name, action_name = pa_google_actions[parsed.path]
+        try:
+            body = _read_json_request_body(handler, max_bytes=64 * 1024)
+            from api import biggy_pa_sources
+
+            action = getattr(biggy_pa_sources, function_name)
+            return j(handler, action(body), status=200)
+        except PermissionError as exc:
+            return bad(handler, _sanitize_error(exc), 403)
+        except ValueError as exc:
+            return bad(handler, _sanitize_error(exc), 400)
+        except Exception:
+            logger.exception("biggy %s failed", action_name)
+            return bad(handler, f"{action_name} failed", 502)
 
     if parsed.path == "/api/shutdown":
         return _handle_shutdown(handler)

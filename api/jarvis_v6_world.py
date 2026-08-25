@@ -87,6 +87,11 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
   let landingZoomApplied = false;
   let landingCameraPosition = null;
   let landingResetTimer = null;
+  let argusActivityState = 'online';
+  let nativeParticleSpeed = null;
+  let nativeParticleWidth = null;
+  const SYNAPSE_REST_SCALE = 1.5;
+  const SYNAPSE_THINKING_MULTIPLIER = 2;
   const LANDING_CAMERA = Object.freeze({ x: 0, y: 0, z: 1120 });
   const edge = (a, b) => `${Math.min(a,b)}:${Math.max(a,b)}`;
   const canonicalSource = value => String(value || '').replace(/\\/g, '/').replace(/^.*?\/Library\//, '').replace(/^\/+/, '');
@@ -131,12 +136,39 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
       const a = nodeFor(link.source), b = nodeFor(link.target);
       return (a && b && (a.g === 'router' || b.g === 'router' || (a.g === 'folder' && b.g === 'folder'))) ? 1.25 : 0.78;
     };
+    // Preserve the original V6 accessors, then increase the ambient synapse
+    // tracer size and speed by 50%. While A.R.G.U.S. is gathering evidence,
+    // the same native tracers run at twice that new baseline (3x original).
+    nativeParticleSpeed = typeof g.linkDirectionalParticleSpeed === 'function'
+      ? g.linkDirectionalParticleSpeed() : 0.0035;
+    nativeParticleWidth = typeof g.linkDirectionalParticleWidth === 'function'
+      ? g.linkDirectionalParticleWidth() : 1.5;
+    const particleValue = (accessor, link, fallback) => {
+      const value = typeof accessor === 'function' ? accessor(link) : accessor;
+      const numeric = Number(value);
+      return Number.isFinite(numeric) ? numeric : fallback;
+    };
+    const activityMultiplier = () => argusActivityState === 'thinking'
+      ? SYNAPSE_THINKING_MULTIPLIER : 1;
+    g.linkDirectionalParticleSpeed(link => particleValue(nativeParticleSpeed, link, 0.0035)
+      * SYNAPSE_REST_SCALE * activityMultiplier());
+    g.linkDirectionalParticleWidth(link => particleValue(nativeParticleWidth, link, 1.5)
+      * SYNAPSE_REST_SCALE * activityMultiplier());
     // Keep inactive corpus routes legible from the room; the active trace is
     // still brighter and thicker, but the rest of the graph must not vanish.
     g.linkColor(idleColor).linkWidth(idleWidth).linkOpacity(0.92);
     if (typeof g.nodeOpacity === 'function') g.nodeOpacity(0.94);
     idleContrastInstalled = true;
     return true;
+  }
+  function setArgusActivityState(state) {
+    const next = String(state || '').toLowerCase();
+    if (!next || next === argusActivityState) return;
+    argusActivityState = next;
+    // Accessors read the state without replacing the 1,104-link graph data.
+    // refresh() updates particle geometry without reheating the simulation.
+    const g = graph();
+    if (g && typeof g.refresh === 'function') g.refresh();
   }
   function restoreBaseGalaxyVisibility() {
     const os = window.__os || {};
@@ -477,6 +509,7 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
       restore();
       parent.postMessage({ type: 'biggy-rag-trace-cleared' }, location.origin);
     }
+    if (data.type === 'biggy-argus-state') setArgusActivityState(data.state);
     if (data.type === 'biggy-world-pause') {
       const g = graph();
       const controls = g && g.controls && g.controls();

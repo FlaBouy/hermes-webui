@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260824-argus-audio-sync-2';
+  const BUILD_ID = '20260825-argus-activity-1';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
@@ -615,6 +615,18 @@
       resetBiggyWorkspace();
     });
     strip.appendChild(home);
+    const sync = el('span', 'biggy-fleet-sync-wrap');
+    sync.innerHTML =
+      '<button id="argusSpeechSyncToggle" class="biggy-fleet-machine biggy-fleet-sync is-online" type="button" '
+      + 'aria-expanded="false" aria-controls="argusSpeechSyncPanel" title="Tune A.R.G.U.S. speech pulse timing">'
+      + '<span class="biggy-fleet-state" aria-hidden="true"></span><span>SYNC</span></button>'
+      + '<div id="argusSpeechSyncPanel" class="biggy-argus-sync-panel" hidden>'
+      + '<label>GAIN <input id="argusSpeechSyncGain" type="range" min="0.5" max="2" step="0.05">'
+      + '<output id="argusSpeechSyncGainOut">100%</output></label>'
+      + '<label>LEAD <input id="argusSpeechSyncLead" type="range" min="-250" max="300" step="10">'
+      + '<output id="argusSpeechSyncLeadOut">+80 ms</output></label></div>';
+    strip.appendChild(sync);
+    installArgusSpeechSyncTuner(sync);
     machines.forEach((machine) => {
       const button = el('button', `biggy-fleet-machine is-${machine.state || 'offline'}`);
       button.type = 'button';
@@ -1185,6 +1197,9 @@
       // authoritative speaking phase, not pedal connectivity.
       if (ours && phase === 'speaking') {
         setJarvisOrbState('speaking', 'Alistar voice active');
+      } else if (ours && phase === 'processing') {
+        stopArgusSpeechPulse();
+        setJarvisOrbState('thinking', 'gathering information');
       } else if (argusSpeechPulseSignature) {
         stopArgusSpeechPulse();
         if (!jarvisOrbFlight) pollJarvisV6Health().catch(() => {});
@@ -1467,6 +1482,7 @@
 
   let jarvisOrbFlight = false;
   let jarvisHealthTimer = null;
+  let jarvisOrbState = 'offline';
 
   // Mirrors V6's own STATE_STYLE table (3d.html) — label, css color, pulse —
   // extended with offline/tool-running/error, which the standalone V6 orb
@@ -1494,6 +1510,16 @@
 
   function setJarvisOrbState(state, detail) {
     const next = ORB_STATES.includes(state) ? state : 'error';
+    jarvisOrbState = next;
+    const frame = document.getElementById('biggyV6World');
+    if (frame && frame.contentWindow) {
+      try {
+        frame.contentWindow.postMessage(
+          { type: 'biggy-argus-state', state: next },
+          window.location.origin,
+        );
+      } catch (_) {}
+    }
     const orb = document.getElementById('j-orb');
     if (!orb) return;
     orb.className = REACTOR_ORB_CLASS[next] || '';
@@ -1585,8 +1611,7 @@
   }
 
   function installArgusSpeechSyncTuner(dock) {
-    if (!dock || dock.dataset.syncTunerInstalled === '1') return;
-    dock.dataset.syncTunerInstalled = '1';
+    if (!dock) return;
     loadArgusSpeechSyncSettings();
     const toggle = dock.querySelector('#argusSpeechSyncToggle');
     const panel = dock.querySelector('#argusSpeechSyncPanel');
@@ -1595,6 +1620,8 @@
     const gainOut = dock.querySelector('#argusSpeechSyncGainOut');
     const leadOut = dock.querySelector('#argusSpeechSyncLeadOut');
     if (!toggle || !panel || !gain || !lead || !gainOut || !leadOut) return;
+    if (toggle.dataset.bound === '1') return;
+    toggle.dataset.bound = '1';
 
     const render = () => {
       gain.value = String(argusSpeechPulseGain);
@@ -2400,6 +2427,12 @@
         }
         if (booted) {
           fallback.classList.remove('is-active');
+          try {
+            iframe.contentWindow.postMessage(
+              { type: 'biggy-argus-state', state: jarvisOrbState },
+              window.location.origin,
+            );
+          } catch (_) {}
           scheduleGalaxyCanvasSize();
           return;
         }
@@ -2471,13 +2504,7 @@
       `</g>` +
       `</svg>` +
       `</div>` +
-      `<div id="j-state" data-testid="biggy-jarvis-state"><span class="dot"></span><span id="j-state-txt">OFFLINE</span></div>` +
-      `<div class="biggy-argus-sync-tuner">` +
-      `<button id="argusSpeechSyncToggle" type="button" aria-expanded="false" aria-controls="argusSpeechSyncPanel">SYNC</button>` +
-      `<div id="argusSpeechSyncPanel" class="biggy-argus-sync-panel" hidden>` +
-      `<label>GAIN <input id="argusSpeechSyncGain" type="range" min="0.5" max="2" step="0.05"><output id="argusSpeechSyncGainOut">100%</output></label>` +
-      `<label>LEAD <input id="argusSpeechSyncLead" type="range" min="-250" max="300" step="10"><output id="argusSpeechSyncLeadOut">+80 ms</output></label>` +
-      `</div></div>`;
+      `<div id="j-state" data-testid="biggy-jarvis-state"><span class="dot"></span><span id="j-state-txt">OFFLINE</span></div>`;
     return dock;
   }
 
@@ -2554,13 +2581,170 @@
 
   const TRAVEL_CATEGORIES = [
     'Travel',
+    'Calendar',
+    'Mail',
     'Weather',
     'Lodging',
     'Meals',
     'Entertainment',
     'Fuel',
-    'Other',
+    'Tasks',
+    'Notes',
+    'Alerts',
   ];
+  const BIGGY_DEFAULT_WEATHER_ZIP = '32444';
+  const BIGGY_WEATHER_ZIP_KEY = 'biggy.weather.zip';
+
+  function savedWeatherZip() {
+    try {
+      const value = String(window.localStorage.getItem(BIGGY_WEATHER_ZIP_KEY) || '').trim();
+      return /^\d{5}$/.test(value) ? value : BIGGY_DEFAULT_WEATHER_ZIP;
+    } catch (_) {
+      return BIGGY_DEFAULT_WEATHER_ZIP;
+    }
+  }
+
+  function extractWeatherZip(value) {
+    const match = String(value || '').match(/(?:^|\D)(\d{5})(?::US)?(?:\D|$)/i);
+    return match ? match[1] : '';
+  }
+
+  function weatherTemperature(value) {
+    if (value === null || value === undefined || value === '') return '—';
+    const number = Number(value);
+    return Number.isFinite(number) ? `${Math.round(number)}°` : '—';
+  }
+
+  function hasWeatherNumber(value) {
+    return value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value));
+  }
+
+  function renderWeatherPanel(dlg, weather) {
+    const state = dlg && dlg.querySelector('#biggyWeatherState');
+    if (!state) return;
+    const currentBox = state.querySelector('#biggyWeatherCurrent');
+    const forecastBox = state.querySelector('#biggyWeatherForecast');
+    const status = state.querySelector('#biggyWeatherStatus');
+    const zipInput = state.querySelector('#biggyWeatherZip');
+    const payload = weather && typeof weather === 'object' ? weather : {};
+    const zipCode = extractWeatherZip(payload.zip) || (zipInput && inputWeatherZip(zipInput)) || BIGGY_DEFAULT_WEATHER_ZIP;
+    if (zipInput) zipInput.value = zipCode;
+    if (currentBox) {
+      currentBox.replaceChildren();
+      const current = payload.current && typeof payload.current === 'object' ? payload.current : {};
+      const temp = document.createElement('div');
+      temp.className = 'biggy-weather-current-temp';
+      temp.textContent = weatherTemperature(current.temp_f);
+      const copy = document.createElement('div');
+      copy.className = 'biggy-weather-current-copy';
+      const place = document.createElement('strong');
+      place.textContent = String(payload.location || zipCode);
+      const conditions = document.createElement('span');
+      const detail = [
+        String(current.summary || '').trim(),
+        hasWeatherNumber(current.humidity_percent) ? `Humidity ${Math.round(Number(current.humidity_percent))}%` : '',
+        hasWeatherNumber(current.wind_mph) ? `Wind ${Math.round(Number(current.wind_mph))} mph` : '',
+      ].filter(Boolean).join(' · ');
+      conditions.textContent = detail || 'Current observation pending';
+      copy.append(place, conditions);
+      currentBox.append(temp, copy);
+    }
+    if (forecastBox) {
+      forecastBox.replaceChildren();
+      const rows = Array.isArray(payload.forecast) ? payload.forecast.slice(0, 7) : [];
+      rows.forEach((row) => {
+        const card = document.createElement('article');
+        card.className = 'biggy-weather-day';
+        const day = document.createElement('strong');
+        day.textContent = String(row.day || row.date || 'Forecast');
+        const temps = document.createElement('div');
+        temps.className = 'biggy-weather-day-temps';
+        temps.textContent = `${weatherTemperature(row.high_f)} / ${weatherTemperature(row.low_f)}`;
+        const summary = document.createElement('span');
+        summary.textContent = String(row.summary || 'Forecast available');
+        const precip = document.createElement('small');
+        precip.textContent = hasWeatherNumber(row.precip_percent) ? `${Math.round(Number(row.precip_percent))}% precipitation` : '';
+        card.append(day, temps, summary, precip);
+        forecastBox.appendChild(card);
+      });
+      if (!rows.length) {
+        const unavailable = document.createElement('div');
+        unavailable.className = 'biggy-weather-unavailable';
+        unavailable.textContent = String(payload.error || 'Live forecast is temporarily unavailable. Retry or enter another ZIP.');
+        forecastBox.appendChild(unavailable);
+      }
+    }
+    if (status) {
+      status.className = `biggy-weather-status${payload.stale || !payload.ok ? ' is-warning' : ''}`;
+      status.textContent = String(payload.warning || payload.error || `${payload.source || 'Weather service'}${payload.updated ? ` · updated ${payload.updated}` : ''}`);
+    }
+  }
+
+  function inputWeatherZip(input) {
+    return extractWeatherZip(input && input.value);
+  }
+
+  async function refreshWeatherPanel(dlg, requestedZip, { persist = true } = {}) {
+    const state = dlg && dlg.querySelector('#biggyWeatherState');
+    if (!state) return false;
+    const input = state.querySelector('#biggyWeatherZip');
+    const zipCode = extractWeatherZip(requestedZip) || inputWeatherZip(input) || savedWeatherZip();
+    if (input) input.value = zipCode;
+    if (persist) {
+      try { window.localStorage.setItem(BIGGY_WEATHER_ZIP_KEY, zipCode); } catch (_) {}
+    }
+    const status = state.querySelector('#biggyWeatherStatus');
+    if (status) {
+      status.className = 'biggy-weather-status is-loading';
+      status.textContent = `Loading the 5–7 day forecast for ${zipCode}…`;
+    }
+    try {
+      const weather = await operatorFetch(`/api/biggy/pa/weather?zip=${encodeURIComponent(zipCode)}`);
+      renderWeatherPanel(dlg, weather);
+      return !!weather.ok;
+    } catch (error) {
+      renderWeatherPanel(dlg, { ok: false, zip: zipCode, error: String(error && error.message || 'Weather refresh failed.') });
+      return false;
+    }
+  }
+
+  function renderArgusWeatherBriefing(dlg, briefing) {
+    if (!briefing || typeof briefing !== 'object') return false;
+    const periods = briefing.forecast && Array.isArray(briefing.forecast.periods)
+      ? briefing.forecast.periods.slice(0, 7)
+      : [];
+    if (!periods.length) return false;
+    const currents = briefing.currents && typeof briefing.currents === 'object' ? briefing.currents : {};
+    const explicitZip = extractWeatherZip(briefing.location_echo);
+    const source = briefing.source && typeof briefing.source === 'object' ? briefing.source : {};
+    renderWeatherPanel(dlg, {
+      ok: true,
+      zip: explicitZip || savedWeatherZip(),
+      location: String(currents.location || briefing.location_label || briefing.location_echo || explicitZip || 'Weather forecast'),
+      source: source.provider === 'weather_underground_twc' ? 'Weather Underground / The Weather Company' : String(source.provider || 'A.R.G.U.S. weather briefing'),
+      updated: String(currents.observed_at || ''),
+      current: {
+        temp_f: currents.temp_f,
+        summary: String(currents.summary || ''),
+        humidity_percent: currents.humidity_percent,
+        wind_mph: currents.wind_mph,
+      },
+      forecast: periods.map((period) => ({
+        day: period.day,
+        date: period.date,
+        high_f: period.high_f,
+        low_f: period.low_f,
+        precip_percent: period.precip_percent,
+        summary: period.summary,
+      })),
+      stale: false,
+      warning: '',
+    });
+    if (explicitZip) {
+      try { window.localStorage.setItem(BIGGY_WEATHER_ZIP_KEY, explicitZip); } catch (_) {}
+    }
+    return true;
+  }
 
   function railCategoryKey(label) {
     return String(label || '').trim().toLowerCase();
@@ -2576,7 +2760,393 @@
     }
     if (c === 'entertainment' || c === 'event' || c === 'shows') return 'entertainment';
     if (c === 'fuel' || c === 'gas') return 'fuel';
-    return 'other';
+    if (c === 'mail' || c === 'email' || c === 'inbox') return 'mail';
+    if (c === 'task' || c === 'tasks' || c === 'todo') return 'tasks';
+    if (c === 'note' || c === 'notes') return 'notes';
+    if (c === 'alert' || c === 'alerts' || c === 'status') return 'alerts';
+    if (c === 'calendar' || c === 'schedule') return 'calendar';
+    return 'travel';
+  }
+
+  function operatorPanel(dlg, key) {
+    return dlg ? dlg.querySelector(`[data-biggy-operator-panel="${key}"]`) : null;
+  }
+
+  function clearOperatorPanel(panel) {
+    if (panel) panel.replaceChildren();
+  }
+
+  function operatorHeading(text) {
+    const heading = document.createElement('div');
+    heading.className = 'biggy-operator-panel-title';
+    heading.textContent = text;
+    return heading;
+  }
+
+  function operatorMessage(panel, text, state) {
+    clearOperatorPanel(panel);
+    const message = document.createElement('p');
+    message.className = `biggy-operator-message ${state ? `is-${state}` : ''}`;
+    message.textContent = text;
+    panel.appendChild(message);
+  }
+
+  async function operatorFetch(url, options = {}) {
+    const method = String(options.method || 'GET').toUpperCase();
+    const fetchOptions = { credentials: 'same-origin', method };
+    if (method !== 'GET' && options.body !== undefined) {
+      fetchOptions.headers = { 'Content-Type': 'application/json' };
+      fetchOptions.body = JSON.stringify(options.body);
+    }
+    const response = await fetch(url, fetchOptions);
+    let payload = {};
+    try { payload = await response.json(); } catch (_) {}
+    if (!response.ok) throw new Error(String((payload && payload.error) || `HTTP ${response.status}`));
+    return payload && typeof payload === 'object' ? payload : {};
+  }
+
+  function appendOperatorRow(panel, primary, secondary, state) {
+    const row = document.createElement('div');
+    row.className = `biggy-operator-row ${state ? `is-${state}` : ''}`;
+    const title = document.createElement('div');
+    title.className = 'biggy-operator-row-title';
+    title.textContent = primary;
+    row.appendChild(title);
+    if (secondary) {
+      const detail = document.createElement('div');
+      detail.className = 'biggy-operator-row-detail';
+      detail.textContent = secondary;
+      row.appendChild(detail);
+    }
+    panel.appendChild(row);
+    return row;
+  }
+
+  function operatorButton(label, tone = '') {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `biggy-operator-btn${tone ? ` is-${tone}` : ''}`;
+    button.textContent = label;
+    return button;
+  }
+
+  function operatorField(label, name, type = 'text', value = '') {
+    const wrapper = document.createElement('label');
+    wrapper.className = 'biggy-operator-field';
+    const caption = document.createElement('span');
+    caption.textContent = label;
+    const input = type === 'textarea' ? document.createElement('textarea') : document.createElement('input');
+    input.name = name;
+    if (type !== 'textarea') input.type = type;
+    if (type === 'email') input.multiple = true;
+    input.value = value || '';
+    if (['to', 'subject', 'summary', 'start', 'end'].includes(name)) input.required = true;
+    wrapper.append(caption, input);
+    return wrapper;
+  }
+
+  function operatorFormStatus(form, text, state = '') {
+    let status = form.querySelector('.biggy-operator-form-status');
+    if (!status) {
+      status = document.createElement('div');
+      status.className = 'biggy-operator-form-status';
+      form.appendChild(status);
+    }
+    status.className = `biggy-operator-form-status${state ? ` is-${state}` : ''}`;
+    status.textContent = text || '';
+  }
+
+  function localDateTimeValue(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const pad = (number) => String(number).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+  }
+
+  function calendarPayload(form) {
+    const data = new FormData(form);
+    const start = new Date(String(data.get('start') || ''));
+    const end = new Date(String(data.get('end') || ''));
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) throw new Error('Start and end times are required.');
+    if (end <= start) throw new Error('End must be after start.');
+    return {
+      summary: String(data.get('summary') || '').trim(),
+      start: start.toISOString(),
+      end: end.toISOString(),
+      location: String(data.get('location') || '').trim(),
+      description: String(data.get('description') || '').trim(),
+    };
+  }
+
+  function appendCalendarForm(panel, dlg, event = null) {
+    const editing = !!(event && event.id);
+    const form = document.createElement('form');
+    form.className = 'biggy-operator-form biggy-calendar-form';
+    form.appendChild(operatorHeading(editing ? 'Edit event' : 'Add event'));
+    form.appendChild(operatorField('Title', 'summary', 'text', event && event.summary));
+    const times = document.createElement('div');
+    times.className = 'biggy-operator-form-grid';
+    times.appendChild(operatorField('Start', 'start', 'datetime-local', localDateTimeValue(event && event.start)));
+    times.appendChild(operatorField('End', 'end', 'datetime-local', localDateTimeValue(event && event.end)));
+    form.appendChild(times);
+    form.appendChild(operatorField('Location', 'location', 'text', event && event.location));
+    form.appendChild(operatorField('Notes', 'description', 'textarea', event && event.description));
+    const actions = document.createElement('div');
+    actions.className = 'biggy-operator-actions';
+    const save = operatorButton(editing ? 'Save changes' : 'Add to calendar', 'primary');
+    save.type = 'submit';
+    actions.appendChild(save);
+    if (editing) {
+      const cancel = operatorButton('Cancel');
+      cancel.addEventListener('click', () => refreshOperatorPanel(dlg, 'calendar'));
+      actions.appendChild(cancel);
+    }
+    form.appendChild(actions);
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      save.disabled = true;
+      operatorFormStatus(form, editing ? 'Saving event…' : 'Creating event…', 'loading');
+      try {
+        const body = calendarPayload(form);
+        if (editing) body.event_id = String(event.id);
+        await operatorFetch(editing ? '/api/biggy/pa/calendar/update' : '/api/biggy/pa/calendar/create', { method: 'POST', body });
+        await refreshOperatorPanel(dlg, 'calendar');
+      } catch (error) {
+        operatorFormStatus(form, String(error && error.message || 'Calendar action failed.'), 'warning');
+        save.disabled = false;
+      }
+    });
+    panel.appendChild(form);
+  }
+
+  function appendMailComposer(panel, dlg) {
+    const form = document.createElement('form');
+    form.className = 'biggy-operator-form biggy-mail-form';
+    form.appendChild(operatorHeading('New draft'));
+    form.appendChild(operatorField('To', 'to', 'email'));
+    form.appendChild(operatorField('Cc', 'cc', 'text'));
+    form.appendChild(operatorField('Subject', 'subject'));
+    form.appendChild(operatorField('Message', 'body', 'textarea'));
+    const actions = document.createElement('div');
+    actions.className = 'biggy-operator-actions';
+    const create = operatorButton('Create draft', 'primary');
+    create.type = 'submit';
+    actions.appendChild(create);
+    form.appendChild(actions);
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const data = new FormData(form);
+      create.disabled = true;
+      operatorFormStatus(form, 'Creating Gmail draft…', 'loading');
+      try {
+        const result = await operatorFetch('/api/biggy/pa/mail/draft', {
+          method: 'POST',
+          body: {
+            to: String(data.get('to') || '').trim(),
+            cc: String(data.get('cc') || '').trim(),
+            subject: String(data.get('subject') || '').trim(),
+            body: String(data.get('body') || '').trim(),
+          },
+        });
+        renderMailDraftReview(panel, dlg, result.draft || {});
+      } catch (error) {
+        operatorFormStatus(form, String(error && error.message || 'Draft creation failed.'), 'warning');
+        create.disabled = false;
+      }
+    });
+    panel.appendChild(form);
+  }
+
+  function renderMailDraftReview(panel, dlg, draft) {
+    clearOperatorPanel(panel);
+    panel.appendChild(operatorHeading('Review Gmail draft'));
+    appendOperatorRow(panel, String(draft.subject || '(no subject)'), `To: ${String(draft.to || '')}${draft.cc ? ` · Cc: ${draft.cc}` : ''}`, 'warning');
+    const body = document.createElement('pre');
+    body.className = 'biggy-operator-draft-body';
+    body.textContent = String(draft.body || '');
+    panel.appendChild(body);
+    const note = document.createElement('p');
+    note.className = 'biggy-operator-confirm-note';
+    note.textContent = 'Nothing has been sent. Review the recipient, subject, and message before confirming.';
+    panel.appendChild(note);
+    const actions = document.createElement('div');
+    actions.className = 'biggy-operator-actions';
+    const send = operatorButton('Send email', 'danger');
+    const discard = operatorButton('Discard draft');
+    const back = operatorButton('Keep draft and return');
+    actions.append(send, discard, back);
+    panel.appendChild(actions);
+    back.addEventListener('click', () => refreshOperatorPanel(dlg, 'mail'));
+    send.addEventListener('click', async () => {
+      if (!window.confirm(`Send this email to ${String(draft.to || 'the listed recipient')}?`)) return;
+      send.disabled = true;
+      try {
+        await operatorFetch('/api/biggy/pa/mail/send', { method: 'POST', body: { draft_id: draft.id, confirmed: true } });
+        operatorMessage(panel, 'Email sent.', 'ready');
+      } catch (error) {
+        operatorMessage(panel, String(error && error.message || 'Email send failed.'), 'warning');
+      }
+    });
+    discard.addEventListener('click', async () => {
+      if (!window.confirm('Discard this Gmail draft?')) return;
+      discard.disabled = true;
+      try {
+        await operatorFetch('/api/biggy/pa/mail/discard', { method: 'POST', body: { draft_id: draft.id, confirmed: true } });
+        await refreshOperatorPanel(dlg, 'mail');
+      } catch (error) {
+        operatorMessage(panel, String(error && error.message || 'Draft discard failed.'), 'warning');
+      }
+    });
+  }
+
+  async function refreshOperatorPanel(dlg, key) {
+    const panel = operatorPanel(dlg, key);
+    if (!panel) return;
+    const current = () => dlg.getAttribute('data-active-category') === key;
+    operatorMessage(panel, 'Loading local status…', 'loading');
+    try {
+      if (key === 'mail') {
+        const mail = await operatorFetch('/api/biggy/pa/mail');
+        if (!current()) return;
+        clearOperatorPanel(panel);
+        panel.appendChild(operatorHeading('Mail'));
+        if (!mail.connected) {
+          appendOperatorRow(panel, 'Biggy local Google authorization is required.', mail.oauth_ready ? 'OAuth client is ready for account approval.' : 'Codex plugins are connected; Biggy still needs its own profile-scoped OAuth client.', 'warning');
+          return;
+        }
+        if (mail.write_ready) {
+          appendMailComposer(panel, dlg);
+        } else {
+          appendOperatorRow(panel, 'Mail is currently read-only.', 'Reconnect Google once to enable Gmail drafts and confirmed sending.', 'warning');
+        }
+        if (mail.error) appendOperatorRow(panel, 'Mail refresh failed.', String(mail.error), 'warning');
+        const drafts = Array.isArray(mail.drafts) ? mail.drafts : [];
+        if (drafts.length) {
+          panel.appendChild(operatorHeading('Saved drafts'));
+          drafts.slice(0, 5).forEach((draft) => appendOperatorRow(panel, String(draft.subject || '(no subject)'), `DRAFT · To: ${String(draft.to || '')}${draft.snippet ? ` · ${draft.snippet}` : ''}`, 'warning'));
+        }
+        panel.appendChild(operatorHeading('Recent inbox'));
+        const messages = Array.isArray(mail.messages) ? mail.messages : [];
+        if (!messages.length && !mail.error) appendOperatorRow(panel, 'Inbox clear.', 'No recent inbox messages returned.', 'ready');
+        messages.slice(0, 10).forEach((message) => appendOperatorRow(panel, String(message.subject || '(no subject)'), `${message.unread ? 'UNREAD · ' : ''}${String(message.from || '')}${message.date ? ` · ${message.date}` : ''}`, message.unread ? 'warning' : 'ready'));
+        return;
+      }
+      if (key === 'calendar') {
+        const calendar = await operatorFetch('/api/biggy/pa/calendar');
+        if (!current()) return;
+        clearOperatorPanel(panel);
+        panel.appendChild(operatorHeading('Calendar'));
+        if (!calendar.connected) {
+          appendOperatorRow(panel, 'Biggy local Google authorization is required.', calendar.oauth_ready ? 'OAuth client is ready for account approval.' : 'Codex plugins are connected; Biggy still needs its own profile-scoped OAuth client.', 'warning');
+          return;
+        }
+        if (calendar.write_ready) {
+          appendCalendarForm(panel, dlg);
+        } else {
+          appendOperatorRow(panel, 'Calendar is currently read-only.', 'Reconnect Google once to enable event creation, editing, and deletion.', 'warning');
+        }
+        if (calendar.error) appendOperatorRow(panel, 'Calendar refresh failed.', String(calendar.error), 'warning');
+        panel.appendChild(operatorHeading('Upcoming events'));
+        const events = Array.isArray(calendar.events) ? calendar.events : [];
+        if (!events.length && !calendar.error) appendOperatorRow(panel, 'No upcoming events.', 'The next 10 days are clear.', 'ready');
+        events.slice(0, 20).forEach((event) => {
+          const row = appendOperatorRow(panel, String(event.summary || '(no title)'), `${String(event.start || '')}${event.location ? ` · ${event.location}` : ''}`, 'ready');
+          if (!calendar.write_ready || !event.id) return;
+          const actions = document.createElement('div');
+          actions.className = 'biggy-operator-actions is-compact';
+          const edit = operatorButton('Edit');
+          const remove = operatorButton('Delete', 'danger');
+          actions.append(edit, remove);
+          row.appendChild(actions);
+          edit.addEventListener('click', () => {
+            clearOperatorPanel(panel);
+            panel.appendChild(operatorHeading('Calendar'));
+            appendCalendarForm(panel, dlg, event);
+          });
+          remove.addEventListener('click', async () => {
+            if (!window.confirm(`Delete “${String(event.summary || 'this event')}” from your calendar?`)) return;
+            remove.disabled = true;
+            try {
+              await operatorFetch('/api/biggy/pa/calendar/delete', { method: 'POST', body: { event_id: event.id, confirmed: true } });
+              await refreshOperatorPanel(dlg, 'calendar');
+            } catch (error) {
+              remove.disabled = false;
+              const detail = row.querySelector('.biggy-operator-row-detail');
+              if (detail) detail.textContent = String(error && error.message || 'Delete failed.');
+              row.classList.add('is-warning');
+            }
+          });
+        });
+        return;
+      }
+      if (key === 'tasks') {
+        const board = await operatorFetch('/api/kanban/board?board=fleet-coordination');
+        if (!current()) return;
+        clearOperatorPanel(panel);
+        panel.appendChild(operatorHeading('Fleet coordination'));
+        const columns = Array.isArray(board.columns) ? board.columns : [];
+        const active = columns.filter((column) => !['done', 'archived'].includes(String(column.name || '').toLowerCase()));
+        let shown = 0;
+        active.forEach((column) => {
+          (Array.isArray(column.tasks) ? column.tasks : []).slice(0, 4).forEach((task) => {
+            shown += 1;
+            appendOperatorRow(
+              panel,
+              String(task.title || 'Untitled task'),
+              `${String(column.name || 'ready').toUpperCase()}${task.assignee ? ` · ${task.assignee}` : ''}`,
+              String(column.name || '').toLowerCase() === 'blocked' ? 'warning' : 'ready',
+            );
+          });
+        });
+        if (!shown) appendOperatorRow(panel, 'No open fleet tasks.', 'The coordination board is clear.', 'ready');
+        return;
+      }
+      if (key === 'notes') {
+        const notes = await operatorFetch('/api/notes/sources');
+        if (!current()) return;
+        clearOperatorPanel(panel);
+        panel.appendChild(operatorHeading('Notes'));
+        if (!notes.enabled) {
+          appendOperatorRow(panel, 'Notes source is not connected.', 'Enable an approved local notes source to display recent notes here.', 'warning');
+          return;
+        }
+        const sources = Array.isArray(notes.sources) ? notes.sources : [];
+        appendOperatorRow(panel, `${sources.length} note source${sources.length === 1 ? '' : 's'} available.`, 'Read-only recent notes are shown below.', 'ready');
+        const recent = Array.isArray(notes.recent_ai_notes) ? notes.recent_ai_notes.slice(0, 5) : [];
+        if (recent.length) {
+          recent.forEach((note) => appendOperatorRow(panel, String(note.title || 'Untitled note'), String(note.updated_time || ''), 'ready'));
+        } else {
+          appendOperatorRow(panel, 'No recent notes returned.', 'The source is connected but has no recent AI notes.', 'muted');
+        }
+        return;
+      }
+      if (key === 'alerts') {
+        const [ingest, fleet] = await Promise.all([
+          operatorFetch('/api/biggy/v6/world/status'),
+          operatorFetch('/api/biggy/fleet/status'),
+        ]);
+        if (!current()) return;
+        clearOperatorPanel(panel);
+        panel.appendChild(operatorHeading('Operational alerts'));
+        const ingestState = String(ingest.state || 'unknown').replace(/_/g, ' ');
+        const issue = String(ingest.last_error || '').trim();
+        appendOperatorRow(
+          panel,
+          `ARGUS ingest: ${ingestState}`,
+          issue || `Latency ${Math.round(Number(ingest.latency_ms || 0))} ms`,
+          issue || ingestState === 'error' ? 'warning' : 'ready',
+        );
+        const machines = Array.isArray(fleet.machines) ? fleet.machines : [];
+        machines.forEach((machine) => {
+          const state = String(machine.state || 'unknown');
+          appendOperatorRow(panel, `${machine.label || machine.id}: ${state}`, String(machine.detail || machine.worker_state || ''), state === 'error' || state === 'offline' ? 'warning' : 'ready');
+        });
+        return;
+      }
+    } catch (error) {
+      if (current()) operatorMessage(panel, `Unable to load this local status: ${String(error && error.message || 'unknown error')}`, 'warning');
+    }
   }
 
   function ensureTravelMapDialog() {
@@ -2628,6 +3198,24 @@
       `<div class="biggy-travel-lodging-note" id="biggyTravelLodgingNote"></div>` +
       `</div>` +
       `<div class="biggy-travel-map-note" id="biggyTravelMapNote"></div>` +
+      `<section class="biggy-weather-state" id="biggyWeatherState" hidden>` +
+      `<form class="biggy-weather-zip-form" id="biggyWeatherZipForm">` +
+      `<label for="biggyWeatherZip">Weather ZIP</label>` +
+      `<input id="biggyWeatherZip" name="zip" inputmode="numeric" autocomplete="postal-code" maxlength="5" pattern="[0-9]{5}" value="${savedWeatherZip()}" aria-label="Weather ZIP code">` +
+      `<button type="submit">Load forecast</button>` +
+      `<a class="biggy-weather-radar-link" id="biggyWeatherRadarLink" href="radar://open" data-testid="biggy-weather-myradar-primary" title="Open the local MyRadar app">Open MyRadar</a>` +
+      `</form>` +
+      `<div class="biggy-weather-current" id="biggyWeatherCurrent"></div>` +
+      `<div class="biggy-weather-forecast" id="biggyWeatherForecast"></div>` +
+      `<div class="biggy-weather-status" id="biggyWeatherStatus">Forecast has not been loaded yet.</div>` +
+      `</section>` +
+      `<div class="biggy-operator-state" id="biggyOperatorState" hidden>` +
+      `<div class="biggy-operator-panel" data-biggy-operator-panel="calendar" hidden></div>` +
+      `<div class="biggy-operator-panel" data-biggy-operator-panel="mail" hidden></div>` +
+      `<div class="biggy-operator-panel" data-biggy-operator-panel="tasks" hidden></div>` +
+      `<div class="biggy-operator-panel" data-biggy-operator-panel="notes" hidden></div>` +
+      `<div class="biggy-operator-panel" data-biggy-operator-panel="alerts" hidden></div>` +
+      `</div>` +
       `<div class="biggy-travel-empty-cat" id="biggyTravelEmptyCat" hidden>No options loaded for this category yet.</div>` +
       `</div>` +
       `</div>`;
@@ -2664,26 +3252,34 @@
       const mapActions = dlg.querySelector('#biggyTravelMapActions');
       const mapNote = dlg.querySelector('#biggyTravelMapNote');
       const lodging = dlg.querySelector('#biggyTravelLodging');
+      const operatorState = dlg.querySelector('#biggyOperatorState');
+      const weatherState = dlg.querySelector('#biggyWeatherState');
       const empty = dlg.querySelector('#biggyTravelEmptyCat');
       const showTravel = key === 'travel';
-      const showWeatherActions =
-        key === 'weather' && mapActions && mapActions.getAttribute('data-action-category') === 'weather' &&
-        mapActions.childElementCount > 0;
+      const showWeather = key === 'weather';
+      const showOperator = ['calendar', 'mail', 'tasks', 'notes', 'alerts'].includes(key);
       const recommendationKey = lodging
         ? mapRecCategoryToRail(lodging.getAttribute('data-rec-category') || '')
         : '';
       const showRecommendation = !!(
-        lodging && !showTravel && !showWeatherActions && key === recommendationKey &&
+        lodging && !showTravel && !showWeather && key === recommendationKey &&
         lodging.getAttribute('data-has-cards') === '1'
       );
       if (mapCanvas) mapCanvas.hidden = !showTravel;
-      if (mapActions) mapActions.hidden = !(showTravel || showWeatherActions);
-      if (mapNote) mapNote.hidden = !(showTravel || showWeatherActions);
+      if (mapActions) mapActions.hidden = !showTravel;
+      if (mapNote) mapNote.hidden = !showTravel;
+      if (weatherState) weatherState.hidden = !showWeather;
       if (lodging) {
         lodging.hidden = !showRecommendation;
       }
+      if (operatorState) {
+        operatorState.hidden = !showOperator;
+        operatorState.querySelectorAll('[data-biggy-operator-panel]').forEach((panel) => {
+          panel.hidden = panel.getAttribute('data-biggy-operator-panel') !== key;
+        });
+      }
       if (empty) {
-        empty.hidden = showTravel || showWeatherActions || showRecommendation;
+        empty.hidden = showTravel || showWeather || showRecommendation || showOperator;
       }
       if (open) {
         dlg.hidden = false;
@@ -2706,8 +3302,24 @@
           return;
         }
         setActiveCategory(key, { open: true });
+        if (key === 'weather') refreshWeatherPanel(dlg, savedWeatherZip());
+        if (['calendar', 'mail', 'tasks', 'notes', 'alerts'].includes(key)) refreshOperatorPanel(dlg, key);
       });
     });
+
+    const weatherForm = dlg.querySelector('#biggyWeatherZipForm');
+    if (weatherForm) {
+      weatherForm.addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        const input = weatherForm.querySelector('#biggyWeatherZip');
+        const zipCode = input && String(input.value || '').trim();
+        if (!/^\d{5}$/.test(zipCode)) {
+          renderWeatherPanel(dlg, { ok: false, zip: zipCode || BIGGY_DEFAULT_WEATHER_ZIP, error: 'Enter a five-digit ZIP code.' });
+          return;
+        }
+        refreshWeatherPanel(dlg, zipCode);
+      });
+    }
 
     const closeBtn = dlg.querySelector('#biggyTravelMapClose');
     if (closeBtn) {
@@ -3237,6 +3849,10 @@
 
     const dlg = ensureTravelMapDialog();
     if (!dlg) return false;
+    const weatherZip = extractWeatherZip(vm.location_echo || vm.location || vm.zip || vm.postal_code);
+    refreshWeatherPanel(dlg, weatherZip || savedWeatherZip(), { persist: !!weatherZip });
+    const radarLink = dlg.querySelector('#biggyWeatherRadarLink');
+    if (radarLink && actions[0]) radarLink.href = actions[0].href;
     const actionBox = dlg.querySelector('#biggyTravelMapActions');
     const note = dlg.querySelector('#biggyTravelMapNote');
     if (!actionBox) return false;
@@ -3276,7 +3892,8 @@
       const tpm = m.trip_plan_view_model;
       const lvm = m.lodging_view_model;
       const avm = m.visual_action_view_model;
-      const hasVisual = [mvm, rvm, tpm, lvm, avm].some((vm) => vm && typeof vm === 'object');
+      const weatherBriefing = m.weather_briefing;
+      const hasVisual = [mvm, rvm, tpm, lvm, avm, weatherBriefing].some((vm) => vm && typeof vm === 'object');
       // Only the latest completed assistant turn is eligible.  Do not walk
       // back through history: a RAG result must never resurrect travel cards.
       if (!hasVisual) {
@@ -3313,6 +3930,20 @@
         }
         if (avm && typeof avm === 'object') {
           visualActionOk = renderVisualActionViewModel(avm);
+        }
+        if (weatherBriefing && typeof weatherBriefing === 'object') {
+          const dlg = ensureTravelMapDialog();
+          const explicitZip = extractWeatherZip(weatherBriefing.location_echo);
+          const zipOverride = explicitZip
+            || extractWeatherZip(weatherBriefing.currents && weatherBriefing.currents.location)
+            || savedWeatherZip();
+          if (!renderArgusWeatherBriefing(dlg, weatherBriefing)) {
+            refreshWeatherPanel(dlg, zipOverride, { persist: !!explicitZip });
+          }
+          if (dlg && typeof dlg.__biggySetActiveCategory === 'function') {
+            dlg.__biggySetActiveCategory('weather', { open: true });
+          }
+          visualActionOk = true;
         }
       } catch (error) {
         console.error('[biggy] recommendation card hydration failed', error);
@@ -3395,7 +4026,6 @@
     const reactorDock = makeReactorDock();
     header.insertAdjacentElement('afterend', reactorDock);
     buildReactorHud();
-    installArgusSpeechSyncTuner(reactorDock);
     installPttBridge(header);
     moveCockpitControlsToRightRail(header);
     installJarvisV6Bridge(header);
