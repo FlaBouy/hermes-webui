@@ -34,8 +34,10 @@ _LOCK = threading.Lock()
 GMAIL_READ_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
 GMAIL_COMPOSE_SCOPE = "https://www.googleapis.com/auth/gmail.compose"
 CALENDAR_EVENTS_SCOPE = "https://www.googleapis.com/auth/calendar.events"
+CALENDAR_LIST_SCOPE = "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
 REQUIRED_WRITE_SCOPES = frozenset((GMAIL_COMPOSE_SCOPE, CALENDAR_EVENTS_SCOPE))
 _SAFE_GOOGLE_ID = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
+_SAFE_CALENDAR_ID = re.compile(r"^[^\x00-\x20\x7f]{1,512}$")
 _SAFE_ZIP = re.compile(r"^\d{5}$")
 _WEATHER_CACHE_TTL = 600.0
 _WEATHER_LAST_GOOD: dict[str, dict[str, Any]] = {}
@@ -95,6 +97,13 @@ def _invalidate(*keys: str) -> None:
     with _LOCK:
         for key in keys:
             _CACHE.pop(key, None)
+
+
+def _invalidate_prefix(prefix: str) -> None:
+    with _LOCK:
+        for key in tuple(_CACHE):
+            if key.startswith(prefix):
+                _CACHE.pop(key, None)
 
 
 def _google_service(api: str, version: str):
@@ -442,33 +451,126 @@ def mail_snapshot() -> dict[str, Any]:
     return _cached("mail", load)
 
 
-def calendar_snapshot() -> dict[str, Any]:
+def _calendar_range(start_value: str = "", end_value: str = "") -> tuple[datetime, datetime]:
+    now = datetime.now(timezone.utc)
+    start = now
+    end = now + timedelta(days=10)
+    if start_value:
+        start = datetime.fromisoformat(start_value.replace("Z", "+00:00"))
+    if end_value:
+        end = datetime.fromisoformat(end_value.replace("Z", "+00:00"))
+    if start.tzinfo is None or end.tzinfo is None:
+        raise ValueError("calendar range must include a timezone")
+    if end <= start:
+        raise ValueError("calendar range end must be after start")
+    if end - start > timedelta(days=62):
+        raise ValueError("calendar range cannot exceed 62 days")
+    return start, end
+
+
+def _calendar_id(value: Any) -> str:
+    calendar_id = str(value or "primary").strip()
+    if not _SAFE_CALENDAR_ID.fullmatch(calendar_id):
+        raise ValueError("invalid calendar id")
+    return calendar_id
+
+
+def _calendar_sources() -> tuple[list[dict[str, Any]], str]:
+    sources = [{
+        "id": "primary",
+        "summary": "Primary calendar",
+        "primary": True,
+        "selected": True,
+        "access_role": "owner",
+        "background_color": "#34d399",
+        "foreground_color": "#04110c",
+    }]
+    if CALENDAR_LIST_SCOPE not in _token_scopes():
+        return sources, "Reconnect Google once to enable additional calendar overlays."
+    try:
+        result = _google_service("calendar", "v3").calendarList().list(
+            maxResults=250,
+            showHidden=False,
+        ).execute()
+        found: list[dict[str, Any]] = []
+        for item in result.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            primary = bool(item.get("primary"))
+            calendar_id = "primary" if primary else _calendar_id(item.get("id"))
+            found.append({
+                "id": calendar_id,
+                "summary": str(item.get("summaryOverride") or item.get("summary") or calendar_id),
+                "primary": primary,
+                "selected": bool(item.get("selected", True)),
+                "access_role": str(item.get("accessRole") or "reader"),
+                "background_color": str(item.get("backgroundColor") or "#334155"),
+                "foreground_color": str(item.get("foregroundColor") or "#f8fafc"),
+            })
+        if found:
+            found.sort(key=lambda row: (not row["primary"], row["summary"].lower()))
+            return found, ""
+    except Exception as exc:
+        return sources, str(exc)
+    return sources, ""
+
+
+def calendar_snapshot(
+    start_value: str = "",
+    end_value: str = "",
+    calendar_ids: list[str] | None = None,
+) -> dict[str, Any]:
+    start, end = _calendar_range(start_value, end_value)
+    requested = [_calendar_id(value) for value in (calendar_ids or ["primary"])]
+    requested = list(dict.fromkeys(requested))[:12]
+    cache_key = "calendar:" + "|".join((start.isoformat(), end.isoformat(), *requested))
+
     def load() -> dict[str, Any]:
         connection = _connection_payload()
         rows: list[dict[str, Any]] = []
         error = ""
+        sources: list[dict[str, Any]] = []
+        overlay_error = ""
         if connection["connected"]:
-            now = datetime.now(timezone.utc)
-            end = now + timedelta(days=10)
+            sources, overlay_error = _calendar_sources()
+            source_by_id = {str(source.get("id") or ""): source for source in sources}
             try:
-                for item in _run_google([
-                    "calendar", "list", "--start", now.isoformat(), "--end", end.isoformat(), "--max", "20",
-                ]):
-                    rows.append({
-                        "id": str(item.get("id") or ""),
-                        "summary": str(item.get("summary") or "(no title)"),
-                        "start": str(item.get("start") or ""),
-                        "end": str(item.get("end") or ""),
-                        "location": str(item.get("location") or ""),
-                        "description": str(item.get("description") or ""),
-                        "status": str(item.get("status") or ""),
-                        "url": str(item.get("htmlLink") or ""),
-                    })
+                for calendar_id in requested:
+                    source = source_by_id.get(calendar_id, {})
+                    for item in _run_google([
+                        "calendar", "list", "--start", start.isoformat(), "--end", end.isoformat(),
+                        "--max", "250", "--calendar", calendar_id,
+                    ]):
+                        rows.append({
+                            "id": str(item.get("id") or ""),
+                            "calendar_id": calendar_id,
+                            "calendar_summary": str(source.get("summary") or calendar_id),
+                            "calendar_color": str(source.get("background_color") or "#34d399"),
+                            "editable": calendar_id == "primary",
+                            "summary": str(item.get("summary") or "(no title)"),
+                            "start": str(item.get("start") or ""),
+                            "end": str(item.get("end") or ""),
+                            "location": str(item.get("location") or ""),
+                            "description": str(item.get("description") or ""),
+                            "status": str(item.get("status") or ""),
+                            "url": str(item.get("htmlLink") or ""),
+                        })
+                rows.sort(key=lambda row: str(row.get("start") or ""))
             except Exception as exc:
                 error = str(exc)
-        return {"schema": "biggy.pa.calendar.v2", **connection, "events": rows, "error": error}
+        return {
+            "schema": "biggy.pa.calendar.v3",
+            **connection,
+            "range": {"start": start.isoformat(), "end": end.isoformat()},
+            "calendar_sources": sources,
+            "selected_calendar_ids": requested,
+            "overlays_ready": not overlay_error,
+            "overlay_error": overlay_error,
+            "events": rows,
+            "error": error,
+        }
 
-    return _cached("calendar", load)
+    return _cached(cache_key, load)
 
 
 def create_mail_draft(payload: dict[str, Any]) -> dict[str, Any]:
@@ -562,7 +664,7 @@ def create_calendar_event(payload: dict[str, Any]) -> dict[str, Any]:
     result = _google_service("calendar", "v3").events().insert(
         calendarId="primary", body=event, sendUpdates="none"
     ).execute()
-    _invalidate("calendar")
+    _invalidate_prefix("calendar:")
     return {
         "schema": "biggy.pa.calendar_event.v1",
         "ok": True,
@@ -582,7 +684,7 @@ def update_calendar_event(payload: dict[str, Any]) -> dict[str, Any]:
     result = _google_service("calendar", "v3").events().patch(
         calendarId="primary", eventId=event_id, body=event, sendUpdates="none"
     ).execute()
-    _invalidate("calendar")
+    _invalidate_prefix("calendar:")
     return {
         "schema": "biggy.pa.calendar_event.v1",
         "ok": True,
@@ -603,7 +705,7 @@ def delete_calendar_event(payload: dict[str, Any]) -> dict[str, Any]:
     _google_service("calendar", "v3").events().delete(
         calendarId="primary", eventId=event_id, sendUpdates="none"
     ).execute()
-    _invalidate("calendar")
+    _invalidate_prefix("calendar:")
     return {
         "schema": "biggy.pa.calendar_event.v1",
         "ok": True,

@@ -42,7 +42,7 @@ def test_google_source_routes_include_guarded_write_contracts():
     assert 'parsed.path == "/api/biggy/pa/mail"' in routes
     assert 'parsed.path == "/api/biggy/pa/calendar"' in routes
     assert "mail_snapshot()" in routes
-    assert "calendar_snapshot()" in routes
+    assert "calendar_snapshot(" in routes
     for path in (
         "/api/biggy/pa/mail/draft",
         "/api/biggy/pa/mail/send",
@@ -181,6 +181,47 @@ def test_calendar_update_requires_start_and_end_together(monkeypatch, tmp_path: 
             "event_id": "event_123",
             "start": "2026-09-19T12:00:00-05:00",
         })
+
+
+def test_calendar_snapshot_accepts_bounded_ranges_and_calendar_overlays(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    _write_token(tmp_path)
+    script = tmp_path / "skills" / "productivity" / "google-workspace" / "scripts" / "google_api.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("", encoding="utf-8")
+    calls = []
+
+    def fake_google(args):
+        calls.append(args)
+        return [{
+            "id": "event_123",
+            "summary": "Auburn football",
+            "start": "2026-09-19T12:00:00-05:00",
+            "end": "2026-09-19T16:00:00-05:00",
+        }]
+
+    monkeypatch.setattr(biggy_pa_sources, "_run_google", fake_google)
+    biggy_pa_sources._CACHE.clear()
+    result = biggy_pa_sources.calendar_snapshot(
+        "2026-09-01T00:00:00-05:00",
+        "2026-10-01T00:00:00-05:00",
+        ["primary", "auburn@example.com"],
+    )
+    assert result["schema"] == "biggy.pa.calendar.v3"
+    assert result["selected_calendar_ids"] == ["primary", "auburn@example.com"]
+    assert len(result["events"]) == 2
+    assert calls[0][-2:] == ["--calendar", "primary"]
+    assert calls[1][-2:] == ["--calendar", "auburn@example.com"]
+
+
+def test_calendar_snapshot_rejects_unbounded_or_invalid_ranges():
+    with pytest.raises(ValueError, match="62 days"):
+        biggy_pa_sources.calendar_snapshot(
+            "2026-01-01T00:00:00-06:00",
+            "2026-04-01T00:00:00-05:00",
+        )
+    with pytest.raises(ValueError, match="timezone"):
+        biggy_pa_sources.calendar_snapshot("2026-09-01T00:00:00", "2026-09-02T00:00:00")
 
 
 def test_write_actions_fail_closed_without_upgraded_scopes(monkeypatch, tmp_path: Path):

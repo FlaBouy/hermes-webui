@@ -528,7 +528,9 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo > .biggy-category-ra
 }
 #mainChat.biggy-brand-iwo .biggy-galaxy-filter-marker{flex:0 0 10px;color:currentColor;text-align:center}
 #mainChat.biggy-brand-iwo .biggy-galaxy-filter-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#mainChat.biggy-brand-iwo .biggy-operator-state{padding:12px 12px 14px;overflow:auto;max-height:min(57vh,560px)}
+#mainChat.biggy-brand-iwo .biggy-operator-state{
+  box-sizing:border-box;flex:1 1 auto;min-height:0;max-height:none;padding:12px 12px 14px;overflow:auto;
+}
 #mainChat.biggy-brand-iwo .biggy-operator-panel-title{margin:1px 0 10px;color:#c4b5fd;font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;text-transform:uppercase}
 #mainChat.biggy-brand-iwo .biggy-operator-message{margin:0;color:#94a3b8;font:13px/1.55 ui-sans-serif,system-ui,sans-serif}
 #mainChat.biggy-brand-iwo .biggy-operator-message.is-warning{color:#f4c579}
@@ -577,10 +579,63 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo > .biggy-category-ra
   border-radius:6px;background:rgba(3,9,18,.88);color:#cbd5e1;font:12px/1.5 ui-sans-serif,system-ui,sans-serif;
 }
 #mainChat.biggy-brand-iwo .biggy-operator-confirm-note{margin:0 0 8px;color:#f4c579;font:11px/1.4 ui-sans-serif,system-ui,sans-serif}
+#mainChat.biggy-brand-iwo .biggy-calendar-workspace{min-width:0}
+#mainChat.biggy-brand-iwo .biggy-calendar-toolbar{
+  display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 10px;padding-bottom:9px;
+  border-bottom:1px solid rgba(95,130,160,.34);
+}
+#mainChat.biggy-brand-iwo .biggy-calendar-picker{
+  box-sizing:border-box;height:29px;min-width:126px;border:1px solid rgba(95,130,160,.5);border-radius:5px;
+  background:#08111d;color:#d9e5ef;padding:4px 7px;font:700 10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+#mainChat.biggy-brand-iwo .biggy-calendar-sources{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px;padding:8px 9px;
+  border:1px solid rgba(95,130,160,.32);border-radius:6px;background:rgba(6,14,25,.72);
+}
+#mainChat.biggy-brand-iwo .biggy-calendar-sources-title{
+  color:#8da4b8;font:700 9px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;
+}
+#mainChat.biggy-brand-iwo .biggy-calendar-source{
+  display:inline-flex;align-items:center;gap:5px;color:#cbd5e1;font:11px/1.2 ui-sans-serif,system-ui,sans-serif;cursor:pointer;
+}
+#mainChat.biggy-brand-iwo .biggy-calendar-source input{accent-color:#34d399}
+#mainChat.biggy-brand-iwo .biggy-calendar-source-swatch{width:8px;height:8px;border-radius:50%;box-shadow:0 0 7px currentColor}
+#mainChat.biggy-brand-iwo .biggy-calendar-manage{margin-left:auto;color:#67e8f9;font:700 10px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;text-decoration:none}
+#mainChat.biggy-brand-iwo .biggy-calendar-manage:hover{text-decoration:underline}
+#mainChat.biggy-brand-iwo .biggy-calendar-overlay-warning{margin:-4px 0 10px;color:#f4c579;font:11px/1.35 ui-sans-serif,system-ui,sans-serif}
+#mainChat.biggy-brand-iwo .biggy-calendar-month{
+  display:grid;grid-template-columns:repeat(7,minmax(0,1fr));border-top:1px solid rgba(95,130,160,.42);border-left:1px solid rgba(95,130,160,.42);
+}
+#mainChat.biggy-brand-iwo .biggy-calendar-weekday{
+  padding:6px 4px;border-right:1px solid rgba(95,130,160,.42);border-bottom:1px solid rgba(95,130,160,.42);
+  background:rgba(15,25,39,.88);color:#8da4b8;text-align:center;font:700 9px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;
+}
+#mainChat.biggy-brand-iwo .biggy-calendar-cell{
+  box-sizing:border-box;min-height:64px;padding:4px;border-right:1px solid rgba(95,130,160,.32);border-bottom:1px solid rgba(95,130,160,.32);
+  background:rgba(5,12,22,.72);overflow:hidden;
+}
+#mainChat.biggy-brand-iwo .biggy-calendar-cell.is-adjacent{background:rgba(2,7,14,.55);opacity:.56}
+#mainChat.biggy-brand-iwo .biggy-calendar-cell.is-today{box-shadow:inset 0 0 0 1px rgba(52,211,153,.78);background:rgba(6,78,59,.15)}
+#mainChat.biggy-brand-iwo .biggy-calendar-day-number{
+  display:block;margin:0 0 3px auto;border:0;background:transparent;color:#b8c8d8;padding:1px 3px;
+  font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;cursor:pointer;
+}
+#mainChat.biggy-brand-iwo .biggy-calendar-cell.is-today .biggy-calendar-day-number{color:#6ee7b7}
+#mainChat.biggy-brand-iwo .biggy-calendar-event{
+  display:block;box-sizing:border-box;width:100%;margin:0 0 3px;padding:3px 4px;border:0;border-left:3px solid #34d399;border-radius:3px;
+  background:rgba(19,34,50,.96);color:#d9e5ef;text-align:left;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  font:600 9px/1.25 ui-sans-serif,system-ui,sans-serif;cursor:pointer;
+}
+#mainChat.biggy-brand-iwo .biggy-calendar-event:hover{background:rgba(30,58,78,.96);color:#ecfeff}
+#mainChat.biggy-brand-iwo .biggy-calendar-day{display:flex;flex-direction:column;gap:6px}
+#mainChat.biggy-brand-iwo .biggy-calendar-date-heading{margin:3px 0 8px;color:#67e8f9;font:700 13px/1.3 ui-sans-serif,system-ui,sans-serif}
 @media(max-width:720px){
   #mainChat.biggy-brand-iwo .biggy-operator-form-grid{grid-template-columns:1fr}
   #mainChat.biggy-brand-iwo .biggy-weather-zip-form{grid-template-columns:1fr 1fr}
   #mainChat.biggy-brand-iwo .biggy-weather-zip-form label{grid-column:1/-1}
+  #mainChat.biggy-brand-iwo .biggy-calendar-cell{min-height:60px;padding:2px}
+  #mainChat.biggy-brand-iwo .biggy-calendar-event{font-size:0;min-height:8px;padding:0}
+  #mainChat.biggy-brand-iwo .biggy-calendar-manage{margin-left:0;width:100%}
 }
 #mainChat.biggy-brand-iwo .biggy-travel-lodging-title{
   font:600 10px/1.2 ui-sans-serif,system-ui,sans-serif;letter-spacing:.04em;text-transform:uppercase;color:#cbd5e1;margin-bottom:6px;

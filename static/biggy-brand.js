@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260825-obsidian-notes-1';
+  const BUILD_ID = '20260825-calendar-workspace-2';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
@@ -3039,6 +3039,53 @@
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
   }
 
+  function calendarLocalDate(value) {
+    const text = String(value || '');
+    if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return new Date(`${text}T00:00:00`);
+    return new Date(text);
+  }
+
+  function calendarDateKey(value) {
+    const date = value instanceof Date ? value : calendarLocalDate(value);
+    if (Number.isNaN(date.getTime())) return '';
+    const pad = (number) => String(number).padStart(2, '0');
+    return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  }
+
+  function calendarWorkspaceState(dlg) {
+    if (!dlg.__biggyCalendarState) {
+      dlg.__biggyCalendarState = {
+        view: 'month',
+        cursor: calendarDateKey(new Date()),
+        calendarIds: ['primary'],
+      };
+    }
+    return dlg.__biggyCalendarState;
+  }
+
+  function calendarRequestWindow(state) {
+    const cursor = calendarLocalDate(state.cursor);
+    cursor.setHours(0, 0, 0, 0);
+    let start = new Date(cursor);
+    let end = new Date(cursor);
+    if (state.view === 'day') {
+      end.setDate(end.getDate() + 1);
+    } else {
+      start = new Date(cursor.getFullYear(), cursor.getMonth(), 1);
+      start.setDate(start.getDate() - start.getDay());
+      end = new Date(start);
+      end.setDate(end.getDate() + 42);
+    }
+    return { start, end };
+  }
+
+  function calendarRequestUrl(state) {
+    const range = calendarRequestWindow(state);
+    const query = new URLSearchParams({ start: range.start.toISOString(), end: range.end.toISOString() });
+    (state.calendarIds.length ? state.calendarIds : ['primary']).forEach((id) => query.append('calendar_id', id));
+    return `/api/biggy/pa/calendar?${query.toString()}`;
+  }
+
   function calendarPayload(form) {
     const data = new FormData(form);
     const start = new Date(String(data.get('start') || ''));
@@ -3054,29 +3101,28 @@
     };
   }
 
-  function appendCalendarForm(panel, dlg, event = null) {
+  function appendCalendarForm(panel, dlg, event = null, defaults = null) {
     const editing = !!(event && event.id);
+    const seed = event || defaults || {};
     const form = document.createElement('form');
     form.className = 'biggy-operator-form biggy-calendar-form';
     form.appendChild(operatorHeading(editing ? 'Edit event' : 'Add event'));
-    form.appendChild(operatorField('Title', 'summary', 'text', event && event.summary));
+    form.appendChild(operatorField('Title', 'summary', 'text', seed.summary));
     const times = document.createElement('div');
     times.className = 'biggy-operator-form-grid';
-    times.appendChild(operatorField('Start', 'start', 'datetime-local', localDateTimeValue(event && event.start)));
-    times.appendChild(operatorField('End', 'end', 'datetime-local', localDateTimeValue(event && event.end)));
+    times.appendChild(operatorField('Start', 'start', 'datetime-local', localDateTimeValue(seed.start)));
+    times.appendChild(operatorField('End', 'end', 'datetime-local', localDateTimeValue(seed.end)));
     form.appendChild(times);
-    form.appendChild(operatorField('Location', 'location', 'text', event && event.location));
-    form.appendChild(operatorField('Notes', 'description', 'textarea', event && event.description));
+    form.appendChild(operatorField('Location', 'location', 'text', seed.location));
+    form.appendChild(operatorField('Notes', 'description', 'textarea', seed.description));
     const actions = document.createElement('div');
     actions.className = 'biggy-operator-actions';
     const save = operatorButton(editing ? 'Save changes' : 'Add to calendar', 'primary');
     save.type = 'submit';
     actions.appendChild(save);
-    if (editing) {
-      const cancel = operatorButton('Cancel');
-      cancel.addEventListener('click', () => refreshOperatorPanel(dlg, 'calendar'));
-      actions.appendChild(cancel);
-    }
+    const cancel = operatorButton('Cancel');
+    cancel.addEventListener('click', () => refreshOperatorPanel(dlg, 'calendar'));
+    actions.appendChild(cancel);
     form.appendChild(actions);
     form.addEventListener('submit', async (ev) => {
       ev.preventDefault();
@@ -3093,6 +3139,198 @@
       }
     });
     panel.appendChild(form);
+  }
+
+  function calendarEventLabel(event, includeDate = false) {
+    const start = calendarLocalDate(event.start);
+    if (Number.isNaN(start.getTime())) return String(event.summary || '(no title)');
+    const isAllDay = /^\d{4}-\d{2}-\d{2}$/.test(String(event.start || ''));
+    const time = isAllDay ? 'ALL DAY' : start.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    const date = includeDate ? `${start.toLocaleDateString([], { month: 'short', day: 'numeric' })} · ` : '';
+    return `${date}${time} · ${String(event.summary || '(no title)')}`;
+  }
+
+  function calendarEventEditor(panel, dlg, event, writeReady) {
+    if (!writeReady || !event.editable || !event.id) return;
+    clearOperatorPanel(panel);
+    panel.appendChild(operatorHeading('Calendar'));
+    appendCalendarForm(panel, dlg, event);
+    const actions = document.createElement('div');
+    actions.className = 'biggy-operator-actions';
+    const remove = operatorButton('Delete event', 'danger');
+    actions.appendChild(remove);
+    panel.appendChild(actions);
+    remove.addEventListener('click', async () => {
+      if (!window.confirm(`Delete “${String(event.summary || 'this event')}” from your calendar?`)) return;
+      remove.disabled = true;
+      try {
+        await operatorFetch('/api/biggy/pa/calendar/delete', { method: 'POST', body: { event_id: event.id, confirmed: true } });
+        await refreshOperatorPanel(dlg, 'calendar');
+      } catch (error) {
+        operatorMessage(panel, String(error && error.message || 'Delete failed.'), 'warning');
+      }
+    });
+  }
+
+  function renderCalendarWorkspace(panel, dlg, calendar) {
+    const state = calendarWorkspaceState(dlg);
+    clearOperatorPanel(panel);
+    panel.classList.add('biggy-calendar-workspace');
+    panel.appendChild(operatorHeading('Google Calendar'));
+
+    if (!calendar.connected) {
+      appendOperatorRow(panel, 'Biggy local Google authorization is required.', calendar.oauth_ready ? 'OAuth client is ready for account approval.' : 'Biggy needs its profile-scoped Google OAuth connection.', 'warning');
+      return;
+    }
+
+    const toolbar = document.createElement('div');
+    toolbar.className = 'biggy-calendar-toolbar';
+    const previous = operatorButton('‹');
+    previous.setAttribute('aria-label', 'Previous calendar period');
+    const today = operatorButton('Today');
+    const next = operatorButton('›');
+    next.setAttribute('aria-label', 'Next calendar period');
+    const picker = document.createElement('input');
+    picker.className = 'biggy-calendar-picker';
+    picker.type = state.view === 'day' ? 'date' : 'month';
+    picker.value = state.view === 'day' ? state.cursor : state.cursor.slice(0, 7);
+    const dayView = operatorButton('Day', state.view === 'day' ? 'primary' : '');
+    const monthView = operatorButton('Month', state.view === 'month' ? 'primary' : '');
+    const add = operatorButton('Add event', 'primary');
+    toolbar.append(previous, today, next, picker, dayView, monthView, add);
+    panel.appendChild(toolbar);
+
+    const shift = (amount) => {
+      const cursor = calendarLocalDate(state.cursor);
+      if (state.view === 'day') cursor.setDate(cursor.getDate() + amount);
+      else cursor.setMonth(cursor.getMonth() + amount, 1);
+      state.cursor = calendarDateKey(cursor);
+      refreshOperatorPanel(dlg, 'calendar');
+    };
+    previous.addEventListener('click', () => shift(-1));
+    next.addEventListener('click', () => shift(1));
+    today.addEventListener('click', () => { state.cursor = calendarDateKey(new Date()); refreshOperatorPanel(dlg, 'calendar'); });
+    picker.addEventListener('change', () => {
+      state.cursor = state.view === 'day' ? picker.value : `${picker.value}-01`;
+      refreshOperatorPanel(dlg, 'calendar');
+    });
+    dayView.addEventListener('click', () => { state.view = 'day'; refreshOperatorPanel(dlg, 'calendar'); });
+    monthView.addEventListener('click', () => { state.view = 'month'; refreshOperatorPanel(dlg, 'calendar'); });
+    add.addEventListener('click', () => {
+      const start = calendarLocalDate(state.cursor);
+      start.setHours(9, 0, 0, 0);
+      const end = new Date(start);
+      end.setHours(10, 0, 0, 0);
+      clearOperatorPanel(panel);
+      panel.appendChild(operatorHeading('Calendar'));
+      appendCalendarForm(panel, dlg, null, { start: start.toISOString(), end: end.toISOString() });
+    });
+
+    if (!calendar.write_ready) appendOperatorRow(panel, 'Calendar is currently read-only.', 'Reconnect Google once to enable event creation, editing, and deletion.', 'warning');
+    if (calendar.error) appendOperatorRow(panel, 'Calendar refresh failed.', String(calendar.error), 'warning');
+
+    const sourceBar = document.createElement('div');
+    sourceBar.className = 'biggy-calendar-sources';
+    const sourceTitle = document.createElement('span');
+    sourceTitle.className = 'biggy-calendar-sources-title';
+    sourceTitle.textContent = 'CALENDAR OVERLAYS';
+    sourceBar.appendChild(sourceTitle);
+    const sources = Array.isArray(calendar.calendar_sources) ? calendar.calendar_sources : [];
+    sources.forEach((source) => {
+      const label = document.createElement('label');
+      label.className = 'biggy-calendar-source';
+      const check = document.createElement('input');
+      check.type = 'checkbox';
+      check.checked = state.calendarIds.includes(String(source.id));
+      check.disabled = !!source.primary;
+      const swatch = document.createElement('span');
+      swatch.className = 'biggy-calendar-source-swatch';
+      swatch.style.backgroundColor = String(source.background_color || '#34d399');
+      const name = document.createElement('span');
+      name.textContent = String(source.summary || source.id || 'Calendar');
+      label.append(check, swatch, name);
+      sourceBar.appendChild(label);
+      check.addEventListener('change', () => {
+        const id = String(source.id || '');
+        state.calendarIds = check.checked ? Array.from(new Set([...state.calendarIds, id])) : state.calendarIds.filter((item) => item !== id);
+        refreshOperatorPanel(dlg, 'calendar');
+      });
+    });
+    const manage = document.createElement('a');
+    manage.className = 'biggy-calendar-manage';
+    manage.href = 'https://calendar.google.com/calendar/u/0/r/settings/addbyurl';
+    manage.target = '_blank';
+    manage.rel = 'noopener noreferrer';
+    manage.textContent = 'Add / manage Google calendars ↗';
+    sourceBar.appendChild(manage);
+    panel.appendChild(sourceBar);
+    if (calendar.overlay_error) {
+      const warning = document.createElement('div');
+      warning.className = 'biggy-calendar-overlay-warning';
+      warning.textContent = String(calendar.overlay_error);
+      panel.appendChild(warning);
+    }
+
+    const events = Array.isArray(calendar.events) ? calendar.events : [];
+    if (state.view === 'day') {
+      const day = document.createElement('section');
+      day.className = 'biggy-calendar-day';
+      const heading = document.createElement('div');
+      heading.className = 'biggy-calendar-date-heading';
+      heading.textContent = calendarLocalDate(state.cursor).toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+      day.appendChild(heading);
+      const selected = events.filter((event) => calendarDateKey(event.start) === state.cursor);
+      if (!selected.length) appendOperatorRow(day, 'No events scheduled.', 'This day is clear.', 'ready');
+      selected.forEach((event) => {
+        const row = appendOperatorRow(day, calendarEventLabel(event), `${String(event.calendar_summary || '')}${event.location ? ` · ${event.location}` : ''}`, 'ready');
+        if (event.editable && calendar.write_ready) {
+          row.classList.add('is-actionable');
+          row.addEventListener('click', () => calendarEventEditor(panel, dlg, event, calendar.write_ready));
+        }
+      });
+      panel.appendChild(day);
+      return;
+    }
+
+    const range = calendarRequestWindow(state);
+    const grid = document.createElement('div');
+    grid.className = 'biggy-calendar-month';
+    ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach((name) => {
+      const weekday = document.createElement('div');
+      weekday.className = 'biggy-calendar-weekday';
+      weekday.textContent = name;
+      grid.appendChild(weekday);
+    });
+    for (let offset = 0; offset < 42; offset += 1) {
+      const date = new Date(range.start);
+      date.setDate(date.getDate() + offset);
+      const key = calendarDateKey(date);
+      const cell = document.createElement('div');
+      cell.className = 'biggy-calendar-cell';
+      if (date.getMonth() !== calendarLocalDate(state.cursor).getMonth()) cell.classList.add('is-adjacent');
+      if (key === calendarDateKey(new Date())) cell.classList.add('is-today');
+      const number = document.createElement('button');
+      number.type = 'button';
+      number.className = 'biggy-calendar-day-number';
+      number.textContent = String(date.getDate());
+      number.addEventListener('click', () => { state.cursor = key; state.view = 'day'; refreshOperatorPanel(dlg, 'calendar'); });
+      cell.appendChild(number);
+      events.filter((event) => calendarDateKey(event.start) === key).slice(0, 4).forEach((event) => {
+        const chip = document.createElement('button');
+        chip.type = 'button';
+        chip.className = 'biggy-calendar-event';
+        chip.textContent = calendarEventLabel(event);
+        chip.title = `${String(event.summary || '')}${event.location ? ` · ${event.location}` : ''}`;
+        chip.style.borderLeftColor = String(event.calendar_color || '#34d399');
+        chip.addEventListener('click', () => {
+          if (event.editable && calendar.write_ready) calendarEventEditor(panel, dlg, event, calendar.write_ready);
+          else if (event.url) window.open(event.url, '_blank', 'noopener');
+        });
+        cell.appendChild(chip);
+      });
+      grid.appendChild(cell);
+    }
+    panel.appendChild(grid);
   }
 
   function appendMailComposer(panel, dlg) {
@@ -3379,51 +3617,10 @@
         return;
       }
       if (key === 'calendar') {
-        const calendar = await operatorFetch('/api/biggy/pa/calendar');
+        const state = calendarWorkspaceState(dlg);
+        const calendar = await operatorFetch(calendarRequestUrl(state));
         if (!current()) return;
-        clearOperatorPanel(panel);
-        panel.appendChild(operatorHeading('Calendar'));
-        if (!calendar.connected) {
-          appendOperatorRow(panel, 'Biggy local Google authorization is required.', calendar.oauth_ready ? 'OAuth client is ready for account approval.' : 'Codex plugins are connected; Biggy still needs its own profile-scoped OAuth client.', 'warning');
-          return;
-        }
-        if (calendar.write_ready) {
-          appendCalendarForm(panel, dlg);
-        } else {
-          appendOperatorRow(panel, 'Calendar is currently read-only.', 'Reconnect Google once to enable event creation, editing, and deletion.', 'warning');
-        }
-        if (calendar.error) appendOperatorRow(panel, 'Calendar refresh failed.', String(calendar.error), 'warning');
-        panel.appendChild(operatorHeading('Upcoming events'));
-        const events = Array.isArray(calendar.events) ? calendar.events : [];
-        if (!events.length && !calendar.error) appendOperatorRow(panel, 'No upcoming events.', 'The next 10 days are clear.', 'ready');
-        events.slice(0, 20).forEach((event) => {
-          const row = appendOperatorRow(panel, String(event.summary || '(no title)'), `${String(event.start || '')}${event.location ? ` · ${event.location}` : ''}`, 'ready');
-          if (!calendar.write_ready || !event.id) return;
-          const actions = document.createElement('div');
-          actions.className = 'biggy-operator-actions is-compact';
-          const edit = operatorButton('Edit');
-          const remove = operatorButton('Delete', 'danger');
-          actions.append(edit, remove);
-          row.appendChild(actions);
-          edit.addEventListener('click', () => {
-            clearOperatorPanel(panel);
-            panel.appendChild(operatorHeading('Calendar'));
-            appendCalendarForm(panel, dlg, event);
-          });
-          remove.addEventListener('click', async () => {
-            if (!window.confirm(`Delete “${String(event.summary || 'this event')}” from your calendar?`)) return;
-            remove.disabled = true;
-            try {
-              await operatorFetch('/api/biggy/pa/calendar/delete', { method: 'POST', body: { event_id: event.id, confirmed: true } });
-              await refreshOperatorPanel(dlg, 'calendar');
-            } catch (error) {
-              remove.disabled = false;
-              const detail = row.querySelector('.biggy-operator-row-detail');
-              if (detail) detail.textContent = String(error && error.message || 'Delete failed.');
-              row.classList.add('is-warning');
-            }
-          });
-        });
+        renderCalendarWorkspace(panel, dlg, calendar);
         return;
       }
       if (key === 'tasks') {

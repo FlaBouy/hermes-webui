@@ -12834,10 +12834,22 @@ def handle_get(handler, parsed) -> bool:
         try:
             from api.biggy_pa_sources import calendar_snapshot
 
-            return j(handler, calendar_snapshot(), status=200)
+            query = parse_qs(parsed.query or "")
+            calendar_ids = query.get("calendar_id", [])
+            return j(
+                handler,
+                calendar_snapshot(
+                    query.get("start", [""])[0],
+                    query.get("end", [""])[0],
+                    calendar_ids or None,
+                ),
+                status=200,
+            )
+        except ValueError as exc:
+            return j(handler, {"schema": "biggy.pa.calendar.v3", "connected": False, "events": [], "error": str(exc)}, status=400)
         except Exception:
             logger.exception("biggy calendar source failed")
-            return j(handler, {"schema": "biggy.pa.calendar.v1", "connected": False, "events": [], "error": "calendar unavailable"}, status=200)
+            return j(handler, {"schema": "biggy.pa.calendar.v3", "connected": False, "events": [], "error": "calendar unavailable"}, status=200)
 
     if parsed.path == "/api/biggy/pa/weather":
         try:
