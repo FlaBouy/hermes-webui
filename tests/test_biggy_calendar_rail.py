@@ -17,7 +17,7 @@ def test_calendar_is_first_pa_data_surface_after_travel():
 def test_calendar_uses_live_same_origin_source():
     assert "/api/biggy/pa/calendar" in BRAND
     assert 'data-biggy-operator-panel="calendar"' in BRAND
-    assert "['calendar', 'mail', 'tasks', 'notes', 'alerts']" in BRAND
+    assert "['phone', 'calendar', 'mail', 'tasks', 'notes', 'alerts']" in BRAND
 
 
 def test_calendar_workspace_has_day_month_navigation_and_overlays():

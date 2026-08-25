@@ -12863,6 +12863,27 @@ def handle_get(handler, parsed) -> bool:
             logger.exception("biggy weather source failed")
             return j(handler, {"schema": "biggy.pa.weather.v1", "ok": False, "forecast": [], "error": "weather unavailable"}, status=200)
 
+    if parsed.path == "/api/biggy/phone/status":
+        try:
+            from api.biggy_phone import phone_status
+
+            return j(handler, phone_status(), status=200)
+        except Exception:
+            logger.exception("biggy phone status failed")
+            return j(handler, {"schema": "biggy.phone.status.v1", "state": "error", "connected": False, "error": "phone status unavailable"}, status=200)
+
+    if parsed.path == "/api/biggy/phone/history":
+        try:
+            from api.biggy_phone import phone_history
+
+            query = parse_qs(parsed.query or "")
+            return j(handler, phone_history(int(query.get("limit", ["20"])[0])), status=200)
+        except (RuntimeError, ValueError) as exc:
+            return j(handler, {"schema": "biggy.phone.history.v1", "items": [], "error": _sanitize_error(exc)}, status=409)
+        except Exception:
+            logger.exception("biggy phone history failed")
+            return j(handler, {"schema": "biggy.phone.history.v1", "items": [], "error": "phone history unavailable"}, status=502)
+
     if parsed.path in ("/api/biggy/v6/health", "/api/biggy/v6/status"):
         try:
             from api.jarvis_v6_bridge import JarvisBridge
@@ -14610,6 +14631,27 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, _sanitize_error(exc), 403)
         except ValueError as exc:
             return bad(handler, _sanitize_error(exc), 400)
+        except Exception:
+            logger.exception("biggy %s failed", action_name)
+            return bad(handler, f"{action_name} failed", 502)
+
+    phone_actions = {
+        "/api/biggy/phone/sms/send": ("send_sms", "phone text send"),
+        "/api/biggy/phone/call/start": ("start_call", "phone call start"),
+    }
+    if parsed.path in phone_actions:
+        function_name, action_name = phone_actions[parsed.path]
+        try:
+            body = _read_json_request_body(handler, max_bytes=8 * 1024)
+            from api import biggy_phone
+
+            return j(handler, getattr(biggy_phone, function_name)(body), status=200)
+        except PermissionError as exc:
+            return bad(handler, _sanitize_error(exc), 403)
+        except ValueError as exc:
+            return bad(handler, _sanitize_error(exc), 400)
+        except RuntimeError as exc:
+            return bad(handler, _sanitize_error(exc), 409)
         except Exception:
             logger.exception("biggy %s failed", action_name)
             return bad(handler, f"{action_name} failed", 502)

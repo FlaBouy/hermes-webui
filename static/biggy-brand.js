@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260825-calendar-workspace-2';
+  const BUILD_ID = '20260825-cockpit-rail-1';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
@@ -602,10 +602,7 @@
     releaseTravelMap();
   }
 
-  function renderFleetStrip(strip, payload) {
-    if (!strip || !payload || !Array.isArray(payload.machines)) return;
-    const machines = payload.machines;
-    strip.innerHTML = '<span class="biggy-fleet-strip-label">FLEET</span>';
+  function makeHomeControl() {
     const home = el('button', 'biggy-fleet-machine biggy-fleet-home is-online');
     home.type = 'button';
     home.dataset.machine = 'HOME';
@@ -616,7 +613,10 @@
       event.preventDefault();
       resetBiggyWorkspace();
     });
-    strip.appendChild(home);
+    return home;
+  }
+
+  function makeSpeechSyncControl() {
     const sync = el('span', 'biggy-fleet-sync-wrap');
     sync.innerHTML =
       '<button id="argusSpeechSyncToggle" class="biggy-fleet-machine biggy-fleet-sync is-online" type="button" '
@@ -627,8 +627,14 @@
       + '<output id="argusSpeechSyncGainOut">100%</output></label>'
       + '<label>LEAD <input id="argusSpeechSyncLead" type="range" min="-250" max="300" step="10">'
       + '<output id="argusSpeechSyncLeadOut">+80 ms</output></label></div>';
-    strip.appendChild(sync);
     installArgusSpeechSyncTuner(sync);
+    return sync;
+  }
+
+  function renderFleetStrip(strip, payload) {
+    if (!strip || !payload || !Array.isArray(payload.machines)) return;
+    const machines = payload.machines;
+    strip.innerHTML = '<span class="biggy-fleet-strip-label">FLEET</span>';
     machines.forEach((machine) => {
       const button = el('button', `biggy-fleet-machine is-${machine.state || 'offline'}`);
       button.type = 'button';
@@ -674,18 +680,43 @@
     return strip;
   }
 
-  // Keep cockpit controls in the persistent right-hand cockpit rail, clear of
-  // both Jarvis's visual field and the normal message composer.
-  function moveCockpitControlsToRightRail(header) {
+  function installCockpitStrip(header) {
     const controls = header && header.querySelector('.biggy-brand-controls');
     const mainChat = document.getElementById('mainChat');
-    if (!controls || !mainChat || controls.parentElement && controls.parentElement.classList.contains('biggy-right-cockpit-controls')) return;
-    document.querySelectorAll('.biggy-right-cockpit-controls').forEach((node) => node.remove());
-    const wrap = el('div', 'biggy-right-cockpit-controls');
-    wrap.setAttribute('aria-label', 'Biggy cockpit controls');
+    if (!controls || !mainChat) return null;
+    document.querySelectorAll('.biggy-cockpit-strip').forEach((node) => node.remove());
+
+    const strip = el('nav', 'biggy-cockpit-strip');
+    strip.id = 'biggyCockpitStrip';
+    strip.setAttribute('aria-label', 'Biggy cockpit controls');
+    strip.setAttribute('data-testid', 'biggy-cockpit-strip');
+    strip.innerHTML = '<span class="biggy-fleet-strip-label">COCKPIT</span>';
+    strip.appendChild(makeHomeControl());
+    strip.appendChild(makeSpeechSyncControl());
+
+    const filter = el('button', 'biggy-fleet-machine biggy-cockpit-filter is-online');
+    filter.type = 'button';
+    filter.title = 'Filter the galaxy by RAG directory';
+    filter.setAttribute('aria-label', filter.title);
+    filter.innerHTML = '<span class="biggy-fleet-state" aria-hidden="true"></span><span>FILTER</span>';
+    filter.addEventListener('click', (event) => {
+      event.preventDefault();
+      const railFilter = document.getElementById('biggyCatRail-filter');
+      if (railFilter) railFilter.click();
+    });
+    strip.appendChild(filter);
+
+    const ptt = controls.querySelector('#biggyPtt');
+    const route = controls.querySelector('#biggyAudioRoute');
+    [ptt, route].forEach((button) => {
+      if (!button) return;
+      button.classList.add('biggy-fleet-machine', 'biggy-cockpit-action');
+      strip.appendChild(button);
+    });
+    if (ptt) ptt.textContent = 'PTT';
     controls.remove();
-    wrap.appendChild(controls);
-    mainChat.appendChild(wrap);
+    mainChat.appendChild(strip);
+    return strip;
   }
 
   function forceChromeLabels() {
@@ -2589,6 +2620,7 @@
 
   const TRAVEL_CATEGORIES = [
     'Filter',
+    'Phone',
     'Travel',
     'Calendar',
     'Mail',
@@ -2927,6 +2959,7 @@
   function mapRecCategoryToRail(category) {
     const c = String(category || '').trim().toLowerCase();
     if (c === 'filter') return 'filter';
+    if (c === 'phone' || c === 'sms' || c === 'text' || c === 'call') return 'phone';
     if (!c || c === 'travel') return 'travel';
     if (c === 'weather' || c === 'radar') return 'weather';
     if (c === 'lodging' || c === 'hotel') return 'lodging';
@@ -3029,6 +3062,190 @@
     }
     status.className = `biggy-operator-form-status${state ? ` is-${state}` : ''}`;
     status.textContent = text || '';
+  }
+
+  function phoneNumberValue(form) {
+    return String(new FormData(form).get('to') || '').trim();
+  }
+
+  function setPhoneDestination(forms, number) {
+    forms.forEach((form) => {
+      const input = form && form.querySelector('[name="to"]');
+      if (input) input.value = String(number || '');
+    });
+  }
+
+  function openPhoneContactCard(panel, label, contacts, forms) {
+    const primaryView = Array.from(panel.childNodes);
+    panel.replaceChildren();
+
+    const card = document.createElement('section');
+    card.className = 'biggy-phone-contact-card';
+    card.setAttribute('aria-label', `${label} contacts`);
+    const chrome = document.createElement('div');
+    chrome.className = 'biggy-phone-contact-card-chrome';
+    const title = operatorHeading(`${label} contacts`);
+    const close = operatorButton('‹ Back to Phone');
+    close.classList.add('biggy-phone-contact-card-close');
+    close.setAttribute('aria-label', `Close ${label} contacts and return to Phone`);
+    const restorePhone = () => panel.replaceChildren(...primaryView);
+    close.addEventListener('click', restorePhone);
+    chrome.append(title, close);
+    card.appendChild(chrome);
+
+    const list = document.createElement('div');
+    list.className = 'biggy-phone-contact-card-list';
+    if (!contacts.length) {
+      const empty = document.createElement('div');
+      empty.className = 'biggy-operator-form-status is-muted';
+      empty.textContent = `No ${label} contacts configured.`;
+      list.appendChild(empty);
+    } else {
+      contacts.forEach((contact) => {
+        const choice = operatorButton(String(contact.name || contact.number || 'Contact'));
+        choice.type = 'button';
+        choice.title = String(contact.number || '');
+        choice.addEventListener('click', () => {
+          setPhoneDestination(forms, contact.number);
+          restorePhone();
+          const target = forms[0] && forms[0].querySelector('[name="to"]');
+          if (target) target.focus();
+        });
+        list.appendChild(choice);
+      });
+    }
+    card.appendChild(list);
+    panel.appendChild(card);
+  }
+
+  function renderPhoneContacts(panel, phone, forms) {
+    panel.appendChild(operatorHeading('Contacts'));
+    const groups = phone.contacts && typeof phone.contacts === 'object' ? phone.contacts : {};
+    const wrap = document.createElement('div');
+    wrap.className = 'biggy-operator-form biggy-phone-contacts';
+    const actions = document.createElement('div');
+    actions.className = 'biggy-operator-actions biggy-phone-contact-launchers';
+
+    ['EGS', 'Personal'].forEach((label) => {
+      const contacts = Array.isArray(groups[label]) ? groups[label] : [];
+      const button = operatorButton(label.toUpperCase(), label === 'EGS' ? 'primary' : '');
+      button.type = 'button';
+      button.setAttribute('aria-label', `Open ${label} contacts`);
+      button.addEventListener('click', () => openPhoneContactCard(panel, label, contacts, forms));
+      actions.appendChild(button);
+    });
+    wrap.appendChild(actions);
+    panel.appendChild(wrap);
+  }
+
+  function renderPhoneHistory(panel, items) {
+    panel.appendChild(operatorHeading('Recent calls and messages'));
+    if (!items.length) {
+      appendOperatorRow(panel, 'No recent phone activity.', 'Calls and texts will appear here after Twilio is connected.', 'muted');
+      return;
+    }
+    items.slice(0, 20).forEach((item) => {
+      const kind = String(item.kind || '').toUpperCase();
+      const direction = String(item.direction || '').replace(/-/g, ' ').toUpperCase();
+      const peer = String(item.direction || '').startsWith('inbound') ? item.from : item.to;
+      const detail = item.kind === 'sms'
+        ? String(item.body || '').slice(0, 180)
+        : `${String(item.status || '')}${item.duration ? ` · ${item.duration}s` : ''}`;
+      appendOperatorRow(panel, `${kind} · ${direction} · ${String(peer || 'unknown')}`, `${String(item.date || '')}${detail ? ` · ${detail}` : ''}`, 'ready');
+    });
+  }
+
+  async function renderPhoneWorkspace(panel, dlg, phone) {
+    clearOperatorPanel(panel);
+    panel.appendChild(operatorHeading('Galaxy S25 Ultra'));
+    const state = String(phone.state || 'disconnected');
+    appendOperatorRow(
+      panel,
+      `${String(phone.device_label || 'Galaxy S25 Ultra')} · ${String(phone.carrier || 'Verizon')}`,
+      phone.connected ? 'Twilio voice and SMS are ready.' : 'Twilio is not connected. Calls and texts remain disabled.',
+      phone.connected ? 'ready' : 'warning',
+    );
+    if (!phone.connected) {
+      const missing = Array.isArray(phone.missing) ? phone.missing.join(', ') : '';
+      appendOperatorRow(panel, 'Phone setup required.', missing || `Add the profile-local configuration at ${String(phone.config_path_hint || '~/.hermes/profiles/biggy/biggy-phone.json')}.`, 'warning');
+    }
+
+    const sms = document.createElement('form');
+    sms.className = 'biggy-operator-form biggy-phone-sms-form';
+    sms.appendChild(operatorHeading('Text message'));
+    sms.appendChild(operatorField('Mobile number', 'to', 'tel'));
+    sms.appendChild(operatorField('Message', 'body', 'textarea'));
+    const smsActions = document.createElement('div');
+    smsActions.className = 'biggy-operator-actions';
+    const send = operatorButton('Review and send', 'primary');
+    send.type = 'submit';
+    send.disabled = !phone.sms_ready;
+    smsActions.appendChild(send);
+    sms.appendChild(smsActions);
+    sms.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const data = new FormData(sms);
+      const to = phoneNumberValue(sms);
+      const body = String(data.get('body') || '').trim();
+      if (!to || !body) return operatorFormStatus(sms, 'A mobile number and message are required.', 'warning');
+      if (!window.confirm(`Send this text to ${to}?\n\n${body}`)) return;
+      send.disabled = true;
+      operatorFormStatus(sms, 'Sending text…', 'loading');
+      try {
+        await operatorFetch('/api/biggy/phone/sms/send', { method: 'POST', body: { to, body, confirmed: true } });
+        sms.reset();
+        operatorFormStatus(sms, 'Text queued through Twilio.', 'ready');
+        window.setTimeout(() => refreshOperatorPanel(dlg, 'phone'), 900);
+      } catch (error) {
+        operatorFormStatus(sms, String(error && error.message || 'Text failed.'), 'warning');
+        send.disabled = !phone.sms_ready;
+      }
+    });
+    panel.appendChild(sms);
+
+    const call = document.createElement('form');
+    call.className = 'biggy-operator-form biggy-phone-call-form';
+    call.appendChild(operatorHeading('Voice call'));
+    call.appendChild(operatorField('Mobile number', 'to', 'tel'));
+    const callActions = document.createElement('div');
+    callActions.className = 'biggy-operator-actions';
+    const dial = operatorButton('Review and call', 'primary');
+    dial.type = 'submit';
+    dial.disabled = !phone.voice_ready;
+    callActions.appendChild(dial);
+    call.appendChild(callActions);
+    if (phone.connected && !phone.voice_ready) operatorFormStatus(call, 'Voice requires an HTTPS TwiML URL in the local phone profile.', 'warning');
+    call.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const to = phoneNumberValue(call);
+      if (!to) return operatorFormStatus(call, 'A mobile number is required.', 'warning');
+      if (!window.confirm(`Call ${to} through Biggy Phone?`)) return;
+      dial.disabled = true;
+      operatorFormStatus(call, 'Starting call…', 'loading');
+      try {
+        await operatorFetch('/api/biggy/phone/call/start', { method: 'POST', body: { to, confirmed: true } });
+        operatorFormStatus(call, 'Call queued through Twilio.', 'ready');
+        window.setTimeout(() => refreshOperatorPanel(dlg, 'phone'), 900);
+      } catch (error) {
+        operatorFormStatus(call, String(error && error.message || 'Call failed.'), 'warning');
+        dial.disabled = !phone.voice_ready;
+      }
+    });
+    panel.appendChild(call);
+
+    renderPhoneContacts(panel, phone, [sms, call]);
+
+    if (phone.history_ready) {
+      try {
+        const history = await operatorFetch('/api/biggy/phone/history?limit=20');
+        if (dlg.getAttribute('data-active-category') !== 'phone') return;
+        renderPhoneHistory(panel, Array.isArray(history.items) ? history.items : []);
+      } catch (error) {
+        appendOperatorRow(panel, 'Phone history unavailable.', String(error && error.message || 'Unable to load recent calls and messages.'), 'warning');
+      }
+    } else {
+      renderPhoneHistory(panel, []);
+    }
   }
 
   function localDateTimeValue(value) {
@@ -3616,6 +3833,12 @@
         messages.slice(0, 10).forEach((message) => appendOperatorRow(panel, String(message.subject || '(no subject)'), `${message.unread ? 'UNREAD · ' : ''}${String(message.from || '')}${message.date ? ` · ${message.date}` : ''}`, message.unread ? 'warning' : 'ready'));
         return;
       }
+      if (key === 'phone') {
+        const phone = await operatorFetch('/api/biggy/phone/status');
+        if (!current()) return;
+        await renderPhoneWorkspace(panel, dlg, phone);
+        return;
+      }
       if (key === 'calendar') {
         const state = calendarWorkspaceState(dlg);
         const calendar = await operatorFetch(calendarRequestUrl(state));
@@ -3744,6 +3967,7 @@
       `<div class="biggy-galaxy-filter-tree" id="biggyGalaxyFilterTree" role="tree" aria-label="RAG directory tree"></div>` +
       `</section>` +
       `<div class="biggy-operator-state" id="biggyOperatorState" hidden>` +
+      `<div class="biggy-operator-panel" data-biggy-operator-panel="phone" hidden></div>` +
       `<div class="biggy-operator-panel" data-biggy-operator-panel="calendar" hidden></div>` +
       `<div class="biggy-operator-panel" data-biggy-operator-panel="mail" hidden></div>` +
       `<div class="biggy-operator-panel" data-biggy-operator-panel="tasks" hidden></div>` +
@@ -3793,7 +4017,7 @@
       const showTravel = key === 'travel';
       const showWeather = key === 'weather';
       const showFilter = key === 'filter';
-      const showOperator = ['calendar', 'mail', 'tasks', 'notes', 'alerts'].includes(key);
+      const showOperator = ['phone', 'calendar', 'mail', 'tasks', 'notes', 'alerts'].includes(key);
       const recommendationKey = lodging
         ? mapRecCategoryToRail(lodging.getAttribute('data-rec-category') || '')
         : '';
@@ -3841,7 +4065,7 @@
         setActiveCategory(key, { open: true });
         if (key === 'filter') refreshGalaxyFilterPanel(dlg);
         if (key === 'weather') refreshWeatherPanel(dlg, savedWeatherZip());
-        if (['calendar', 'mail', 'tasks', 'notes', 'alerts'].includes(key)) refreshOperatorPanel(dlg, key);
+        if (['phone', 'calendar', 'mail', 'tasks', 'notes', 'alerts'].includes(key)) refreshOperatorPanel(dlg, key);
       });
     });
 
@@ -3909,14 +4133,8 @@
     const mainChat = document.getElementById('mainChat');
     if (!rail || !mainChat) return;
     if (rail.parentElement !== mainChat) mainChat.appendChild(rail);
-    const controls = document.querySelector('.biggy-right-cockpit-controls .biggy-brand-controls');
-    if (!controls) return;
-    const buttons = [...controls.querySelectorAll('button')];
-    buttons.reverse().forEach((button) => {
-      button.classList.add('biggy-category-rail-btn', 'biggy-utility-control');
-      rail.insertBefore(button, rail.firstChild);
-    });
-    controls.parentElement && controls.parentElement.remove();
+    const filter = rail.querySelector('[data-category="filter"]');
+    if (filter) filter.hidden = true;
   }
 
   function hideTravelMap() {
@@ -4558,6 +4776,7 @@
     document.querySelectorAll('.biggy-jarvis-transplant').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-composer-controls').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-fleet-strip').forEach((node) => node.remove());
+    document.querySelectorAll('.biggy-cockpit-strip').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-right-cockpit-controls').forEach((node) => node.remove());
     mainChat.querySelectorAll('.biggy-argus-rag-overview').forEach((node) => node.remove());
     mainChat.querySelectorAll('.biggy-argus-conversation-lane').forEach((node) => node.remove());
@@ -4568,10 +4787,14 @@
     const header = makeHeader();
     mainChat.insertBefore(header, mainChat.firstChild);
     const reactorDock = makeReactorDock();
-    header.insertAdjacentElement('afterend', reactorDock);
+    const modelStatus = header.querySelector('.biggy-brand-status');
+    if (modelStatus) reactorDock.appendChild(modelStatus);
+    const composer = document.getElementById('composerWrap');
+    if (composer) composer.appendChild(reactorDock);
+    else header.insertAdjacentElement('afterend', reactorDock);
     buildReactorHud();
     installPttBridge(header);
-    moveCockpitControlsToRightRail(header);
+    installCockpitStrip(header);
     installJarvisV6Bridge(header);
     installRagTraceObserver();
     purgeOwnerAckArtifacts();

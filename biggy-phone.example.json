@@ -1,0 +1,13 @@
+{
+  "device_label": "Galaxy S25 Ultra",
+  "carrier": "Verizon",
+  "account_sid": "ACxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "auth_token": "replace-in-profile-only",
+  "from_number": "+15555550100",
+  "voice_from_number": "+15555550100",
+  "voice_url": "https://your-twiml-endpoint.example/voice",
+  "contacts": {
+    "EGS": [],
+    "Personal": []
+  }
+}
