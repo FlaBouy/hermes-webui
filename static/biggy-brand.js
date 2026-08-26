@@ -2599,6 +2599,10 @@
     dock.setAttribute('data-testid', 'biggy-reactor-dock');
     dock.innerHTML =
       `<div id="j-orb" data-testid="biggy-jarvis-orb" role="status" aria-live="polite" aria-label="A.R.G.U.S. offline">` +
+      // Opaque freeze underlay: full 204px Orb circumference above Galaxy,
+      // beneath every SVG ring/label. Blocks node/trace bleed without covering
+      // Orb art, model chip, state, or fleet/cockpit interaction.
+      `<div id="j-orb-mask" class="biggy-orb-mask biggy-orb-freeze-overlay" data-testid="biggy-orb-mask" data-biggy-layer="orb-mask" aria-hidden="true"></div>` +
       `<svg viewBox="0 0 200 200" aria-hidden="true">` +
       `<defs><radialGradient id="hudCore" cx="50%" cy="45%" r="62%">` +
       `<stop offset="0%" stop-color="#0e413c"/><stop offset="70%" stop-color="#0b302d"/>` +

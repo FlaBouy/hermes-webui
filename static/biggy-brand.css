@@ -31,6 +31,13 @@ body.biggy-brand > .app-titlebar{display:none!important}
   --hud:#62dbff; --hud2:#2f9fd0; --accent:#f4a93a; --glow:rgba(70,200,255,.5); --beat:0; --orb-scale:1;
   transform-origin:50% 50%;transition:transform 105ms ease-out;
 }
+/* Full-circumference opaque freeze under the Orb rings: above Galaxy
+   (--biggy-layer-galaxy:0 via reactor stack) and below Orb SVG art. Matches
+   the 204px outer Orb box so nodes/traces cannot show inside the rings. */
+#j-orb .biggy-orb-mask{
+  position:absolute;inset:0;width:204px;height:204px;box-sizing:border-box;
+  border-radius:50%;background:#04050a;z-index:0;pointer-events:none;
+}
 #j-state{
   position:absolute;left:50%;top:250px;transform:translateX(-50%);width:204px;text-align:center;
   font-family:'SF Mono',ui-monospace,monospace;font-size:13px;font-weight:700;letter-spacing:.24em;color:#5a6b62;text-transform:uppercase;
@@ -51,7 +58,7 @@ body.biggy-brand > .app-titlebar{display:none!important}
 .biggy-argus-sync-panel label+label{margin-top:7px}.biggy-argus-sync-panel input{width:100%;accent-color:#62dbff}.biggy-argus-sync-panel output{text-align:right;color:#bcefff;font-size:8px;letter-spacing:0}
 #j-brain{position:static;width:auto;text-align:right;}
 #j-brain-chip{display:inline-block;box-sizing:border-box;max-width:min(360px,calc(100vw - 220px));overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:'SF Mono',ui-monospace,monospace;font-size:11px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#34d399;border:1px solid rgba(52,211,153,.42);border-radius:999px;padding:5px 14px;background:rgba(10,22,18,.72);backdrop-filter:blur(6px);}
-#j-orb svg{width:100%;height:100%;overflow:visible;display:block;}
+#j-orb svg{position:relative;z-index:1;width:100%;height:100%;overflow:visible;display:block;}
 #j-orb .glow{filter:drop-shadow(0 0 3px var(--glow));}
 #j-orb .rot{transform-box:view-box;transform-origin:100px 100px;}
 #j-orb .s-hud{stroke:var(--hud);fill:none;}
