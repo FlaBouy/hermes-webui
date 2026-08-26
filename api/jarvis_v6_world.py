@@ -82,6 +82,9 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
   let pulseScale = null;
   let destinationTimer = null;
   let traceGroup = null;
+  let traceFlowFrame = 0;
+  let traceFlowStarted = 0;
+  const traceFlowSegments = [];
   const activePages = new Map();
   let directoryFilterPath = '';
   let directoryFilterIds = null;
@@ -96,8 +99,11 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
   let nativeParticleSpeed = null;
   let nativeParticleWidth = null;
   const SYNAPSE_REST_SCALE = 1.5;
+  const SYNAPSE_WIDTH_SCALE = 2.2;
   const SYNAPSE_THINKING_MULTIPLIER = 2;
-  const LANDING_CAMERA = Object.freeze({ x: 0, y: 0, z: 1120 });
+  const FULL_SCOPE_NODE_SCALE = 6.4;
+  const HOME_SAFE_FIT_SCALE = 1.3;
+  const LANDING_CAMERA_FALLBACK = Object.freeze({ x: 0, y: 0, z: 2400 });
   const edge = (a, b) => `${Math.min(a,b)}:${Math.max(a,b)}`;
   const canonicalSource = value => String(value || '').replace(/\\/g, '/').replace(/^.*?\/Library\//, '').replace(/^\/+/, '');
   function graph() { return window.__os && window.__os.Graph; }
@@ -125,6 +131,54 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     anchor.val = Math.max(Number(anchor.val) || 0, 22);
     return anchor;
   }
+  function fullCorpusCameraPosition() {
+    const g = graph();
+    const data = window.__os && window.__os.data;
+    if (!g || !data || !Array.isArray(data.nodes)) return Object.assign({}, LANDING_CAMERA_FALLBACK);
+    let radius = 0;
+    for (const node of data.nodes) {
+      if (!node || !Number.isFinite(node.x) || !Number.isFinite(node.y) || !Number.isFinite(node.z)) continue;
+      radius = Math.max(radius, Math.hypot(node.x, node.y, node.z));
+    }
+    if (!Number.isFinite(radius) || radius < 1) return Object.assign({}, LANDING_CAMERA_FALLBACK);
+    const cameraObject = typeof g.camera === 'function' ? g.camera() : null;
+    const verticalFov = Math.max(24, Math.min(90, Number(cameraObject && cameraObject.fov) || 60)) * Math.PI / 180;
+    const aspect = Math.max(0.55, Number(cameraObject && cameraObject.aspect) || 1);
+    const limitingFov = aspect < 1 ? 2 * Math.atan(Math.tan(verticalFov / 2) * aspect) : verticalFov;
+    const distance = Math.max(1400, radius / Math.sin(limitingFov / 2) * 1.18 * HOME_SAFE_FIT_SCALE);
+    const current = typeof g.cameraPosition === 'function' ? g.cameraPosition() : null;
+    let dx = Number(current && current.x) || 0;
+    let dy = Number(current && current.y) || 0;
+    let dz = Number(current && current.z) || 1;
+    const length = Math.hypot(dx, dy, dz) || 1;
+    dx /= length; dy /= length; dz /= length;
+    return { x: dx * distance, y: dy * distance, z: dz * distance };
+  }
+  function applyHomeViewOffset(g) {
+    if (!g || typeof g.camera !== 'function') return;
+    const camera = g.camera();
+    if (!camera || typeof camera.setViewOffset !== 'function') return;
+    let desiredCenterX = innerWidth / 2;
+    let desiredCenterY = innerHeight / 2;
+    try {
+      const prompt = parent.document.getElementById('composerBox');
+      const frame = parent.document.getElementById('biggyV6World');
+      const cockpit = parent.document.getElementById('biggyCockpitStrip');
+      const orb = parent.document.getElementById('j-orb');
+      if (prompt && frame) {
+        const promptRect = prompt.getBoundingClientRect();
+        const frameRect = frame.getBoundingClientRect();
+        desiredCenterX = promptRect.left + (promptRect.width / 2) - frameRect.left;
+      }
+      const cockpitBottom = cockpit ? cockpit.getBoundingClientRect().bottom + 14 : 72;
+      const orbTop = orb ? orb.getBoundingClientRect().top - 18 : innerHeight - 360;
+      if (orbTop > cockpitBottom + 120) desiredCenterY = (cockpitBottom + orbTop) / 2;
+    } catch (_) {}
+    const shiftLeft = Math.max(-180, Math.min(180, innerWidth / 2 - desiredCenterX));
+    const shiftUp = Math.max(0, Math.min(210, innerHeight / 2 - desiredCenterY));
+    camera.setViewOffset(innerWidth, innerHeight, shiftLeft, shiftUp, innerWidth, innerHeight);
+    camera.updateProjectionMatrix();
+  }
   function installIdleContrast() {
     const g = graph();
     if (!g || idleContrastInstalled) return !!g;
@@ -135,11 +189,18 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     const idleColor = link => {
       const a = nodeFor(link.source), b = nodeFor(link.target);
       return (a && b && (a.g === 'router' || b.g === 'router' || (a.g === 'folder' && b.g === 'folder')))
-        ? '#54d9c2' : '#3f94ae';
+        ? '#82ffe7' : '#6acbed';
     };
     const idleWidth = link => {
       const a = nodeFor(link.source), b = nodeFor(link.target);
-      return (a && b && (a.g === 'router' || b.g === 'router' || (a.g === 'folder' && b.g === 'folder'))) ? 1.25 : 0.78;
+      return (a && b && (a.g === 'router' || b.g === 'router' || (a.g === 'folder' && b.g === 'folder'))) ? 2.2 : 1.35;
+    };
+    const idleNodeColor = node => {
+      const group = String(node && node.g || '');
+      if (group === 'prompt') return '#ffc44d';
+      if (group === 'router' || group === 'folder') return '#52b8ff';
+      if (group === 'document') return '#b69cff';
+      return '#67e8c5';
     };
     // Preserve the original V6 accessors, then increase the ambient synapse
     // tracer size and speed by 50%. While A.R.G.U.S. is gathering evidence,
@@ -158,11 +219,35 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     g.linkDirectionalParticleSpeed(link => particleValue(nativeParticleSpeed, link, 0.0035)
       * SYNAPSE_REST_SCALE * activityMultiplier());
     g.linkDirectionalParticleWidth(link => particleValue(nativeParticleWidth, link, 1.5)
-      * SYNAPSE_REST_SCALE * activityMultiplier());
+      * SYNAPSE_WIDTH_SCALE * activityMultiplier());
     // Keep inactive corpus routes legible from the room; the active trace is
     // still brighter and thicker, but the rest of the graph must not vanish.
-    g.linkColor(idleColor).linkWidth(idleWidth).linkOpacity(0.92);
-    if (typeof g.nodeOpacity === 'function') g.nodeOpacity(0.94);
+    g.linkColor(idleColor).linkWidth(idleWidth).linkOpacity(1).nodeColor(idleNodeColor);
+    if (typeof g.nodeOpacity === 'function') g.nodeOpacity(1);
+    // The stock V6 scene was tuned for close-up inspection and uses subdued
+    // Lambert lighting. At Home's full-corpus distance that turns otherwise
+    // saturated node colors almost black. Raise ambient fill once so the
+    // galaxy remains readable without changing active-trace contrast.
+    const THREE = window.__os && window.__os.THREE;
+    if (typeof g.lights === 'function' && THREE) {
+      const ambient = new THREE.AmbientLight(0xffffff, 2.4);
+      const key = new THREE.DirectionalLight(0xbfeaff, 1.6);
+      key.position.set(1, 1, 2);
+      g.lights([ambient, key]);
+    }
+    // V6's exponential fog is attractive close up, but at the full-corpus
+    // camera distance it reduces nodes and links to near-black. Keep only a
+    // very light depth cue in Biggy's embedded galaxy.
+    const scene = typeof g.scene === 'function' ? g.scene() : null;
+    if (scene && scene.fog && 'density' in scene.fog) scene.fog.density = 0.000035;
+    // The stock viewer sizes geometry in world units, so the complete corpus
+    // can collapse into sub-pixel dots when the operator zooms far enough out
+    // to see every branch. Establish a readable full-scope floor once during
+    // boot; this does not rebuild or poll the graph while the camera moves.
+    if (typeof g.nodeRelSize === 'function') {
+      const currentNodeScale = Number(g.nodeRelSize());
+      g.nodeRelSize(Math.max(Number.isFinite(currentNodeScale) ? currentNodeScale : 0, FULL_SCOPE_NODE_SCALE));
+    }
     idleContrastInstalled = true;
     return true;
   }
@@ -505,6 +590,10 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
   }
   function clearTraceOverlay() {
     const g = graph();
+    if (traceFlowFrame) cancelAnimationFrame(traceFlowFrame);
+    traceFlowFrame = 0;
+    traceFlowStarted = 0;
+    traceFlowSegments.length = 0;
     if (!traceGroup) return;
     if (g && typeof g.scene === 'function') g.scene().remove(traceGroup);
     traceGroup.traverse(object => {
@@ -533,9 +622,36 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
       mesh.renderOrder = 90;
       group.add(mesh);
     };
-    place(2.15, 0.16);
-    place(0.72, 1);
+    place(3.4, 0.24);
+    place(1.25, 1);
+    const tracer = new THREE.Mesh(
+      new THREE.SphereGeometry(5.2, 10, 8),
+      new THREE.MeshBasicMaterial({ color: '#d8fff7', transparent: true, opacity: 0.98, depthWrite: false }),
+    );
+    tracer.renderOrder = 96;
+    tracer.position.copy(start);
+    group.add(tracer);
+    traceFlowSegments.push({ object: tracer, start, end, offset: traceFlowSegments.length * 0.17 });
     return true;
+  }
+  function startTraceFlow() {
+    if (traceFlowFrame) cancelAnimationFrame(traceFlowFrame);
+    traceFlowStarted = performance.now();
+    const animate = now => {
+      if (!traceGroup || !traceFlowSegments.length) {
+        traceFlowFrame = 0;
+        return;
+      }
+      const cycle = argusActivityState === 'thinking' ? 620 : 980;
+      for (const segment of traceFlowSegments) {
+        const progress = (((now - traceFlowStarted) / cycle) + segment.offset) % 1;
+        segment.object.position.lerpVectors(segment.start, segment.end, progress);
+        const pulse = 1 + 0.42 * Math.sin(progress * Math.PI);
+        segment.object.scale.setScalar(pulse);
+      }
+      traceFlowFrame = requestAnimationFrame(animate);
+    };
+    traceFlowFrame = requestAnimationFrame(animate);
   }
   function drawTraceOverlay(route, failed) {
     clearTraceOverlay();
@@ -550,6 +666,7 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
       addTraceSegment(traceGroup, from, to, key === failed ? '#ef4444' : '#34d399');
     }
     g.scene().add(traceGroup);
+    startTraceFlow();
     return true;
   }
   function restore() {
@@ -623,6 +740,7 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     }
     if (data.type === 'biggy-galaxy-filter-focus') applyDirectoryFilter(data.path);
     if (data.type === 'biggy-argus-state') setArgusActivityState(data.state);
+    if (data.type === 'biggy-home-centerline-sync') applyHomeViewOffset(graph());
     if (data.type === 'biggy-world-pause') {
       const g = graph();
       const controls = g && g.controls && g.controls();
@@ -652,7 +770,8 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
       controls.update();
     }
     if (typeof g.resumeAnimation === 'function') g.resumeAnimation();
-    landingCameraPosition = Object.assign({}, LANDING_CAMERA);
+    applyHomeViewOffset(g);
+    landingCameraPosition = fullCorpusCameraPosition();
     g.cameraPosition(Object.assign({}, landingCameraPosition), { x: 0, y: 0, z: 0 }, 0);
     if (landingResetTimer) clearTimeout(landingResetTimer);
     landingResetTimer = setTimeout(() => {
@@ -684,18 +803,26 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     // The original V6 intro-fit is intentionally disabled for an embedded
     // corpus. Biggy owns one immediate, readable landing distance instead of
     // a second zoom several seconds after the page appears.
-    landingCameraPosition = Object.assign({}, LANDING_CAMERA);
+    applyHomeViewOffset(g);
+    landingCameraPosition = fullCorpusCameraPosition();
     g.cameraPosition(Object.assign({}, landingCameraPosition), { x: 0, y: 0, z: 0 }, 0);
     return true;
   };
+  addEventListener('resize', () => {
+    const g = graph();
+    if (g) applyHomeViewOffset(g);
+  });
   const waitForGraph = () => {
     if (!installIdleContrast()) { setTimeout(waitForGraph, 180); return; }
     installGalaxyNavigation();
-    requestAnimationFrame(() => {
+    // The standalone viewer already begins at a wide camera. Give its force
+    // layout a brief moment to assign coordinates, then fit the complete
+    // corpus around the fixed Biggy Prompt origin without a later push-in.
+    setTimeout(() => {
       if (!applyLandingCamera()) { setTimeout(waitForGraph, 180); return; }
       window.__biggyRagTraceReady = true;
       parent.postMessage({ type: 'biggy-rag-world-ready' }, location.origin);
-    });
+    }, 650);
   };
   waitForGraph();
 })();

@@ -13,8 +13,9 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260825-cockpit-rail-1';
+  const BUILD_ID = '20260826-cockpit-rag-layout-5';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
+  const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
   const V6_CHAT_PATH = '/api/biggy/v6/chat';
   const V6_WORLD_PATH = '/api/biggy/v6/world';
@@ -680,6 +681,36 @@
     return strip;
   }
 
+  let sharedCenterlineTimer = null;
+
+  function syncBiggySharedCenterline() {
+    sharedCenterlineTimer = null;
+    const prompt = document.getElementById('composerBox');
+    const mainChat = document.getElementById('mainChat');
+    if (!prompt || !mainChat) return;
+    const promptRect = prompt.getBoundingClientRect();
+    const masterX = promptRect.left + (promptRect.width / 2);
+    const placeOnMaster = (node) => {
+      if (!node || !node.offsetParent) return;
+      const parentRect = node.offsetParent.getBoundingClientRect();
+      node.style.left = `${masterX - parentRect.left}px`;
+    };
+    placeOnMaster(document.getElementById('biggyCockpitStrip'));
+    placeOnMaster(document.getElementById('biggyFleetStrip'));
+    placeOnMaster(document.getElementById('biggyJarvisTransplant'));
+    const frame = document.getElementById('biggyV6World');
+    if (frame && frame.contentWindow) {
+      try {
+        frame.contentWindow.postMessage({ type: 'biggy-home-centerline-sync' }, window.location.origin);
+      } catch (_) {}
+    }
+  }
+
+  function scheduleBiggySharedCenterline() {
+    if (sharedCenterlineTimer !== null) clearTimeout(sharedCenterlineTimer);
+    sharedCenterlineTimer = setTimeout(syncBiggySharedCenterline, 80);
+  }
+
   function installCockpitStrip(header) {
     const controls = header && header.querySelector('.biggy-brand-controls');
     const mainChat = document.getElementById('mainChat');
@@ -705,6 +736,18 @@
       if (railFilter) railFilter.click();
     });
     strip.appendChild(filter);
+
+    const rag = el('button', 'biggy-fleet-machine biggy-cockpit-action biggy-cockpit-rag');
+    rag.id = 'biggyCockpitRag';
+    rag.type = 'button';
+    rag.textContent = 'RAG';
+    rag.addEventListener('click', (event) => {
+      event.preventDefault();
+      const overview = document.getElementById('biggyArgusRagOverview');
+      setArgusRagPanelVisible(!!(overview && overview.hidden), rag, true);
+    });
+    strip.appendChild(rag);
+    setArgusRagPanelVisible(loadArgusRagPanelVisible(), rag, false);
 
     const ptt = controls.querySelector('#biggyPtt');
     const route = controls.querySelector('#biggyAudioRoute');
@@ -2065,6 +2108,34 @@
     return hud;
   }
 
+  function loadArgusRagPanelVisible() {
+    try {
+      const stored = localStorage.getItem(ARGUS_RAG_PANEL_STORAGE_KEY);
+      return stored === null ? true : stored !== '0';
+    } catch (_) {
+      return true;
+    }
+  }
+
+  function setArgusRagPanelVisible(visible, button, persist) {
+    const host = document.getElementById('mainChat');
+    const overview = ensureArgusRagOverview(host);
+    const control = button || document.getElementById('biggyCockpitRag');
+    const next = visible !== false;
+    if (overview) overview.hidden = !next;
+    if (host) host.classList.toggle('biggy-rag-panel-off', !next);
+    if (control) {
+      control.classList.toggle('ok', next);
+      control.setAttribute('aria-pressed', next ? 'true' : 'false');
+      control.title = next ? 'Hide the A.R.G.U.S. RAG panel' : 'Show the A.R.G.U.S. RAG panel';
+      control.setAttribute('aria-label', control.title);
+    }
+    if (persist) {
+      try { localStorage.setItem(ARGUS_RAG_PANEL_STORAGE_KEY, next ? '1' : '0'); } catch (_) {}
+    }
+    requestAnimationFrame(() => syncArgusConversationLaneBoundary());
+  }
+
   function ensureArgusConversationLane(mainChat) {
     const host = mainChat || document.getElementById('mainChat');
     if (!host) return null;
@@ -2086,11 +2157,17 @@
   function syncArgusConversationLaneBoundary(lane, host) {
     lane = lane || document.getElementById('biggyArgusConversationLane');
     host = host || document.getElementById('mainChat');
-    const composer = document.getElementById('composerWrap');
+    const composer = document.getElementById('composerBox') || document.getElementById('composerWrap');
     if (!lane || !host || !composer) return;
     const hostRect = host.getBoundingClientRect();
     const composerRect = composer.getBoundingClientRect();
-    const overlapBoundary = Math.max(132, Math.round(hostRect.bottom - composerRect.top + 18));
+    const laneStyle = window.getComputedStyle(lane);
+    const laneLeft = hostRect.left + (parseFloat(laneStyle.left) || 0);
+    const laneRight = laneLeft + (parseFloat(laneStyle.width) || 410);
+    const overlapsLane = composerRect.left < laneRight && composerRect.right > laneLeft;
+    const overlapBoundary = overlapsLane
+      ? Math.max(132, Math.round(hostRect.bottom - composerRect.top + 18))
+      : 18;
     lane.style.setProperty('--biggy-conversation-bottom', overlapBoundary + 'px');
   }
 
@@ -2158,8 +2235,8 @@
     // Measuring the composer forces a complete layout pass. Do it only when
     // the visible transcript actually changed, never on the background
     // heartbeat while the 3D canvas is rendering.
-    syncArgusConversationLaneBoundary(lane);
     lane.hidden = turns.length === 0;
+    syncArgusConversationLaneBoundary(lane);
     const body = lane.querySelector('.biggy-argus-conversation-turns');
     if (!body) return;
     body.innerHTML = turns.map((turn) => `<article class="biggy-argus-dialog is-${turn.identity.key}${turn.pending ? ' is-pending' : ''}">`
@@ -2489,6 +2566,8 @@
       pollRagWorldState().catch(() => {});
     });
     mainChat.appendChild(iframe);
+    scheduleGalaxyCanvasSize();
+    setTimeout(scheduleGalaxyCanvasSize, 500);
   }
 
   function makeHeader() {
@@ -4804,6 +4883,8 @@
     installDocumentTitle();
     installComposerBranding();
     installFleetStrip();
+    scheduleBiggySharedCenterline();
+    setTimeout(scheduleBiggySharedCenterline, 350);
     forceChromeLabels();
     installJarvisResponseLabels();
     removeCaduceus();
@@ -4844,6 +4925,8 @@
   function start() {
     tryStart().catch(() => {});
   }
+
+  window.addEventListener('resize', scheduleBiggySharedCenterline);
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start, { once: true });

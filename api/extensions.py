@@ -16,7 +16,7 @@ import socket
 import threading
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
-from urllib.parse import unquote, urlsplit
+from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 import hashlib
 import io
 import time
@@ -627,10 +627,40 @@ def _manifest_asset_url(value: object, asset_base: str = "") -> str:
     # bare relative paths resolve under /extensions/. Absolute same-origin paths
     # are still allowed and go through the same validator as env-configured URLs.
     if item.startswith("/"):
-        return item
+        return _auto_fingerprint_static_asset(item)
     base = asset_base.strip("/")
     rel = f"{base}/{item}" if base else item
     return EXTENSION_ROUTE_PREFIX + rel
+
+
+def _auto_fingerprint_static_asset(item: str) -> str:
+    """Replace ``v=auto`` on a local static asset with its content digest.
+
+    Locally maintained extensions otherwise have to pin a hand-written query
+    value in their installed manifest.  That pin routinely leaves a browser on
+    a stale skin after the source file changes.  ``v=auto`` keeps the manifest
+    stable while preserving immutable caching for the actual content URL.
+    """
+    parsed = urlsplit(item)
+    query = parse_qsl(parsed.query, keep_blank_values=True)
+    if not any(key == "v" and value == "auto" for key, value in query):
+        return item
+    if not parsed.path.startswith("/static/"):
+        return item
+    try:
+        from api import config as api_config
+
+        static_root = api_config.get_static_root().resolve()
+        rel = unquote(parsed.path[len("/static/") :])
+        asset = (static_root / rel).resolve()
+        asset.relative_to(static_root)
+        if not asset.is_file():
+            return item
+        digest = hashlib.sha256(asset.read_bytes()).hexdigest()[:16]
+    except (OSError, ValueError):
+        return item
+    resolved_query = [(key, digest if key == "v" and value == "auto" else value) for key, value in query]
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(resolved_query), parsed.fragment))
 
 
 def _manifest_asset_value_with_base(value: object, asset_base: str) -> object:

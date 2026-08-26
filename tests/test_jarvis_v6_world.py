@@ -474,16 +474,37 @@ def test_trace_waits_for_world_ready_and_does_not_replay_saved_receipt_on_boot()
     assert "clearRagTrace();" in BIGGY_JS
     assert "resetLandingCamera();" in world._TRACE_RUNTIME
     assert "controls.target.set(0, 0, 0)" in world._TRACE_RUNTIME
-    assert "const LANDING_CAMERA = Object.freeze({ x: 0, y: 0, z: 1120 })" in world._TRACE_RUNTIME
+    assert "const LANDING_CAMERA_FALLBACK = Object.freeze({ x: 0, y: 0, z: 2400 })" in world._TRACE_RUNTIME
+    assert "function fullCorpusCameraPosition()" in world._TRACE_RUNTIME
+    assert "radius / Math.sin(limitingFov / 2) * 1.18 * HOME_SAFE_FIT_SCALE" in world._TRACE_RUNTIME
+    assert "const HOME_SAFE_FIT_SCALE = 1.3" in world._TRACE_RUNTIME
+    assert "function applyHomeViewOffset(g)" in world._TRACE_RUNTIME
+    assert "parent.document.getElementById('biggyCockpitStrip')" in world._TRACE_RUNTIME
+    assert "parent.document.getElementById('j-orb')" in world._TRACE_RUNTIME
+    assert "desiredCenterX = promptRect.left + (promptRect.width / 2) - frameRect.left" in world._TRACE_RUNTIME
+    assert "camera.setViewOffset(innerWidth, innerHeight, shiftLeft, shiftUp, innerWidth, innerHeight)" in world._TRACE_RUNTIME
+    assert "biggy-home-centerline-sync" in world._TRACE_RUNTIME
     assert "controls.autoRotate = false" in world._TRACE_RUNTIME
     assert "liveControls.autoRotate = true" in world._TRACE_RUNTIME
     assert "activePages.clear();" in world._TRACE_RUNTIME
     assert "restoreBaseGalaxyVisibility();\n    resetLandingCamera();" in world._TRACE_RUNTIME
     assert "typeof os.clearFocus === 'function'" in world._TRACE_RUNTIME
     assert "idleContrastInstalled = false" in world._TRACE_RUNTIME
-    assert "g.nodeOpacity(0.94)" in world._TRACE_RUNTIME
-    assert "'#54d9c2'" in world._TRACE_RUNTIME
-    assert "'#3f94ae'" in world._TRACE_RUNTIME
+    assert "g.nodeOpacity(1)" in world._TRACE_RUNTIME
+    assert "const FULL_SCOPE_NODE_SCALE = 6.4" in world._TRACE_RUNTIME
+    assert "const SYNAPSE_WIDTH_SCALE = 2.2" in world._TRACE_RUNTIME
+    assert "g.nodeRelSize(Math.max" in world._TRACE_RUNTIME
+    assert "'#82ffe7'" in world._TRACE_RUNTIME
+    assert "'#6acbed'" in world._TRACE_RUNTIME
+    assert "const idleNodeColor = node =>" in world._TRACE_RUNTIME
+    assert "new THREE.AmbientLight(0xffffff, 2.4)" in world._TRACE_RUNTIME
+    assert "scene.fog.density = 0.000035" in world._TRACE_RUNTIME
+    assert ".nodeColor(idleNodeColor)" in world._TRACE_RUNTIME
+    assert "place(3.4, 0.24)" in world._TRACE_RUNTIME
+    assert "place(1.25, 1)" in world._TRACE_RUNTIME
+    assert "function startTraceFlow()" in world._TRACE_RUNTIME
+    assert "new THREE.SphereGeometry(5.2, 10, 8)" in world._TRACE_RUNTIME
+    assert "segment.object.position.lerpVectors" in world._TRACE_RUNTIME
     assert "/ 135" in world._TRACE_RUNTIME
     assert "state: 'unresolved'" in world._TRACE_RUNTIME
     assert "segments: 0" in world._TRACE_RUNTIME

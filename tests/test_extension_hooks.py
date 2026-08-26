@@ -103,6 +103,25 @@ def test_extension_config_accepts_only_safe_same_origin_urls(tmp_path, monkeypat
     }
 
 
+def test_manifest_static_auto_version_tracks_asset_content(tmp_path, monkeypatch):
+    from api import config as api_config
+    from api.extensions import _manifest_asset_url
+
+    static_root = tmp_path / "static"
+    static_root.mkdir()
+    asset = static_root / "skin.js"
+    monkeypatch.setattr(api_config, "get_static_root", lambda: static_root)
+
+    asset.write_text("first", encoding="utf-8")
+    first = _manifest_asset_url("/static/skin.js?v=auto")
+    asset.write_text("second", encoding="utf-8")
+    second = _manifest_asset_url("/static/skin.js?v=auto")
+
+    assert first.startswith("/static/skin.js?v=")
+    assert "auto" not in first
+    assert first != second
+
+
 def test_index_html_injection_escapes_urls_and_preserves_disabled_default(tmp_path, monkeypatch):
     monkeypatch.delenv("HERMES_WEBUI_EXTENSION_DIR", raising=False)
     monkeypatch.setenv("HERMES_WEBUI_EXTENSION_SCRIPT_URLS", "/extensions/app.js")
