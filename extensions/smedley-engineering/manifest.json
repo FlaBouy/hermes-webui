@@ -4,9 +4,13 @@
   "version": "0.2.5",
   "description": "RAG retrieval, PTT, and deterministic electrical tools around the existing Smedley WebUI session.",
   "scripts": [
+    "voltage-drop-sizing.js",
+    "smedley-electrical-results.js",
+    "smedley-live-tools.v0.2.5.js",
     "smedley-engineering.v0.2.5.js"
   ],
   "stylesheets": [
+    "smedley-electrical-results.css",
     "smedley-engineering.v0.2.5.css"
   ],
   "sidecar": {

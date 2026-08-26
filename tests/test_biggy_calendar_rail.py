@@ -42,3 +42,18 @@ def test_calendar_write_controls_are_guarded_and_visible():
 def test_calendar_month_fits_the_full_docked_panel_height():
     assert "flex:1 1 auto;min-height:0;max-height:none" in BRAND_CSS
     assert "min-height:64px" in BRAND_CSS
+
+
+def test_calendar_overlays_default_all_listed_on_card_open():
+    """On each Calendar open, every calendarList source is selected by default."""
+    assert "function resetCalendarOverlayDefaults(dlg)" in BRAND
+    assert "function syncCalendarOverlayDefaults(dlg, calendar)" in BRAND
+    assert "function calendarSourceIds(calendar)" in BRAND
+    assert "overlaysUserModified: false" in BRAND
+    assert "if (key === 'calendar') resetCalendarOverlayDefaults(dlg);" in BRAND
+    assert "state.overlaysUserModified = true;" in BRAND
+    assert "if (syncCalendarOverlayDefaults(dlg, calendar))" in BRAND
+    assert "calendar.calendar_sources" in BRAND
+    # Session toggles still refresh the panel; reopen resets via setActiveCategory.
+    assert "state.calendarIds = check.checked" in BRAND
+    assert "Add / manage Google calendars" in BRAND

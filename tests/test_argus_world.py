@@ -1,11 +1,11 @@
-"""Jarvis V6 3D world embed: narrow allowlist, chrome suppression, fallback."""
+"""A.R.G.U.S. 3D world embed: narrow allowlist, chrome suppression, fallback."""
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
 
-import api.jarvis_v6_world as world
+import api.argus_world as world
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -204,6 +204,14 @@ def test_ingest_status_retains_ledger_truth_while_monitor_reconnects(tmp_path, m
 def test_ingest_overlay_treats_monitor_reconnect_as_amber_not_failure():
     assert "INGEST MONITOR RECONNECTING" in BIGGY_JS
     assert "state === 'monitor_offline'" in BIGGY_JS
+
+
+def test_embedded_world_keeps_native_animation_and_full_resolution():
+    source = (ROOT / "api" / "argus_world.py").read_text(encoding="utf-8")
+    assert "function installBudgetedRenderLoop" not in source
+    assert "renderer.setPixelRatio" not in source
+    assert "window.requestAnimationFrame =" not in source
+    assert "g.resumeAnimation()" in source
 
 
 def test_retry_is_confined_to_a_ledger_known_failed_file(tmp_path, monkeypatch):
@@ -561,16 +569,29 @@ def test_argus_conversation_lane_mirrors_existing_message_state():
     assert "--biggy-conversation-bottom" in BIGGY_CSS
 
 
-def test_map_handoff_is_single_flight_and_pauses_the_galaxy():
+def test_owner_prompt_renderer_never_exposes_private_voice_context():
+    """The glass may show the utterance, never the appended PTT control prompt."""
+    start = BIGGY_JS.index("function argusVisibleOwnerPrompt")
+    end = BIGGY_JS.index("function argusConversationIdentity", start)
+    boundary = BIGGY_JS[start:end]
+    assert r"\[Voice PTT turn\b" in boundary
+    assert r"\[Full spoken mode\b" in boundary
+    assert r"Active Operator behavior\s*:" in boundary
+    render = BIGGY_JS[BIGGY_JS.index("function renderArgusConversationLane"):BIGGY_JS.index("window.__biggyRenderArgusConversationLaneNow")]
+    assert "message.role === 'user'" in render
+    assert "argusVisibleOwnerPrompt(message)" in render
+
+
+def test_map_handoff_is_single_flight_and_uses_static_map_not_second_webgl_scene():
     assert "let mapRenderPromise = null" in BIGGY_JS
     assert "if (mapRenderPromise) return mapRenderPromise" in BIGGY_JS
-    assert "biggy-world-pause" in BIGGY_JS
-    assert "biggy-world-resume" in BIGGY_JS
-    assert "mapbox_load_timeout" in BIGGY_JS
-    assert "setGalaxyRenderPaused(false);\n      return true;" in BIGGY_JS
+    assert "mapbox_static_timeout" in BIGGY_JS
+    assert "styles/v1/mapbox/streets-v12/static/geojson" in BIGGY_JS
+    assert "Math.ceil(coordinates.length / 80)" in BIGGY_JS
+    render_start = BIGGY_JS.index("async function renderMapViewModelOnce")
+    render_end = BIGGY_JS.index("function renderMapViewModel(mvm)", render_start)
+    assert "new mapboxgl.Map" not in BIGGY_JS[render_start:render_end]
     assert "setTimeout(_render" not in (ROOT / "static" / "messages.js").read_text(encoding="utf-8")
-    assert "pauseAnimation" in world._TRACE_RUNTIME
-    assert "resumeAnimation" in world._TRACE_RUNTIME
 
 
 def test_ptt_completion_is_retryable_and_rehydrates_dialogs_and_cards():
@@ -651,7 +672,7 @@ def test_argus_browser_voice_fallback_is_alistar():
 def test_routes_wire_world_endpoint():
     assert "/api/biggy/v6/world" in ROUTES
     assert "/api/biggy/v6/world/tree" in ROUTES
-    assert "jarvis_v6_world" in ROUTES
+    assert "argus_world" in ROUTES
     # Must not reuse the shared DENY/frame-ancestors-none security headers,
     # which would prevent the same-origin iframe from ever loading.
     assert "X-Frame-Options" in ROUTES

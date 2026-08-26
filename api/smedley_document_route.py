@@ -343,9 +343,9 @@ def document_route_enabled() -> bool:
 def _is_ask_jarvis_traffic(text: object) -> bool:
     """Ask Jarvis turns must not auto-open the Smedley engineering document sidecar."""
     try:
-        from api.ask_jarvis_route import is_ask_jarvis_command
+        from api.ask_jarvis_route import is_argus_command
 
-        return bool(is_ask_jarvis_command(str(text or "")))
+        return bool(is_argus_command(str(text or "")))
     except Exception:
         return bool(
             re.search(

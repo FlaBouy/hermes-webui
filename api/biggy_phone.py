@@ -1,7 +1,7 @@
-"""Profile-local Twilio seam for Biggy's phone cockpit.
+"""Profile-local phone transports for Biggy's cockpit.
 
-The browser never receives Twilio credentials.  With no profile config this
-module is deliberately disconnected; calls and messages fail closed.
+Google Messages is the primary SMS transport. Twilio is the SMS fallback and
+the voice bridge. The browser never receives either transport's credentials.
 """
 
 from __future__ import annotations
@@ -81,18 +81,43 @@ def _readiness(cfg: dict[str, Any]) -> tuple[bool, list[str]]:
 
 def phone_status() -> dict[str, Any]:
     cfg = _load_config()
-    ready, missing = _readiness(cfg)
+    twilio_ready, missing = _readiness(cfg)
+    twilio_sms_ready = twilio_ready and cfg.get("twilio_sms_enabled") is True
+    try:
+        from api.google_messages_bridge import google_messages_status
+
+        google = google_messages_status()
+    except Exception:
+        google = {"ready": False, "paired": False, "connected": False, "detail": "Google Messages local bridge is unavailable"}
     identity = _safe_identity(cfg)
     config_error = str(cfg.get("_config_error") or "")
-    state = "error" if config_error else ("ready" if ready else "disconnected")
+    sms_ready = bool(google.get("ready")) or twilio_sms_ready
+    try:
+        _phone(cfg.get("bridge_device_number"), "bridge device number")
+        bridge_ready = True
+    except ValueError:
+        bridge_ready = False
+    voice_ready = twilio_ready and bridge_ready
+    state = "error" if config_error else ("ready" if (sms_ready or voice_ready) else "disconnected")
     return {
         "schema": "biggy.phone.status.v1",
         "state": state,
-        "connected": ready,
+        "connected": sms_ready or voice_ready,
         **identity,
-        "sms_ready": ready,
-        "voice_ready": ready and bool(str(cfg.get("voice_url") or "").strip()),
-        "history_ready": ready,
+        "sms_ready": sms_ready,
+        "voice_ready": voice_ready,
+        "history_ready": twilio_ready,
+        "sms_primary": "google_messages",
+        "sms_transport": "google_messages" if google.get("ready") else ("twilio_fallback" if twilio_sms_ready else "unavailable"),
+        "google_messages": google,
+        "twilio_fallback_ready": twilio_sms_ready,
+        "twilio_configured": twilio_ready,
+        "twilio_fallback_detail": (
+            "ready"
+            if twilio_sms_ready
+            else str(cfg.get("twilio_sms_block_reason") or "Twilio SMS is waiting for carrier registration.")
+        ),
+        "voice_transport": "twilio_click_to_call" if voice_ready else "unavailable",
         "contacts": _safe_contacts(cfg),
         "missing": missing,
         "error": config_error or None,
@@ -184,24 +209,62 @@ def send_sms(body: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("message body is required")
     if len(text) > 1600:
         raise ValueError("message body is too long")
+    recipient = _phone(body.get("to"), "recipient")
+    google_error = ""
+    try:
+        from api.google_messages_bridge import send_google_message
+
+        result = send_google_message(recipient, text)
+        return {"schema": "biggy.phone.sms.v1", **result}
+    except Exception as exc:
+        google_error = str(exc).strip() or "Google Messages failed"
+
+    ready, _missing = _readiness(cfg)
+    if not ready:
+        raise RuntimeError(f"Google Messages failed and Twilio fallback is unavailable: {google_error}")
+    if cfg.get("twilio_sms_enabled") is not True:
+        reason = str(cfg.get("twilio_sms_block_reason") or "Twilio SMS is waiting for carrier registration.")
+        raise RuntimeError(f"Google Messages failed and Twilio fallback is blocked: {reason}")
     payload = _twilio_request(cfg, "Messages.json", method="POST", data={
-        "To": _phone(body.get("to"), "recipient"),
+        "To": recipient,
         "From": _phone(cfg.get("from_number"), "Twilio number"),
         "Body": text,
     })
-    return {"schema": "biggy.phone.sms.v1", "ok": True, "sid": str(payload.get("sid") or ""), "status": str(payload.get("status") or "queued")}
+    return {
+        "schema": "biggy.phone.sms.v1",
+        "ok": True,
+        "transport": "twilio_fallback",
+        "sid": str(payload.get("sid") or ""),
+        "status": str(payload.get("status") or "queued"),
+        "primary_error": google_error[:300],
+    }
 
 
 def start_call(body: dict[str, Any]) -> dict[str, Any]:
     if body.get("confirmed") is not True:
         raise PermissionError("explicit confirmation is required before starting a call")
     cfg = _load_config()
-    voice_url = str(cfg.get("voice_url") or "").strip()
-    if not voice_url.startswith("https://"):
-        raise RuntimeError("Phone voice is not configured with an HTTPS TwiML URL")
+    target = _phone(body.get("to"), "recipient")
+    bridge_device = _phone(cfg.get("bridge_device_number"), "bridge device number")
+    from_number = _phone(cfg.get("voice_from_number") or cfg.get("from_number"), "Twilio number")
+    # Click-to-call: Twilio rings Rick's Galaxy first. Once he answers, Twilio
+    # dials the selected contact using the Biggy number as caller ID. Calling
+    # the contact first and then running the old static forwarding TwiML would
+    # reverse the bridge and could dial Rick's phone twice.
+    twiml = (
+        '<Response><Say>Connecting your call.</Say>'
+        f'<Dial callerId="{from_number}"><Number>{target}</Number></Dial>'
+        '</Response>'
+    )
     payload = _twilio_request(cfg, "Calls.json", method="POST", data={
-        "To": _phone(body.get("to"), "recipient"),
-        "From": _phone(cfg.get("voice_from_number") or cfg.get("from_number"), "Twilio number"),
-        "Url": voice_url,
+        "To": bridge_device,
+        "From": from_number,
+        "Twiml": twiml,
     })
-    return {"schema": "biggy.phone.call.v1", "ok": True, "sid": str(payload.get("sid") or ""), "status": str(payload.get("status") or "queued")}
+    return {
+        "schema": "biggy.phone.call.v1",
+        "ok": True,
+        "transport": "twilio_click_to_call",
+        "sid": str(payload.get("sid") or ""),
+        "status": str(payload.get("status") or "queued"),
+    }

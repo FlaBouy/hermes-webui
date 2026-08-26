@@ -87,12 +87,19 @@ def test_argus_orb_status_tracks_server_owned_alistar_playback():
     assert "clear_argus_speech_telemetry" in speaker
     assert "pollArgusSpeechMeter" in brand
     assert "requestAnimationFrame(renderArgusSpeechFrame)" in brand
-    assert "setInterval(() => { pollArgusSpeechMeter().catch(() => {}); }, 80)" in brand
+    assert "setInterval(() => { pollArgusSpeechMeter().catch(() => {}); }, 400)" in brand
     assert "argusSpeechSyncGain" in brand
     assert "argusSpeechSyncLead" in brand
     assert "ARGUS_SYNC_STORAGE_KEY" in brand
     assert "status.speech_meter" not in brand
     assert "word.length / 28" not in brand
+
+
+def test_argus_orb_ring_motion_remains_continuous():
+    css = (ROOT / "static" / "biggy-brand.css").read_text(encoding="utf-8")
+    assert "#j-orb .rot-a{animation:hudCCW 64s linear infinite;}" in css
+    assert "#j-orb .rot-radar{animation:hudCW 6s linear infinite;}" in css
+    assert "#j-orb .rot-a{animation-timing-function:steps" not in css
 
 
 def test_argus_orb_renders_measured_audio_level_and_cleans_up():
@@ -120,8 +127,8 @@ const sandbox = {{
   document: {{getElementById: (id) => id === 'j-orb' ? orb : null}},
   requestAnimationFrame: (fn) => {{ frames.push(fn); return frames.length; }},
   cancelAnimationFrame: () => {{}},
-  jarvisOrbFlight: true,
-  pollJarvisV6Health: () => Promise.resolve(),
+  argusOrbFlight: true,
+  pollArgusHealth: () => Promise.resolve(),
   argusSpeechPulseFrame: null,
   argusSpeechPulseSignature: '',
   argusSpeechPulseEnvelope: [],

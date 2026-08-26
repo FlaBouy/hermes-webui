@@ -300,13 +300,13 @@ def _health_route(*, health_get: HealthGetter | None) -> dict[str, Any]:
 
 
 def _default_ingest_status_get() -> dict[str, Any]:
-    from api.jarvis_v6_world import ingest_status
+    from api.argus_world import ingest_status
 
     return ingest_status()
 
 
 def _default_ingest_retry(source: str) -> dict[str, Any]:
-    from api.jarvis_v6_world import retry_ingest_source
+    from api.argus_world import retry_ingest_source
 
     return retry_ingest_source(source)
 

@@ -20,7 +20,7 @@
     ['vfd-circuit','VFD Circuit','motor']
   ];
   const FIELDS = {
-    'voltage-drop': [['voltage','System voltage (V)','number','480'],['phase','Phase','select','3|1'],['amps','Load amps','number',''],['length_ft','One-way length (ft)','number',''],['conductor_awg','Conductor size','select',CONDUCTORS.join('|')],['conduit_type','Conduit type','select','steel|aluminum|pvc'],['circuit_type','Circuit type','select','feeder|branch'],['parallel_sets','Parallel sets','number','1'],['power_factor','Power factor','number','0.85']],
+    'voltage-drop': [['voltage','System voltage (V)','number','480'],['phase','Phase','select','3|1'],['amps','Load amps','number',''],['length_ft','One-way length (ft)','number',''],['material','Conductor material','select','copper'],['temp_rating','Temp / terminal basis (C)','select','75|90|60'],['conduit_type','Conduit type','select','steel|aluminum|pvc'],['circuit_type','Circuit type','select','feeder|branch'],['continuous_load','Continuous load','select','true|false'],['parallel_sets','Parallel sets','number','1'],['power_factor','Power factor','number','0.85'],['ambient_temp_c','Ambient temp (C)','number','30'],['num_conductors','Current-carrying conductors','number','3']],
     'feeder-size': [['voltage','System voltage (V)','number','480'],['phase','Phase','select','3|1'],['circuit_type','Circuit type','select','feeder|branch'],['length_ft','One-way length (ft)','number',''],['_fla_src','FLA source','select','amps|nameplate_fla|hp'],['_fla_val','FLA / HP value','number',''],['conduit_type','Conduit type','select','steel|aluminum|pvc'],['parallel_sets','Parallel sets','number','1'],['ambient_temp_c','Ambient temp (C)','number','30'],['num_conductors','Current-carrying conductors','number','3'],['temp_rating','Temp rating (C)','select','75|90|60']],
     'conductor-sets': [['voltage','System voltage (V)','number','480'],['phase','Phase','select','3|1'],['circuit_type','Circuit type','select','feeder|branch'],['length_ft','One-way length (ft)','number',''],['_fla_src','FLA source','select','amps|nameplate_fla|hp'],['_fla_val','FLA / HP value','number',''],['conduit_type','Conduit type','select','steel|aluminum|pvc'],['ambient_temp_c','Ambient temp (C)','number','30']],
     'ocpd-size': [['amps','Calculated amps','number',''],['circuit_type','Circuit type','select','feeder|branch'],['note','Basis / note','text','']],
@@ -411,19 +411,363 @@
     return rail;
   }
 
+  // Empty defaults that are intentionally optional (check-existing / notes / estimates).
+  // ocpd_amps is optional for conduit-fill; grounding requires it only for egc/both via validateExtra.
+  const OPTIONAL_EMPTY_FIELDS = new Set([
+    'note',
+    'trade_size',
+    'check_width_in',
+    'circuit_conductor_size',
+    'drive_input_fla',
+    'ocpd_amps',
+  ]);
+
+  const FIELD_NUMBER_CONSTRAINTS = Object.freeze({
+    parallel_sets: {min: '1', step: '1'},
+    num_conductors: {min: '1', step: '1'},
+    num_current_carrying: {min: '1', step: '1'},
+    power_factor: {min: '0', max: '1', step: 'any'},
+    voltage: {min: '0', step: 'any'},
+    amps: {min: '0', step: 'any'},
+    length_ft: {min: '0', step: 'any'},
+    _fla_val: {min: '0', step: 'any'},
+    ocpd_amps: {min: '0', step: 'any'},
+    service_factor: {min: '0', step: 'any'},
+    drive_input_fla: {min: '0', step: 'any'},
+    check_width_in: {min: '0', step: 'any'},
+    ambient_temp_c: {step: 'any'},
+  });
+
   function fieldControl(field) {
-    const [name,label,type,initial]=field; const wrapper=el('label'); const caption=el('span');caption.textContent=label;wrapper.appendChild(caption);let control;
-    if(type==='select'){control=el('select');String(initial).split('|').forEach((value)=>{const option=el('option');option.value=value;option.textContent=value||'—';control.appendChild(option);});}
-    else if(type==='textarea'){control=el('textarea');control.rows=4;control.value=initial;}
-    else{control=el('input');control.type=type;control.value=initial;}
-    control.name=name;wrapper.appendChild(control);return wrapper;
+    const [name, label, type, initial] = field;
+    const wrapper = el('label');
+    const caption = el('span');
+    caption.textContent = label;
+    wrapper.appendChild(caption);
+    let control;
+    if (type === 'select') {
+      control = el('select');
+      String(initial).split('|').forEach((value) => {
+        const option = el('option');
+        option.value = value;
+        option.textContent = value || '—';
+        control.appendChild(option);
+      });
+    } else if (type === 'textarea') {
+      control = el('textarea');
+      control.rows = 4;
+      control.value = initial;
+    } else {
+      control = el('input');
+      control.type = type;
+      control.value = initial;
+      if (type === 'number') {
+        control.inputMode = 'decimal';
+        const constraints = FIELD_NUMBER_CONSTRAINTS[name] || {};
+        control.step = constraints.step || 'any';
+        if (constraints.min != null) control.min = constraints.min;
+        if (constraints.max != null) control.max = constraints.max;
+      }
+    }
+    control.name = name;
+    if (
+      (type === 'number' || type === 'text' || type === 'textarea')
+      && String(initial ?? '') === ''
+      && !OPTIONAL_EMPTY_FIELDS.has(name)
+    ) {
+      control.required = true;
+    }
+    if (name === 'cables') control.required = true;
+    wrapper.appendChild(control);
+    return wrapper;
   }
-  function valueFor(control){if(control.value==='')return undefined;if(control.name==='cables')return JSON.parse(control.value);if(control.type==='number')return Number(control.value);if(control.value==='true')return true;if(control.value==='false')return false;return control.value;}
+  function valueFor(control) {
+    if (control.value === '') return undefined;
+    if (control.name === 'cables') return JSON.parse(control.value);
+    if (control.type === 'number') return Number(control.value);
+    if (control.value === 'true') return true;
+    if (control.value === 'false') return false;
+    return control.value;
+  }
+
+  let activeToolClose = null;
+
   function openTool(tool) {
-    const backdrop=el('div','smedley-engineering-modal-backdrop');const modal=el('div','smedley-engineering-modal');const head=el('div','smedley-engineering-modal-head',`<h2>${esc(tool[1])}</h2><button type="button" aria-label="Close">×</button>`);const body=el('div','smedley-engineering-tool-body');const form=el('div','smedley-engineering-form');const result=el('div','smedley-engineering-result','<p>Validated results, assumptions, warnings, and NEC basis appear here.</p>');
-    (FIELDS[tool[0]]||[]).forEach((field)=>form.appendChild(fieldControl(field)));const run=el('button','smedley-engineering-primary');run.textContent='RUN DETERMINISTIC TOOL';form.appendChild(run);body.append(form,result);modal.append(head,body);backdrop.appendChild(modal);const workspace=document.getElementById('mainChat');(workspace||document.body).appendChild(backdrop);
-    const close=()=>backdrop.remove();head.querySelector('button').addEventListener('click',close);backdrop.addEventListener('mousedown',(event)=>{if(event.target===backdrop)close();});
-    run.addEventListener('click',async()=>{run.disabled=true;run.textContent='CALCULATING…';try{const params={};form.querySelectorAll('input,select,textarea').forEach((control)=>{const value=valueFor(control);if(value!==undefined)params[control.name]=value;});if(params._fla_src&&params._fla_val!==undefined){params[params._fla_src]=params._fla_val;delete params._fla_src;delete params._fla_val;}const data=await proxyJson(`/tools/${tool[0]}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(params)});result.innerHTML=`<pre>${esc(JSON.stringify(data,null,2))}</pre>`;}catch(error){result.innerHTML=`<pre>${esc(JSON.stringify({status:'error',error:String(error.message||error)},null,2))}</pre>`;}finally{run.disabled=false;run.textContent='RUN DETERMINISTIC TOOL';}});
+    if (activeToolClose) activeToolClose();
+
+    const toolId = tool[0];
+    const backdrop = el('div', 'smedley-engineering-modal-backdrop');
+    const modal = el('div', 'smedley-engineering-modal');
+    const head = el(
+      'div',
+      'smedley-engineering-modal-head',
+      `<h2>${esc(tool[1])}</h2><button type="button" aria-label="Close">×</button>`,
+    );
+    const body = el('div', 'smedley-engineering-tool-body');
+    const form = el('form', 'smedley-engineering-form');
+    const result = el(
+      'div',
+      'smedley-engineering-result',
+      '<div class="smedley-engineering-result-empty">Enter parameters — results update live.</div>',
+    );
+    (FIELDS[toolId] || []).forEach((field) => form.appendChild(fieldControl(field)));
+    const run = el('button', 'smedley-engineering-primary');
+    run.type = 'button';
+    run.textContent = 'RECALCULATE';
+    form.appendChild(run);
+    body.append(form, result);
+    modal.append(head, body);
+    backdrop.appendChild(modal);
+    const workspace = document.getElementById('mainChat');
+    (workspace || document.body).appendChild(backdrop);
+
+    let live = null;
+    let closed = false;
+    let voltageDropBaseline = null;
+    let comparisonSequence = 0;
+    const close = () => {
+      if (closed) return;
+      closed = true;
+      if (live && typeof live.dispose === 'function') live.dispose();
+      if (activeToolClose === close) activeToolClose = null;
+      backdrop.remove();
+    };
+    activeToolClose = close;
+    head.querySelector('button').addEventListener('click', close);
+    backdrop.addEventListener('mousedown', (event) => {
+      if (event.target === backdrop) close();
+    });
+    form.addEventListener('submit', (event) => {
+      event.preventDefault();
+      if (live && typeof live.calculateNow === 'function') live.calculateNow();
+    });
+
+    const collectParams = () => {
+      const params = {};
+      form.querySelectorAll('input,select,textarea').forEach((control) => {
+        const value = valueFor(control);
+        if (value !== undefined) params[control.name] = value;
+      });
+      if (params._fla_src && params._fla_val !== undefined) {
+        params[params._fla_src] = params._fla_val;
+        delete params._fla_src;
+        delete params._fla_val;
+      }
+      return params;
+    };
+
+    const calculate = async (params) => {
+      if (toolId === 'voltage-drop') {
+        const sizing = window.SmedleyVoltageDropSizing;
+        if (!sizing || typeof sizing.calculate !== 'function') {
+          throw new Error('Voltage drop auto-sizing helper is not loaded.');
+        }
+        return sizing.calculate(params, async (path, toolParams) =>
+          proxyJson(path, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(toolParams),
+          }),
+        );
+      }
+      return proxyJson(`/tools/${toolId}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(params),
+      });
+    };
+
+    const requestVoltageDrop = (params, conductorAwg) => proxyJson('/tools/voltage-drop', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        voltage: Number(params.voltage),
+        phase: Number(params.phase),
+        amps: Number(params.amps),
+        length_ft: Number(params.length_ft),
+        conductor_awg: String(conductorAwg),
+        conduit_type: String(params.conduit_type || '').toLowerCase(),
+        circuit_type: String(params.circuit_type || '').toLowerCase(),
+        parallel_sets: Number(params.parallel_sets || 1),
+        ...(params.power_factor !== undefined
+          ? {power_factor: Number(params.power_factor)} : {}),
+      }),
+    });
+
+    const renderConductorComparison = (data) => {
+      if (toolId !== 'voltage-drop' || !voltageDropBaseline?.result) return;
+      const sizing = window.SmedleyVoltageDropSizing;
+      const sizes = Array.isArray(sizing?.CONDUCTORS) ? sizing.CONDUCTORS : [];
+      const recommended = String(voltageDropBaseline.result.recommended_size || '');
+      const current = String(data?.result?.comparison_size || recommended);
+      const currentIndex = sizes.indexOf(current);
+      const parallelFloor = voltageDropBaseline.result.parallel_minimum_awg;
+      const floorIndex = parallelFloor ? sizes.indexOf(String(parallelFloor)) : 0;
+      if (!sizes.length || currentIndex < 0) return;
+
+      const controls = el('div', 'smedley-conductor-compare');
+      const smaller = el('button', 'smedley-conductor-compare-step');
+      smaller.type = 'button';
+      smaller.textContent = '◀ SMALLER';
+      smaller.disabled = currentIndex <= Math.max(0, floorIndex);
+      const status = el(
+        'div',
+        'smedley-conductor-compare-status',
+        `<span>CONDUCTOR COMPARISON</span><strong>${esc(current)} AWG</strong>`
+          + `<small>RECOMMENDED ${esc(recommended)} AWG</small>`,
+      );
+      const reset = el('button', 'smedley-conductor-compare-reset');
+      reset.type = 'button';
+      reset.textContent = 'RECOMMENDED';
+      reset.disabled = current === recommended;
+      const larger = el('button', 'smedley-conductor-compare-step');
+      larger.type = 'button';
+      larger.textContent = 'LARGER ▶';
+      larger.disabled = currentIndex >= sizes.length - 1;
+      controls.append(smaller, status, reset, larger);
+      result.prepend(controls);
+
+      const compare = async (nextSize) => {
+        if (!nextSize || !voltageDropBaseline?.result) return;
+        const requestId = ++comparisonSequence;
+        controls.querySelectorAll('button').forEach((button) => { button.disabled = true; });
+        status.querySelector('small').textContent = `CHECKING ${nextSize} AWG…`;
+        try {
+          const params = collectParams();
+          const drop = await requestVoltageDrop(params, nextSize);
+          if (requestId !== comparisonSequence) return;
+          if (!drop || drop.status !== 'ok' || !drop.result) {
+            throw new Error(drop?.error || `Voltage-drop comparison failed for ${nextSize} AWG.`);
+          }
+          const baseline = voltageDropBaseline;
+          const ampacityMinimum = String(baseline.result.minimum_ampacity_size || recommended);
+          const ampacityPass = sizes.indexOf(nextSize) >= sizes.indexOf(ampacityMinimum);
+          const voltageDropPass = String(drop.result.pass_fail || '').toUpperCase() === 'PASS';
+          const warnings = Array.from(new Set([...(drop.warnings || [])]));
+          if (!ampacityPass) {
+            warnings.unshift(
+              `Trial ${nextSize} AWG is below minimum ampacity/code size ${ampacityMinimum} AWG.`,
+            );
+          }
+          const comparison = {
+            ...drop,
+            inputs: {...(drop.inputs || {}), ...params, conductor_awg: nextSize},
+            result: {
+              ...drop.result,
+              conductor_awg: nextSize,
+              comparison_size: nextSize,
+              baseline_recommended_size: recommended,
+              recommended_size: recommended,
+              minimum_ampacity_size: baseline.result.minimum_ampacity_size,
+              minimum_voltage_drop_size: baseline.result.minimum_voltage_drop_size,
+              parallel_minimum_awg: baseline.result.parallel_minimum_awg,
+              governing_constraint: baseline.result.governing_constraint,
+              governing_explanation: baseline.result.governing_explanation,
+              design_amps: baseline.result.design_amps,
+              derated_ampacity_A: baseline.result.derated_ampacity_A,
+              ampacity_pass_fail: ampacityPass ? 'PASS' : 'FAIL',
+              voltage_drop_pass_fail: voltageDropPass ? 'PASS' : 'FAIL',
+              pass_fail: ampacityPass && voltageDropPass ? 'PASS' : 'FAIL',
+            },
+            assumptions: Array.from(new Set([
+              ...(drop.assumptions || []),
+              `ElectriCalc comparison: ${nextSize} AWG trial against automatic ${recommended} AWG recommendation.`,
+            ])),
+            warnings,
+            code_basis: Array.from(new Set([
+              baseline.code_basis,
+              drop.code_basis,
+            ].filter(Boolean))).join(' | '),
+          };
+          renderSuccess(comparison, {preserveBaseline: true});
+        } catch (error) {
+          if (requestId === comparisonSequence) renderError(error);
+        }
+      };
+      smaller.addEventListener('click', () => compare(sizes[currentIndex - 1]));
+      larger.addEventListener('click', () => compare(sizes[currentIndex + 1]));
+      reset.addEventListener('click', () => compare(recommended));
+    };
+
+    const renderSuccess = (data, options = {}) => {
+      if (toolId === 'voltage-drop' && data?.status === 'ok' && !options.preserveBaseline) {
+        voltageDropBaseline = data;
+        comparisonSequence += 1;
+      }
+      const renderer = window.SmedleyElectricalResults;
+      if (renderer && typeof renderer.renderResultCard === 'function') {
+        result.innerHTML = renderer.renderResultCard(toolId, data);
+      } else {
+        result.innerHTML = `<pre>${esc(JSON.stringify(data, null, 2))}</pre>`;
+      }
+      renderConductorComparison(data);
+    };
+
+    const renderError = (error) => {
+      const errPayload = {status: 'error', error: String(error.message || error)};
+      const renderer = window.SmedleyElectricalResults;
+      if (renderer && typeof renderer.renderResultCard === 'function') {
+        result.innerHTML = renderer.renderResultCard(toolId, errPayload);
+      } else {
+        result.innerHTML = `<pre>${esc(JSON.stringify(errPayload, null, 2))}</pre>`;
+      }
+    };
+
+    const validateExtra = (controls) => {
+      const byName = Object.fromEntries(controls.map((control) => [control.name, control]));
+      const errors = {};
+      if (toolId === 'grounding') {
+        const mode = String(byName.mode?.value || 'both');
+        if ((mode === 'egc' || mode === 'both') && !String(byName.ocpd_amps?.value || '').trim()) {
+          errors.ocpd_amps = 'OCPD amps (EGC) is required for this mode.';
+        }
+        if ((mode === 'gec' || mode === 'both')
+            && !String(byName.service_conductor_size?.value || '').trim()) {
+          errors.service_conductor_size = 'Service conductor (GEC) is required for this mode.';
+        }
+      }
+      if (byName._fla_src && byName._fla_val
+          && !String(byName._fla_val.value || '').trim()) {
+        errors._fla_val = 'FLA / HP value is required.';
+      }
+      return errors;
+    };
+
+    const liveApi = window.SmedleyLiveTools;
+    form.addEventListener('input', () => { comparisonSequence += 1; });
+    form.addEventListener('change', () => { comparisonSequence += 1; });
+    if (liveApi && typeof liveApi.wire === 'function') {
+      live = liveApi.wire({
+        form,
+        result,
+        run,
+        collectParams,
+        calculate,
+        renderSuccess,
+        renderError,
+        validateExtra,
+      });
+      const firstEmpty = form.querySelector('input[required],textarea[required]');
+      if (firstEmpty && typeof firstEmpty.focus === 'function') firstEmpty.focus();
+      const initial = liveApi.validateForm(form, validateExtra);
+      if (initial.valid) live.calculateNow();
+    } else {
+      // Calculate-only fallback if the live helper failed to load.
+      run.textContent = 'CALCULATE';
+      run.addEventListener('click', async (event) => {
+        event.preventDefault();
+        run.disabled = true;
+        run.textContent = 'CALCULATING…';
+        try {
+          renderSuccess(await calculate(collectParams()));
+        } catch (error) {
+          renderError(error);
+        } finally {
+          run.disabled = false;
+          run.textContent = 'CALCULATE';
+        }
+      });
+    }
   }
   function makeRightRail(){
     const rail=el('aside','smedley-engineering-rail smedley-engineering-rail--right');rail.id='smedleyEngineeringRight';

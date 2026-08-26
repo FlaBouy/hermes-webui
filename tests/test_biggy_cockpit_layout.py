@@ -32,7 +32,7 @@ def test_filter_stays_functional_but_is_removed_from_right_rail():
 
 
 def test_orb_is_bottom_docked_and_cockpit_is_top_centered():
-    assert ".biggy-jarvis-transplant{" in BRAND_CSS
+    assert ".biggy-argus-reactor{" in BRAND_CSS
     assert "bottom:calc(100% - 8px)" in BRAND_CSS
     assert ".biggy-cockpit-strip{" in BRAND_CSS
     assert "left:50%;top:20px" in BRAND_CSS
@@ -65,12 +65,24 @@ def test_half_width_prompt_is_centered_on_the_shared_cockpit_axis():
     assert "const masterX = promptRect.left + (promptRect.width / 2)" in BRAND
     assert "placeOnMaster(document.getElementById('biggyCockpitStrip'))" in BRAND
     assert "placeOnMaster(document.getElementById('biggyFleetStrip'))" in BRAND
-    assert "placeOnMaster(document.getElementById('biggyJarvisTransplant'))" in BRAND
+    assert "placeOnMaster(document.getElementById('biggyArgusReactor'))" in BRAND
     assert "biggy-home-centerline-sync" in BRAND
+
+
+def test_conversation_lane_clears_full_width_composer_overlay():
+    """Dialog stack must stop above the full-width bottom overlay, not the half-width prompt."""
     boundary = BRAND[BRAND.index("function syncArgusConversationLaneBoundary"):BRAND.index("function argusConversationText")]
-    assert "document.getElementById('composerBox')" in boundary
-    assert "const overlapsLane" in boundary
-    assert ": 18" in boundary
+    assert "document.getElementById('composerWrap')" in boundary
+    assert "document.getElementById('composerBox')" not in boundary
+    assert "overlapsLane" not in boundary
+    assert "hostRect.bottom - overlayRect.top" in boundary
+    assert "Math.max(132," in boundary
+    assert "scheduleArgusConversationLaneBoundary" in BRAND
+    assert "scheduleArgusConversationLaneBoundary()" in BRAND
+    # Usable bottom follows overlay across viewport sizes; top positions stay RAG-gated.
+    assert ".biggy-rag-panel-off .biggy-argus-conversation-lane{top:28px}" in BRAND_CSS
+    assert "bottom:var(--biggy-conversation-bottom,176px)" in BRAND_CSS
+    assert "overflow:auto" in BRAND_CSS[BRAND_CSS.index(".biggy-argus-conversation-turns{"):BRAND_CSS.index(".biggy-argus-dialog{")]
 
 
 def test_galaxy_canvas_remains_full_screen_while_home_camera_controls_framing():
@@ -78,3 +90,12 @@ def test_galaxy_canvas_remains_full_screen_while_home_camera_controls_framing():
     assert "iframe.style.top = `${profileTop}px`" not in BRAND
     assert ".biggy-v6-world{\n  position:absolute;inset:0;width:100%;height:100%" in BRAND_CSS
     assert "window.addEventListener('resize', scheduleGalaxyCanvasSize)" in BRAND
+
+
+def test_argus_response_label_observer_is_idempotent():
+    """Response branding must not trigger its own MutationObserver forever."""
+    labels = BRAND[BRAND.index("function labelArgusResponses"):BRAND.index("function removeCaduceus")]
+    assert "name && name.textContent !== 'A.R.G.U.S.'" in labels
+    assert "icon && icon.textContent !== 'A'" in labels
+    assert "turn.dataset.responseAgent !== 'argus'" in labels
+    assert "if (name) name.textContent = 'A.R.G.U.S.'" not in labels

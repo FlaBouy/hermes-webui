@@ -217,7 +217,7 @@ def _security_headers(handler):
     handler._csp_extra_frame_src = extra_frame_src
     handler.send_header('X-Content-Type-Options', 'nosniff')
     handler.send_header('X-Frame-Options', 'DENY')
-    handler.send_header('Referrer-Policy', 'same-origin')
+    handler.send_header('Referrer-Policy', 'strict-origin')
     handler.send_header(_CSP_HEADER_NAME, _build_csp_enforced_policy(extra_connect_src, extra_frame_src))
     handler.send_header(
         'Permissions-Policy',

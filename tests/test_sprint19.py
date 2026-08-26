@@ -89,7 +89,7 @@ def test_security_headers_on_json():
     assert status == 200
     assert headers.get("X-Content-Type-Options") == "nosniff"
     assert headers.get("X-Frame-Options") == "DENY"
-    assert headers.get("Referrer-Policy") == "same-origin"
+    assert headers.get("Referrer-Policy") == "strict-origin"
 
 
 def test_security_headers_on_health():

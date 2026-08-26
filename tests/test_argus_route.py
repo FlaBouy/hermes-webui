@@ -1,7 +1,7 @@
 """Ask-Jarvis hard-bind trigger detection and chat-bubble attribution.
 
 Regression coverage for two 2026-08-18 reports:
-  - "I need Jarvis to get me a map routing to Tallahassee, Florida" fell
+  - "I need Argus to get me a map routing to Tallahassee, Florida" fell
     through to ordinary chat instead of hard-binding to Jarvis (missing verb
     form in the embedded trigger regex).
   - A completed Ask-Jarvis turn rendered in the chat bubble with no visible
@@ -11,7 +11,7 @@ Regression coverage for two 2026-08-18 reports:
 
 from __future__ import annotations
 
-from api.ask_jarvis_route import argus_voice_id, is_ask_jarvis_command
+from api.argus_route import argus_voice_id, is_argus_command
 
 
 def test_argus_voice_is_alistar():
@@ -38,7 +38,7 @@ def _jarvis_session_for_followup_tests():
 
     return SimpleNamespace(
         messages=[
-            {"role": "user", "content": "Ask Jarvis for the PM20-520 manual."},
+            {"role": "user", "content": "Ask Argus for the PM20-520 manual."},
             {
                 "role": "assistant",
                 "content": "**Jarvis:** I could not verify that page yet.",
@@ -73,52 +73,52 @@ def _argus_travel_session_for_followup_tests():
     )
 
 
-def test_leading_ask_jarvis_colon_matches():
-    assert is_ask_jarvis_command("Ask Jarvis: get me a map route to Tallahassee, FL")
+def test_retired_jarvis_name_is_not_an_active_route_alias():
+    assert not is_argus_command("Ask Jarvis: get me a map route to Tallahassee, FL")
 
 
-def test_embedded_ask_jarvis_matches():
-    assert is_ask_jarvis_command(
-        "Do you have access to ask Jarvis to get me a map route to Tallahassee?"
+def test_embedded_ask_argus_access_matches():
+    assert is_argus_command(
+        "Do you have access to ask Argus to get me a map route to Tallahassee?"
     )
 
 
 def test_embedded_ask_argus_matches():
-    assert is_ask_jarvis_command(
+    assert is_argus_command(
         "Hey Biggy, ask Argus to map us a route to Jordan-Hare Stadium."
     )
 
 
 def test_stt_getting_argus_map_variant_stays_hard_bound():
-    assert is_ask_jarvis_command(
+    assert is_argus_command(
         "Hey Biggy about getting Argus to get me a map routed to Jordan-Hare Stadium."
     )
 
 
 def test_leading_ask_argus_colon_matches():
-    assert is_ask_jarvis_command("Ask Argus: map a route to Tallahassee, FL")
+    assert is_argus_command("Ask Argus: map a route to Tallahassee, FL")
 
 
-def test_need_jarvis_to_matches():
-    assert is_ask_jarvis_command(
-        "I need Jarvis to get me a map routing to Tallahassee, Florida"
+def test_need_argus_to_matches():
+    assert is_argus_command(
+        "I need Argus to get me a map routing to Tallahassee, Florida"
     )
 
 
-def test_need_jarvis_for_matches():
-    assert is_ask_jarvis_command("I need Jarvis for a weather update")
+def test_need_argus_for_matches():
+    assert is_argus_command("I need Argus for a weather update")
 
 
 def test_unrelated_mention_of_jarvis_does_not_match():
-    assert not is_ask_jarvis_command(
+    assert not is_argus_command(
         "That is untrue. Jarvis has been providing maps for a week now."
     )
 
 
 def test_jarvis_manual_location_followup_stays_hard_bound():
-    from api.routes import _jarvis_active_followup_objective
+    from api.routes import _argus_active_followup_objective
 
-    objective = _jarvis_active_followup_objective(
+    objective = _argus_active_followup_objective(
         _jarvis_session_for_followup_tests(),
         "Take a look in the Vendor Data folder under Honeywell - TDC3000",
     )
@@ -129,9 +129,9 @@ def test_jarvis_manual_location_followup_stays_hard_bound():
 
 
 def test_jarvis_numbered_selection_stays_hard_bound():
-    from api.routes import _jarvis_active_followup_objective
+    from api.routes import _argus_active_followup_objective
 
-    objective = _jarvis_active_followup_objective(
+    objective = _argus_active_followup_objective(
         _jarvis_session_for_followup_tests(), "Selection 1"
     )
 
@@ -140,10 +140,10 @@ def test_jarvis_numbered_selection_stays_hard_bound():
 
 
 def test_explicit_biggy_address_releases_jarvis_followup_binding():
-    from api.routes import _jarvis_active_followup_objective
+    from api.routes import _argus_active_followup_objective
 
     assert (
-        _jarvis_active_followup_objective(
+        _argus_active_followup_objective(
             _jarvis_session_for_followup_tests(), "Hey Biggy, change subjects."
         )
         is None
@@ -151,9 +151,9 @@ def test_explicit_biggy_address_releases_jarvis_followup_binding():
 
 
 def test_argus_event_venue_clarification_stays_in_active_travel_lane():
-    from api.routes import _jarvis_active_followup_objective
+    from api.routes import _argus_active_followup_objective
 
-    objective = _jarvis_active_followup_objective(
+    objective = _argus_active_followup_objective(
         _argus_travel_session_for_followup_tests(),
         "The Auburn and Florida game is going to be played September the 19th at Jordan-Hare.",
     )
@@ -165,9 +165,9 @@ def test_argus_event_venue_clarification_stays_in_active_travel_lane():
 
 
 def test_argus_multi_category_travel_retry_uses_prior_verified_destination():
-    from api.routes import _jarvis_active_followup_objective
+    from api.routes import _argus_active_followup_objective
 
-    objective = _jarvis_active_followup_objective(
+    objective = _argus_active_followup_objective(
         _argus_travel_session_for_followup_tests(),
         (
             "Ask Argus: map a route to the Auburn versus Florida game on September 19 "
@@ -181,9 +181,9 @@ def test_argus_multi_category_travel_retry_uses_prior_verified_destination():
 
 
 def test_argus_travel_recovery_discards_injected_library_matches():
-    from api.routes import _jarvis_active_followup_objective
+    from api.routes import _argus_active_followup_objective
 
-    objective = _jarvis_active_followup_objective(
+    objective = _argus_active_followup_objective(
         _argus_travel_session_for_followup_tests(),
         (
             "The game is at Jordan-Hare.\n\n"
@@ -199,10 +199,10 @@ def test_argus_travel_recovery_discards_injected_library_matches():
 
 def test_travel_language_without_prior_argus_map_is_not_auto_bound():
     from types import SimpleNamespace
-    from api.routes import _jarvis_active_followup_objective
+    from api.routes import _argus_active_followup_objective
 
     assert (
-        _jarvis_active_followup_objective(
+        _argus_active_followup_objective(
             SimpleNamespace(messages=[]),
             "The game is going to be played September 19 at Jordan-Hare.",
         )
@@ -220,7 +220,7 @@ def test_ask_jarvis_reply_is_attributed_in_chat_bubble(monkeypatch):
     import pathlib
     import subprocess
 
-    import api.ask_jarvis_route as ajr
+    import api.argus_route as ajr
 
     fake_payload = {
         "speak": "Route to Tallahassee is 285 miles, about 4.5 hours.",
@@ -236,7 +236,7 @@ def test_ask_jarvis_reply_is_attributed_in_chat_bubble(monkeypatch):
     monkeypatch.setattr(pathlib.Path, "is_file", lambda self: True)
     monkeypatch.setattr(subprocess, "run", lambda *a, **k: _FakeProc())
 
-    result = ajr.try_ask_jarvis("Ask Jarvis: get me a map route to Tallahassee, FL")
+    result = ajr.try_ask_jarvis("Ask Argus: get me a map route to Tallahassee, FL")
     assert result is not None
     assert result["reply"].startswith("**A.R.G.U.S.:**")
     assert "Tallahassee" in result["reply"]
@@ -247,7 +247,7 @@ def test_legacy_backend_name_is_rebranded_in_public_reply(monkeypatch):
     import pathlib
     import subprocess
 
-    import api.ask_jarvis_route as ajr
+    import api.argus_route as ajr
 
     class _FakeProc:
         stdout = json.dumps({"speak": "Jarvis has mapped the route.", "citations": []})
@@ -266,7 +266,7 @@ def test_pa_core_carries_biggy_session_id_for_short_term_memory(monkeypatch):
     """A follow-up must retain its chat identity, never a request correlation."""
     import json
 
-    import api.ask_jarvis_route as ajr
+    import api.argus_route as ajr
     import api.jarvis_pa_conversation_memory as conversation_memory
     import api.jarvis_pa_strategy_memory as strategy_memory
 
@@ -308,6 +308,54 @@ def test_pa_core_carries_biggy_session_id_for_short_term_memory(monkeypatch):
     assert captured["payload"]["conversation_context"][0]["objective"] == "Prior manual request"
 
 
+def test_pa_core_retries_one_empty_success_response(monkeypatch):
+    """An n8n HTTP 200 with no body must not become a false Argus failure."""
+    import api.argus_route as ajr
+    import api.jarvis_pa_conversation_memory as conversation_memory
+    import api.jarvis_pa_strategy_memory as strategy_memory
+
+    calls = []
+
+    class _Response:
+        def __init__(self, body):
+            self.body = body
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return self.body
+
+    def _urlopen(request, timeout):
+        calls.append(request)
+        if len(calls) == 1:
+            return _Response(b"")
+        return _Response(
+            b'{"status":"COMPLETED","spokenText":"Route ready.",'
+            b'"requestedTools":["maps"],"citations":[],"map_view_model":'
+            b'{"schema":"jarvis.map_view_model.v1","available":true}}'
+        )
+
+    monkeypatch.setenv("GPT_BIGGY_PROPOSE_TOKEN", "test-token")
+    monkeypatch.setattr(ajr.urllib.request, "urlopen", _urlopen)
+    monkeypatch.setattr(ajr.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(strategy_memory, "record_outcome", lambda **_kwargs: None)
+    monkeypatch.setattr(conversation_memory, "record_turn", lambda *_a, **_k: None)
+
+    result = ajr.try_jarvis_ii_pa_core(
+        "Ask Argus: map a route to Jordan-Hare Stadium.",
+        correlation_id="same-correlation",
+        session_id="biggy-chat",
+    )
+
+    assert len(calls) == 2
+    assert result["ok"] is True
+    assert result["map_view_model"]["available"] is True
+
+
 def test_short_term_pa_context_is_bounded_and_session_scoped():
     """The continuity window is transient and cannot cross from one Biggy chat to another."""
     from api.jarvis_pa_conversation_memory import record_turn, recent_context
@@ -328,8 +376,8 @@ def test_short_term_pa_context_is_bounded_and_session_scoped():
     assert recent_context("another-biggy-chat") == []
 
 
-def test_jarvis_identity_and_server_tts_guard_are_durable():
-    """Every UI shell must receive an explicit Jarvis identity and avoid a second TTS pass."""
+def test_argus_identity_and_server_tts_guard_are_durable():
+    """Every UI shell must receive an explicit A.R.G.U.S. identity and avoid a second TTS pass."""
     from pathlib import Path
 
     root = Path(__file__).resolve().parents[1]
@@ -337,7 +385,7 @@ def test_jarvis_identity_and_server_tts_guard_are_durable():
     ui = (root / "static" / "ui.js").read_text(encoding="utf-8")
     messages = (root / "static" / "messages.js").read_text(encoding="utf-8")
 
-    assert '"assistant_identity": "jarvis"' in routes
+    assert '"assistant_identity": "argus"' in routes
     assert "message.assistant_identity" in ui
     assert "startData.tts_final_queued" in messages
 

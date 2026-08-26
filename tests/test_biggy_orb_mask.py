@@ -67,8 +67,8 @@ def test_orb_mask_stacking_stays_in_reactor_above_galaxy():
     layers = BRAND_CSS[BRAND_CSS.index("#mainChat.biggy-brand-iwo{"):BRAND_CSS.index("#mainChat.biggy-brand-iwo .messages-shell")]
     assert "--biggy-layer-galaxy:0" in layers
     assert "--biggy-layer-reactor:10" in layers
-    transplant = BRAND_CSS[BRAND_CSS.index(".biggy-jarvis-transplant{"):BRAND_CSS.index("#j-orb{")]
-    assert "z-index:var(--biggy-layer-reactor, 10)" in transplant
+    reactor = BRAND_CSS[BRAND_CSS.index(".biggy-argus-reactor{"):BRAND_CSS.index("#j-orb{")]
+    assert "z-index:var(--biggy-layer-reactor, 10)" in reactor
     markup = _reactor_markup()
     # Mask lives inside #j-orb (reactor), not over chip/state/fleet controls.
     assert markup.index('id="j-orb"') < markup.index('id="j-orb-mask"')

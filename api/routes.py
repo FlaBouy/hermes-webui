@@ -10323,7 +10323,7 @@ def _handle_biggy_rag_navigation(handler, parsed) -> bool:
     if parsed.path not in {_BIGGY_RAG_BROWSE_PATH, _BIGGY_RAG_FILE_PATH} and not is_file_path:
         return False
     try:
-        from api.jarvis_v6_world import rag_folder_entries, resolve_rag_document
+        from api.argus_world import rag_folder_entries, resolve_rag_document
 
         requested = (
             unquote(parsed.path[len(_BIGGY_RAG_FILE_PREFIX) :])
@@ -12238,10 +12238,10 @@ def _handle_biggy_v6_world_asset(handler, parsed) -> bool:
     scoped CSP/X-Frame-Options instead of api.helpers._security_headers(),
     because that shared policy sets X-Frame-Options: DENY and
     frame-ancestors 'none', which would block Biggy from framing its own
-    embed. See api/jarvis_v6_world.py for the full rationale.
+    embed. See api/argus_world.py for the full rationale.
     """
     try:
-        from api.jarvis_v6_world import WORLD_CSP, serve_asset
+        from api.argus_world import WORLD_CSP, serve_asset
     except Exception:
         logger.exception("jarvis v6 world module failed to import")
         return j(handler, {"error": "V6 world embed unavailable"}, status=500)
@@ -12886,17 +12886,17 @@ def handle_get(handler, parsed) -> bool:
 
     if parsed.path in ("/api/biggy/v6/health", "/api/biggy/v6/status"):
         try:
-            from api.jarvis_v6_bridge import JarvisBridge
+            from api.argus_bridge import ArgusBridge
 
-            payload, status = JarvisBridge().health()
+            payload, status = ArgusBridge().health()
             return j(handler, payload, status=status)
         except Exception:
             logger.exception("jarvis v6 health bridge failed")
             return j(
                 handler,
                 {
-                    "schema": "biggy.jarvis_v6_health.v1",
-                    "service": "jarvis-v6",
+                    "schema": "biggy.argus_health.v1",
+                    "service": "argus",
                     "state": "error",
                     "online": False,
                     "error": "A.R.G.U.S. health bridge failed",
@@ -12906,7 +12906,7 @@ def handle_get(handler, parsed) -> bool:
 
     if parsed.path == "/api/biggy/v6/world/status":
         try:
-            from api.jarvis_v6_world import ingest_status
+            from api.argus_world import ingest_status
 
             return j(handler, ingest_status(), status=200)
         except Exception:
@@ -12915,7 +12915,7 @@ def handle_get(handler, parsed) -> bool:
 
     if parsed.path == "/api/biggy/v6/world/tree":
         try:
-            from api.jarvis_v6_world import rag_directory_tree
+            from api.argus_world import rag_directory_tree
 
             return j(handler, rag_directory_tree(), status=200)
         except Exception:
@@ -14353,13 +14353,13 @@ def handle_post(handler, parsed) -> bool:
         finally:
             if diag:
                 diag.finish()
-    # Lightweight Ask Jarvis client hard-bind/render timing merge (no optimize/rewire).
+    # Lightweight A.R.G.U.S. client hard-bind/render timing merge (no optimize/rewire).
 
-    # Client render acknowledgement for Ask Jarvis travel visuals (map + recommendation cards).
+    # Client render acknowledgement for A.R.G.U.S. travel visuals (map + recommendation cards).
     # Required before any text/TTS may claim on-screen/map/visual results for that correlation.
-    if parsed.path == "/api/biggy/ask-jarvis-render-ack":
+    if parsed.path in {"/api/biggy/argus-render-ack", "/api/biggy/ask-jarvis-render-ack"}:
         try:
-            from api.ask_jarvis_route import timing_path_for
+            from api.argus_route import timing_path_for
             from datetime import datetime, timezone
 
             raw = handler.rfile.read(int(handler.headers.get("Content-Length") or 0))
@@ -14388,7 +14388,7 @@ def handle_post(handler, parsed) -> bool:
                     prev = {}
             now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             ack = {
-                "schema": "jarvis.ask_jarvis_render_ack.v1",
+                "schema": "argus.render_ack.v1",
                 "correlation_id": corr,
                 "positive": positive,
                 "map_rendered": map_ok,
@@ -14416,9 +14416,9 @@ def handle_post(handler, parsed) -> bool:
                 },
             }
             prev["render_ack"] = ack
-            # Post-ack visual claim line suppressed: Ask Jarvis hard-bind already
+            # Post-ack visual claim line suppressed: A.R.G.U.S. hard-bind already
             # speaks exactly one Austin ack + one Alistar final. Extra TTS
-            # overlaps the authoritative Jarvis response.
+            # overlaps the authoritative A.R.G.U.S. response.
             post_ack_tts = {"queued": False, "reason": "suppressed_single_jm_authority"}
             try:
                 if positive and rec_ok:
@@ -14444,7 +14444,7 @@ def handle_post(handler, parsed) -> bool:
             if body.get("segments_ms") and isinstance(body.get("segments_ms"), dict):
                 segs.update(body.get("segments_ms"))
             prev["segments_ms"] = segs
-            prev["schema"] = prev.get("schema") or "jarvis.ask_jarvis_correlation_timing.v1"
+            prev["schema"] = prev.get("schema") or "argus.correlation_timing.v1"
             prev["correlation_id"] = corr
             path.write_text(json.dumps(prev, indent=2) + "\n", encoding="utf-8")
             return j(
@@ -14457,12 +14457,12 @@ def handle_post(handler, parsed) -> bool:
                 },
             )
         except Exception:
-            logger.exception("ask_jarvis render ack merge failed")
+            logger.exception("argus render ack merge failed")
             return bad(handler, "render ack failed", 500)
 
-    if parsed.path == "/api/biggy/ask-jarvis-client-timing":
+    if parsed.path in {"/api/biggy/argus-client-timing", "/api/biggy/ask-jarvis-client-timing"}:
         try:
-            from api.ask_jarvis_route import timing_path_for
+            from api.argus_route import timing_path_for
 
             raw = handler.rfile.read(int(handler.headers.get("Content-Length") or 0))
             body = json.loads(raw.decode("utf-8") or "{}")
@@ -14564,9 +14564,9 @@ def handle_post(handler, parsed) -> bool:
         session = str(body.get("session") or "").strip() or None
         context = body.get("context") if isinstance(body.get("context"), dict) else None
         try:
-            from api.jarvis_v6_bridge import JarvisBridge
+            from api.argus_bridge import ArgusBridge
 
-            payload, status = JarvisBridge().chat(
+            payload, status = ArgusBridge().chat(
                 message, session=session, context=context
             )
             return j(handler, payload, status=status)
@@ -14586,7 +14586,7 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/biggy/v6/world/retry":
         try:
             body = _read_json_request_body(handler)
-            from api.jarvis_v6_world import retry_ingest_source
+            from api.argus_world import retry_ingest_source
 
             return j(handler, retry_ingest_source(body.get("source")), status=200)
         except ValueError as exc:
@@ -14598,7 +14598,7 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/biggy/v6/world/disposition":
         try:
             body = _read_json_request_body(handler)
-            from api.jarvis_v6_world import disposition_ingest_source
+            from api.argus_world import disposition_ingest_source
 
             return j(
                 handler,
@@ -23032,10 +23032,14 @@ def _handle_chat_start(handler, body, diag=None):
         # acknowledgement, governed tool selection, and the current RAG Core
         # instead of bypassing it through the older index-first resolver.
         _ask_jarvis_document_fast_path = str(
-            os.environ.get("HERMES_WEBUI_ASK_JARVIS_DOCUMENT_FAST_PATH") or ""
+            os.environ.get("HERMES_WEBUI_ASK_ARGUS_DOCUMENT_FAST_PATH")
+            or os.environ.get("HERMES_WEBUI_ASK_JARVIS_DOCUMENT_FAST_PATH")
+            or ""
         ).strip().lower() in {"1", "true", "yes", "on"}
         _jarvis_pa_core_enabled = str(
-            os.environ.get("HERMES_WEBUI_JARVIS_II_PA_CORE_ENABLED") or ""
+            os.environ.get("HERMES_WEBUI_ARGUS_PA_CORE_ENABLED")
+            or os.environ.get("HERMES_WEBUI_JARVIS_II_PA_CORE_ENABLED")
+            or ""
         ).strip().lower() in {"1", "true", "yes", "on"}
         # VNext document work uses the normal Ask-Jarvis two-stage handoff
         # below: Biggy acknowledges immediately and the verified result replaces
@@ -23043,7 +23047,7 @@ def _handle_chat_start(handler, body, diag=None):
         # available only when the operator has not enabled that handoff.
         if not attachments and not _ask_jarvis_document_fast_path and not _jarvis_pa_core_enabled:
             try:
-                from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj_document
+                from api.argus_route import is_argus_command as _is_aj_document
                 from api.smedley_document_route import is_document_request, try_document_route
 
                 jarvis_document = (
@@ -23106,7 +23110,8 @@ def _handle_chat_start(handler, body, diag=None):
                             "content": reply,
                             "timestamp": now_ts + 1,
                             "document_route": True,
-                            "assistant_identity": "jarvis",
+                            "assistant_identity": "argus",
+                            "argus_response": True,
                             "jarvis_response": True,
                             "ask_jarvis_hard_bind": True,
                             "spoken_reply": spoken,
@@ -23135,8 +23140,10 @@ def _handle_chat_start(handler, body, diag=None):
                         "session_id": s.session_id,
                         "stream_id": None,
                         "document_route": True,
-                        "assistant_identity": "jarvis",
+                        "assistant_identity": "argus",
+                        "argus_response": True,
                         "jarvis_response": True,
+                        "ask_argus_hard_bind": True,
                         "ask_jarvis_hard_bind": True,
                         "reply": reply,
                         "spoken_reply": spoken,
@@ -23156,25 +23163,33 @@ def _handle_chat_start(handler, body, diag=None):
         # Must run before smedley document/engineering RAG routes.
         if not attachments:
             try:
-                from api.ask_jarvis_route import (
+                from api.argus_route import (
                     ack_spoken_text,
                     austin_voice_id,
-                    is_ask_jarvis_command,
+                    is_argus_command,
                     mint_correlation_id,
                     pending_visual_text,
-                    try_jarvis_ii_pa_core,
-                    queue_ask_jarvis_smedley_tts,
+                    try_argus_pa_core,
+                    queue_argus_smedley_tts,
                     queue_biggy_austin_ack,
                     timing_path_for,
-                    try_ask_jarvis,
+                    try_argus,
                     wait_ack_playback_complete,
                 )
             except Exception:
                 logger.exception("ask_jarvis imports failed; falling through to ordinary chat")
             else:
-                _jarvis_followup_objective = _jarvis_active_followup_objective(s, msg)
-                if is_ask_jarvis_command(msg) or _jarvis_followup_objective:
-                    _jarvis_objective = _jarvis_followup_objective or msg
+                _jarvis_explicit_objective = is_argus_command(msg)
+                _jarvis_followup_objective = (
+                    None
+                    if _jarvis_explicit_objective
+                    else _argus_active_followup_objective(s, msg)
+                )
+                if _jarvis_explicit_objective or _jarvis_followup_objective:
+                    # A new explicit Argus command always starts from the
+                    # owner's stated destination.  Never let a prior travel
+                    # card (for example Grand Canyon) overwrite Jordan-Hare.
+                    _jarvis_objective = msg if _jarvis_explicit_objective else _jarvis_followup_objective
                     _jarvis_document_vnext = False
                     if not _jarvis_followup_objective:
                         try:
@@ -23234,6 +23249,7 @@ def _handle_chat_start(handler, body, diag=None):
                                 "role": "user",
                                 "content": msg,
                                 "timestamp": now_ts,
+                                "_ask_argus": True,
                                 "_ask_jarvis": True,
                                 "_correlation_id": corr,
                             },
@@ -23241,6 +23257,8 @@ def _handle_chat_start(handler, body, diag=None):
                                 "role": "assistant",
                                 "content": pending_text,
                                 "timestamp": now_ts + 1,
+                                "ask_argus_hard_bind": True,
+                                "ask_argus_pending": True,
                                 "ask_jarvis_hard_bind": True,
                                 "ask_jarvis_pending": True,
                                 "spoken_reply": None,
@@ -23256,7 +23274,7 @@ def _handle_chat_start(handler, body, diag=None):
                     )
                     s.pending_user_message = None
                     # Keep a synthetic active marker so UI shows working until final resolves.
-                    s.active_stream_id = f"ask-jarvis-pending:{corr}"
+                    s.active_stream_id = f"ask-argus-pending:{corr}"
                     if hasattr(s, "pending_started_at"):
                         s.pending_started_at = time.time()
                     try:
@@ -23285,7 +23303,7 @@ def _handle_chat_start(handler, body, diag=None):
 
                     sid = s.session_id
 
-                    def _ask_jarvis_finish_bg(
+                    def _argus_finish_bg(
                         session_id=sid,
                         objective=_jarvis_objective,
                         correlation_id=corr,
@@ -23329,14 +23347,14 @@ def _handle_chat_start(handler, body, diag=None):
                                         "transport": "jarvis_ii_generic_rag_vnext",
                                     }
                                 elif pa_core_enabled:
-                                    ask_jarvis = try_jarvis_ii_pa_core(
+                                    ask_jarvis = try_argus_pa_core(
                                         objective,
                                         biggy_ingress_ts=ingress_ts,
                                         correlation_id=correlation_id,
                                         session_id=session_id,
                                     )
                                 else:
-                                    ask_jarvis = try_ask_jarvis(
+                                    ask_jarvis = try_argus(
                                         objective,
                                         biggy_ingress_ts=ingress_ts,
                                         correlation_id=correlation_id,
@@ -23364,7 +23382,10 @@ def _handle_chat_start(handler, body, diag=None):
                                     "role": "assistant",
                                     "content": reply,
                                     "timestamp": int(time.time()),
-                                    "assistant_identity": "jarvis",
+                                    "assistant_identity": "argus",
+                                    "argus_response": True,
+                                    "ask_argus_hard_bind": True,
+                                    "ask_argus_pending": False,
                                     "ask_jarvis_hard_bind": True,
                                     "ask_jarvis_pending": False,
                                     "spoken_reply": spoken_text or None,
@@ -23554,7 +23575,7 @@ def _handle_chat_start(handler, body, diag=None):
                                 tts_final = {"queued": False}
                                 if spoken_text:
                                     try:
-                                        tts_final = queue_ask_jarvis_smedley_tts(
+                                        tts_final = queue_argus_smedley_tts(
                                             spoken_text,
                                             voice_id=ask_jarvis.get("tts_voice_id"),
                                             correlation_id=correlation_id,
@@ -23565,7 +23586,7 @@ def _handle_chat_start(handler, body, diag=None):
                                         logger.exception("ask_jarvis final JM TTS failed")
                                         tts_final = {"queued": False, "reason": "exception"}
                                         try:
-                                            from api.ask_jarvis_route import (
+                                            from api.argus_route import (
                                                 mark_final_playback_complete as _mfc,
                                             )
 
@@ -23575,7 +23596,7 @@ def _handle_chat_start(handler, body, diag=None):
                                 else:
                                     # No compact final — release post-ack waiters immediately.
                                     try:
-                                        from api.ask_jarvis_route import (
+                                        from api.argus_route import (
                                             mark_final_playback_complete as _mfc,
                                         )
 
@@ -23613,7 +23634,7 @@ def _handle_chat_start(handler, body, diag=None):
                             target=_run, daemon=True, name=f"ask-jarvis-finish-{correlation_id[-8:]}"
                         ).start()
 
-                    _ask_jarvis_finish_bg()
+                    _argus_finish_bg()
                     return j(
                         handler,
                         {
@@ -23704,7 +23725,7 @@ def _handle_chat_start(handler, body, diag=None):
         if not attachments:
             try:
                 from api.smedley_document_route import try_grounded_document_excerpt
-                from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj3
+                from api.argus_route import is_argus_command as _is_aj3
 
                 if _is_aj3(msg):
                     grounded = None
@@ -23730,7 +23751,7 @@ def _handle_chat_start(handler, body, diag=None):
         if not attachments:
             try:
                 from api.smedley_document_route import try_engineering_rag_answer
-                from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj
+                from api.argus_route import is_argus_command as _is_aj
 
                 if _is_aj(msg):
                     engineering = None
@@ -23803,7 +23824,7 @@ def _handle_chat_start(handler, body, diag=None):
         if not attachments:
             try:
                 from api.smedley_document_route import try_document_route
-                from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj2
+                from api.argus_route import is_argus_command as _is_aj2
 
                 if _is_aj2(msg):
                     routed = None
@@ -24257,7 +24278,7 @@ def _return_smedley_fast_route(handler, s, msg, routed, ptt_owned_tts=False):
     )
 
 
-def _jarvis_active_followup_objective(session, message: str) -> str | None:
+def _argus_active_followup_objective(session, message: str) -> str | None:
     """Keep an unambiguous continuation in the active Jarvis task.
 
     Biggy owns the chat shell, but a short reply to a completed Jarvis turn is
@@ -24271,7 +24292,7 @@ def _jarvis_active_followup_objective(session, message: str) -> str | None:
 
     # Preserve the existing richer travel continuation, including its verified
     # destination/date carry-forward behavior.
-    travel = _jarvis_travel_followup_objective(session, text)
+    travel = _argus_travel_followup_objective(session, text)
     if travel:
         return travel
 
@@ -24332,7 +24353,7 @@ def _owner_text_without_library_appendix(message: str) -> str:
     )[0].strip()
 
 
-def _jarvis_travel_followup_objective(session, message: str) -> str | None:
+def _argus_travel_followup_objective(session, message: str) -> str | None:
     """Bind an unambiguous travel continuation to the prior A.R.G.U.S. turn.
 
     The owner should not have to repeat a venue that Jarvis just established.
@@ -24391,24 +24412,24 @@ def _jarvis_travel_followup_objective(session, message: str) -> str | None:
     )
 
 
-def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
+def _handle_argus_sync_hard_bind(handler, s, objective: str):
     """PTT/sync ``/api/chat`` Ask Jarvis hard-bind (blocks until Jarvis + TTS done).
 
     Pedal posts wrapped ``message`` plus raw ``display_message``. Always bind on the
     raw owner utterance so Austin ack + Alistar final run here — never the
     agent/skill paraphrase path.
     """
-    from api.ask_jarvis_route import (
+    from api.argus_route import (
         ack_spoken_text,
         austin_voice_id,
         mint_correlation_id,
         pending_visual_text,
-        jarvis_ii_pa_core_enabled,
-        queue_ask_jarvis_smedley_tts,
+        argus_pa_core_enabled,
+        queue_argus_smedley_tts,
         queue_biggy_austin_ack,
         timing_path_for,
-        try_jarvis_ii_pa_core,
-        try_ask_jarvis,
+        try_argus_pa_core,
+        try_argus,
         wait_ack_playback_complete,
         wait_final_playback_complete,
     )
@@ -24463,6 +24484,7 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
                 "role": "user",
                 "content": objective,
                 "timestamp": now_ts,
+                "_ask_argus": True,
                 "_ask_jarvis": True,
                 "_correlation_id": corr,
                 "_ingress": "api_chat_sync_ptt",
@@ -24471,6 +24493,8 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
                 "role": "assistant",
                 "content": pending_text,
                 "timestamp": now_ts + 1,
+                "ask_argus_hard_bind": True,
+                "ask_argus_pending": True,
                 "ask_jarvis_hard_bind": True,
                 "ask_jarvis_pending": True,
                 "spoken_reply": None,
@@ -24485,7 +24509,7 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
         ]
     )
     s.pending_user_message = None
-    s.active_stream_id = f"ask-jarvis-pending:{corr}"
+    s.active_stream_id = f"ask-argus-pending:{corr}"
     if hasattr(s, "pending_started_at"):
         s.pending_started_at = time.time()
     try:
@@ -24513,14 +24537,14 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
         pass
 
     ask_jarvis = (
-        try_jarvis_ii_pa_core(
+        try_argus_pa_core(
             objective,
             biggy_ingress_ts=ingress_ts,
             correlation_id=corr,
             session_id=str(getattr(s, "session_id", "") or ""),
         )
-        if jarvis_ii_pa_core_enabled()
-        else try_ask_jarvis(objective, biggy_ingress_ts=ingress_ts, correlation_id=corr)
+        if argus_pa_core_enabled()
+        else try_argus(objective, biggy_ingress_ts=ingress_ts, correlation_id=corr)
     )
     if not isinstance(ask_jarvis, dict) or not ask_jarvis.get("handled"):
         ask_jarvis = {
@@ -24543,7 +24567,10 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
         "role": "assistant",
         "content": reply or pending_text,
         "timestamp": int(time.time()),
-        "assistant_identity": "jarvis",
+        "assistant_identity": "argus",
+        "argus_response": True,
+        "ask_argus_hard_bind": True,
+        "ask_argus_pending": False,
         "ask_jarvis_hard_bind": True,
         "ask_jarvis_pending": False,
         "spoken_text": spoken_text or None,
@@ -24620,7 +24647,7 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
     tts_final = {"queued": False}
     if spoken_text:
         try:
-            tts_final = queue_ask_jarvis_smedley_tts(
+            tts_final = queue_argus_smedley_tts(
                 spoken_text,
                 voice_id=ask_jarvis.get("tts_voice_id"),
                 correlation_id=corr,
@@ -24665,7 +24692,7 @@ def _handle_ask_jarvis_sync_hard_bind(handler, s, objective: str):
             "reply": reply,
             "spoken_reply": spoken_text or None,
             "spoken_text": spoken_text or None,
-            "assistant_identity": "jarvis",
+                            "assistant_identity": "argus",
             "ask_jarvis_hard_bind": True,
             "ask_jarvis_pending": False,
             "tts_server_handled": True,
@@ -24776,7 +24803,7 @@ def _handle_jarvis_ii_pa_travel(handler, body):
         logger.warning("Jarvis II PA travel rejected auth")
         return j(handler, {"ok": False, "error": "authenticated Biggy ingress required"}, status=401)
     try:
-        from api.jarvis_pa_travel import plan_trip, resolve_travel
+        from api.argus_travel import plan_trip, resolve_travel
 
         destination = str(body.get("destination") or body.get("query") or "")
         origin = str(body.get("origin") or "").strip()
@@ -24802,7 +24829,7 @@ def _handle_jarvis_ii_pa_place_resolve(handler, body):
         logger.warning("Jarvis II PA place resolver rejected auth")
         return j(handler, {"ok": False, "error": "authenticated Biggy ingress required"}, status=401)
     try:
-        from api.jarvis_pa_travel import resolve_place
+        from api.argus_travel import resolve_place
 
         result = resolve_place(query=str(body.get("query") or body.get("destination") or ""))
         return j(handler, result, status=200 if result.get("ok") else 404)
@@ -24896,7 +24923,7 @@ def _handle_chat_sync(handler, body):
     # acknowledgement/final-response cycle).  Keep the response as one
     # persisted Jarvis turn and stop before the legacy path can run.
     try:
-        from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj_document_sync
+        from api.argus_route import is_argus_command as _is_aj_document_sync
         from api.smedley_document_route import (
             is_document_request,
             try_active_document_review,
@@ -24940,9 +24967,9 @@ def _handle_chat_sync(handler, body):
         # message is not enough: the pedal suppresses its local Austin fallback
         # only when the server has explicitly taken ownership of final TTS.
         # Queue Alistar here and return the authoritative ownership gate.
-        from api.ask_jarvis_route import (
+        from api.argus_route import (
             mint_correlation_id,
-            queue_ask_jarvis_smedley_tts,
+            queue_argus_smedley_tts,
             timing_path_for,
             wait_final_playback_complete,
         )
@@ -24958,7 +24985,7 @@ def _handle_chat_sync(handler, body):
             s.messages = []
         final_message = {
             "role": "assistant", "content": reply, "timestamp": now_ts + 1,
-            "document_route": True, "assistant_identity": "jarvis", "jarvis_response": True,
+            "document_route": True, "assistant_identity": "argus", "argus_response": True, "jarvis_response": True,
             "ask_jarvis_hard_bind": True, "spoken_reply": spoken, "spoken_text": spoken,
             "tts_voice_id": "rvugSNzdY0NcpG2PKe4B", "tts_voice_profile": "argus_alistar",
             "_correlation_id": corr, "_tts_final_server_queued": False,
@@ -24986,7 +25013,7 @@ def _handle_chat_sync(handler, body):
             return bad(handler, "failed to persist Ask Jarvis document-route turn", 500)
         if spoken:
             try:
-                tts_final = queue_ask_jarvis_smedley_tts(
+                tts_final = queue_argus_smedley_tts(
                     spoken,
                     voice_id="rvugSNzdY0NcpG2PKe4B",
                     correlation_id=corr,
@@ -25008,7 +25035,7 @@ def _handle_chat_sync(handler, body):
         return j(handler, {
             "session_id": s.session_id, "answer": reply, "reply": reply,
             "spoken_reply": spoken, "spoken_text": spoken,
-            "document_route": True, "assistant_identity": "jarvis", "jarvis_response": True, "ask_jarvis_hard_bind": True,
+            "document_route": True, "assistant_identity": "argus", "argus_response": True, "jarvis_response": True, "ask_argus_hard_bind": True, "ask_jarvis_hard_bind": True,
             "tts_voice_id": "rvugSNzdY0NcpG2PKe4B", "tts_voice_profile": "argus_alistar",
             "correlation_id": corr,
             "tts_server_handled": True,
@@ -25024,14 +25051,26 @@ def _handle_chat_sync(handler, body):
     # PTT Ask Jarvis must hard-bind here (pedal uses /api/chat, not /api/chat/start).
     # Detect on display_message (raw utterance) first — wrapped message may bury the cue.
     try:
-        from api.ask_jarvis_route import is_ask_jarvis_command as _is_aj_sync
+        from api.argus_route import is_argus_command as _is_aj_sync
     except Exception:
         logger.exception("ask_jarvis sync import failed; falling through to ordinary chat")
     else:
-        _jarvis_followup_objective = _jarvis_travel_followup_objective(s, display_msg)
-        if _is_aj_sync(display_msg) or _is_aj_sync(msg) or _jarvis_followup_objective:
-            ask_objective = _jarvis_followup_objective or (display_msg if _is_aj_sync(display_msg) else msg)
-            return _handle_ask_jarvis_sync_hard_bind(handler, s, ask_objective)
+        # display_message is the raw owner utterance.  The wrapped message also
+        # carries voice/operator instructions containing phrases such as
+        # "Never say Jarvis online" and "Open ..."; classifying that appendix
+        # routed ordinary requests like "tell me a story" into Argus.
+        has_display_message = "display_message" in body
+        explicit_objective = _is_aj_sync(display_msg)
+        if not has_display_message and not explicit_objective:
+            explicit_objective = _is_aj_sync(msg)
+        _jarvis_followup_objective = (
+            None
+            if explicit_objective
+            else _argus_travel_followup_objective(s, display_msg)
+        )
+        if explicit_objective or _jarvis_followup_objective:
+            ask_objective = display_msg if explicit_objective else _jarvis_followup_objective
+            return _handle_argus_sync_hard_bind(handler, s, ask_objective)
     try:
         from api.smedley_fast_route import try_smedley_fast_route
 

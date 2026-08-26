@@ -187,6 +187,81 @@ def test_sync_chat_display_message_splits_agent_input_from_visible_turn(
     assert visible[0]["content"] == "What is NEC 250.122?"
 
 
+def test_sync_voice_appendix_cannot_steal_ordinary_biggy_story(
+    sync_chat_env, monkeypatch
+):
+    """Only the raw owner utterance may select the Argus hard-bind lane."""
+    tmp_path = sync_chat_env
+    session = _make_session(tmp_path)
+    capture: dict = {}
+    _install_fake_agent(monkeypatch, capture=capture)
+    monkeypatch.setattr(
+        routes,
+        "_handle_argus_sync_hard_bind",
+        lambda *_a, **_k: pytest.fail("ordinary Biggy story was stolen by Argus"),
+    )
+    owner = "Hey Biggy, tell me a story about a Marine in a foxhole."
+    wrapped = (
+        owner
+        + "\n\n[Voice PTT turn — Never say Jarvis online, never recite host IP. "
+        + "Open as Smedley in natural voice.]"
+    )
+
+    handler = _FakePostHandler()
+    routes._handle_chat_sync(
+        handler,
+        {
+            "session_id": session.session_id,
+            "message": wrapped,
+            "display_message": owner,
+            "workspace": str(tmp_path),
+        },
+    )
+
+    assert handler.status == 200
+    assert capture["run_kwargs"]["persist_user_message"] == owner
+
+
+def test_sync_explicit_new_argus_map_beats_stale_travel_destination(
+    sync_chat_env, monkeypatch
+):
+    """A new Jordan-Hare command must not continue a Grand Canyon card."""
+    tmp_path = sync_chat_env
+    session = _make_session(tmp_path)
+    session.messages = [
+        {
+            "role": "assistant",
+            "ask_jarvis_hard_bind": True,
+            "map_view_model": {
+                "destination": {"label": "Grand Canyon National Park, Arizona"}
+            },
+        }
+    ]
+    session.save(touch_updated_at=False)
+    captured = {}
+
+    def _hard_bind(handler, _session, objective):
+        captured["objective"] = objective
+        return routes.j(handler, {"ok": True, "objective": objective})
+
+    monkeypatch.setattr(routes, "_handle_argus_sync_hard_bind", _hard_bind)
+    owner = "Hey Biggy, have Argus pull me a map to Jordan-Hare Stadium."
+    handler = _FakePostHandler()
+    routes._handle_chat_sync(
+        handler,
+        {
+            "session_id": session.session_id,
+            "message": owner + "\n\n[Voice PTT turn]",
+            "display_message": owner,
+            "workspace": str(tmp_path),
+        },
+    )
+
+    assert handler.status == 200
+    assert captured["objective"] == owner
+    assert "Grand Canyon" not in captured["objective"]
+
+
 @pytest.mark.parametrize(
     "display_message",
     ["", "   ", None, 123, ["not", "a", "string"]],
@@ -265,12 +340,12 @@ def test_sync_argus_document_result_is_server_owned_alistar(sync_chat_env, monke
     tmp_path = sync_chat_env
     session = _make_session(tmp_path)
 
-    import api.ask_jarvis_route as ask_route
+    import api.argus_route as ask_route
     import api.smedley_document_route as doc_route
 
     source = "Vendor Data/Honeywell/Honeywell Edge UIO/User-manual.pdf"
     monkeypatch.setattr(routes, "_request_base_url", lambda _handler: "http://127.0.0.1:8790")
-    monkeypatch.setattr(ask_route, "is_ask_jarvis_command", lambda _text: True)
+    monkeypatch.setattr(ask_route, "is_argus_command", lambda _text: True)
     monkeypatch.setattr(doc_route, "is_document_request", lambda *_a, **_k: True)
     monkeypatch.setattr(
         doc_route,
@@ -291,7 +366,7 @@ def test_sync_argus_document_result_is_server_owned_alistar(sync_chat_env, monke
         queued.update(text=text, **kwargs)
         return {"queued": True}
 
-    monkeypatch.setattr(ask_route, "queue_ask_jarvis_smedley_tts", _queue)
+    monkeypatch.setattr(ask_route, "queue_argus_smedley_tts", _queue)
     monkeypatch.setattr(
         ask_route,
         "wait_final_playback_complete",

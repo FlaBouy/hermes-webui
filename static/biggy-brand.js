@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260826-cockpit-rag-layout-5';
+  const BUILD_ID = '20260826-argus-stable-runtime-29';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -61,6 +61,9 @@
   let ragWorldTimer = null;
   let conversationLaneTimer = null;
   let conversationLaneRenderQueued = false;
+  let activeSessionReconcileTimer = null;
+  let activeSessionReconcileInFlight = false;
+  let activeSessionReconcileSignature = '';
   let completionMessages = [];
   let completionMessagesSessionId = '';
   let ragTraceObserverInstalled = false;
@@ -290,13 +293,13 @@
     return stripGlassLabelsForSpeech(clean);
   }
 
-  function resolveAskJarvisVoiceId() {
-    // Last Ask Jarvis hard-bind turn only — do not change Biggy default Austin.
+  function resolveArgusVoiceId() {
+    // Last A.R.G.U.S. hard-bind turn only — do not change Biggy default Austin.
     try {
       const msgs = (typeof S !== 'undefined' && Array.isArray(S.messages)) ? S.messages : [];
       for (let i = msgs.length - 1; i >= 0; i--) {
         const m = msgs[i];
-        if (m && m.role === 'assistant' && m.ask_jarvis_hard_bind) {
+        if (m && m.role === 'assistant' && (m.ask_argus_hard_bind || m.ask_jarvis_hard_bind)) {
           return String(m.tts_voice_id || 'rvugSNzdY0NcpG2PKe4B').trim();
         }
         if (m && m.role === 'assistant') break;
@@ -347,7 +350,7 @@
     // Exact override: speechSynthesis sink and other no-opts callers were
     // posting /speak with no voice_id → Austin. Ask Argus turns must carry
     // Alistar through this single Smedley-sink choke point.
-    if (!voiceId) voiceId = resolveAskJarvisVoiceId();
+    if (!voiceId) voiceId = resolveArgusVoiceId();
     if (!/^[A-Za-z0-9_-]{8,64}$/.test(voiceId)) voiceId = '';
     const chunks = splitSmedleySpeech(clean, 760);
     const dispatch = async () => {
@@ -449,23 +452,24 @@
     // Retry until autoRead exists — first shell paint can outrun ui.js define.
     const installAutoReadSink = function () {
       if (typeof window.autoReadLastAssistant !== 'function') return false;
-      if (window.__biggyAutoReadJarvisVoice === true) return true;
+      if (window.__biggyAutoReadArgusVoice === true) return true;
       const prior = window.autoReadLastAssistant;
       window.autoReadLastAssistant = function biggyAutoReadToSmedley() {
         try {
           // Ask Argus hard-bind: spoken_text only + Alistar voice override.
           const msgs = (typeof S !== 'undefined' && Array.isArray(S.messages)) ? S.messages : [];
-          let jarvisMsg = null;
+          let argusMsg = null;
           for (let i = msgs.length - 1; i >= 0; i--) {
-            if (msgs[i] && msgs[i].role === 'assistant' && msgs[i].ask_jarvis_hard_bind) {
-              jarvisMsg = msgs[i];
+            if (msgs[i] && msgs[i].role === 'assistant'
+                && (msgs[i].ask_argus_hard_bind || msgs[i].ask_jarvis_hard_bind)) {
+              argusMsg = msgs[i];
               break;
             }
             if (msgs[i] && msgs[i].role === 'assistant') break;
           }
-          if (jarvisMsg) {
+          if (argusMsg) {
             // Pending working bubble has no spoken_text; never invent/speak it.
-            if (jarvisMsg.ask_jarvis_pending) return;
+            if (argusMsg.ask_argus_pending || argusMsg.ask_jarvis_pending) return;
             // A hard-bound final is always server-owned Alistar speech.  This
             // includes tablets: auto-read otherwise uses the browser's Austin
             // selection and can read the long display answer instead.
@@ -486,7 +490,7 @@
         // Fall through only if we couldn't extract text.
         try { return prior.apply(this, arguments); } catch (_) {}
       };
-      window.__biggyAutoReadJarvisVoice = true;
+      window.__biggyAutoReadArgusVoice = true;
       window.__biggyAutoReadPatched = true;
       return true;
     };
@@ -697,7 +701,7 @@
     };
     placeOnMaster(document.getElementById('biggyCockpitStrip'));
     placeOnMaster(document.getElementById('biggyFleetStrip'));
-    placeOnMaster(document.getElementById('biggyJarvisTransplant'));
+    placeOnMaster(document.getElementById('biggyArgusReactor'));
     const frame = document.getElementById('biggyV6World');
     if (frame && frame.contentWindow) {
       try {
@@ -815,9 +819,9 @@
   }
 
   // Biggy is the coordinator surface.  Replies supplied by the explicit
-  // Ask-Jarvis route must retain their own author label instead of inheriting
+  // A.R.G.U.S. routes must retain their own author label instead of inheriting
   // Biggy's global assistant name from the shared renderer.
-  function labelJarvisResponses(root) {
+  function labelArgusResponses(root) {
     try {
       const messages = (typeof S !== 'undefined' && Array.isArray(S.messages)) ? S.messages : [];
       const scope = root && root.querySelectorAll ? root : document;
@@ -825,31 +829,37 @@
         const idx = Number(segment.dataset.msgIdx);
         const message = Number.isFinite(idx) ? messages[idx] : null;
         const visible = String(segment.dataset.rawText || segment.textContent || '');
-        const isJarvis = !!(message && (
-          String(message.assistant_identity || '').toLowerCase() === 'jarvis'
+        const identity = String(message && message.assistant_identity || '').toLowerCase();
+        const isArgus = !!(message && (
+          identity === 'argus' || identity === 'jarvis'
+          || message.ask_argus_hard_bind || message.argus_response
+          || message.ask_argus_hard_bind || message.argus_response
           || message.ask_jarvis_hard_bind || message.jarvis_response
         ))
           || /^\s*(?:\*\*)?(?:A\.R\.G\.U\.S\.|Argus|Jarvis)\s*:/i.test(visible);
-        if (!isJarvis) return;
+        if (!isArgus) return;
         const turn = segment.closest('.assistant-turn');
         const role = turn && turn.querySelector('.msg-role.assistant');
         if (!role) return;
         const name = role.querySelector('.msg-role-name');
         const icon = role.querySelector('.role-icon.assistant');
-        if (name) name.textContent = 'A.R.G.U.S.';
-        if (icon) icon.textContent = 'J';
-        if (turn) turn.dataset.responseAgent = 'jarvis';
+        // This function runs from a subtree MutationObserver. Assigning the
+        // same textContent still emits a childList mutation in Chrome, so an
+        // unconditional write here becomes a self-sustaining renderer loop.
+        if (name && name.textContent !== 'A.R.G.U.S.') name.textContent = 'A.R.G.U.S.';
+        if (icon && icon.textContent !== 'A') icon.textContent = 'A';
+        if (turn && turn.dataset.responseAgent !== 'argus') turn.dataset.responseAgent = 'argus';
       });
     } catch (_) {}
   }
 
-  function installJarvisResponseLabels() {
-    if (window.__biggyJarvisResponseLabelsInstalled) return;
-    window.__biggyJarvisResponseLabelsInstalled = true;
+  function installArgusResponseLabels() {
+    if (window.__biggyArgusResponseLabelsInstalled) return;
+    window.__biggyArgusResponseLabelsInstalled = true;
     const root = document.getElementById('msgInner');
     if (!root) return;
-    labelJarvisResponses(root);
-    new MutationObserver(() => labelJarvisResponses(root)).observe(root, {
+    labelArgusResponses(root);
+    new MutationObserver(() => labelArgusResponses(root)).observe(root, {
       childList: true,
       subtree: true,
     });
@@ -1161,7 +1171,7 @@
       if (!event.altKey) return;
       const target = event.target;
       if (!(target instanceof Element)) return;
-      if (!target.closest('.biggy-jarvis-transplant, #biggyIdentity')) return;
+      if (!target.closest('.biggy-argus-reactor, #biggyIdentity')) return;
       clicks += 1;
       clearTimeout(timer);
       timer = setTimeout(() => { clicks = 0; }, 900);
@@ -1272,13 +1282,13 @@
       // physical pedal sidecar is not reporting alive.  The orb follows the
       // authoritative speaking phase, not pedal connectivity.
       if (ours && phase === 'speaking') {
-        setJarvisOrbState('speaking', 'Alistar voice active');
+        setArgusOrbState('speaking', 'Alistar voice active');
       } else if (ours && phase === 'processing') {
         stopArgusSpeechPulse();
-        setJarvisOrbState('thinking', 'gathering information');
+        setArgusOrbState('thinking', 'gathering information');
       } else if (argusSpeechPulseSignature) {
         stopArgusSpeechPulse();
-        if (!jarvisOrbFlight) pollJarvisV6Health().catch(() => {});
+        if (!argusOrbFlight) pollArgusHealth().catch(() => {});
       }
       applyAudioRouteStatus(status);
     }
@@ -1297,12 +1307,12 @@
             startArgusSpeechPulse(meter);
             speechMeterKnownGeneration = generation;
           }
-          setJarvisOrbState('speaking', 'Alistar voice active');
+          setArgusOrbState('speaking', 'Alistar voice active');
         } else {
           speechMeterKnownGeneration = '';
           if (argusSpeechPulseSignature) {
             stopArgusSpeechPulse();
-            if (!jarvisOrbFlight) pollJarvisV6Health().catch(() => {});
+            if (!argusOrbFlight) pollArgusHealth().catch(() => {});
           }
         }
       } catch (_) {
@@ -1357,7 +1367,8 @@
         // session boundary, before transcript/card reconciliation.
         const latestAssistant = includeVisuals
           ? [...messages].reverse().find((message) => message
-              && message.role === 'assistant' && !message.ask_jarvis_pending)
+              && message.role === 'assistant'
+              && !(message.ask_argus_pending || message.ask_jarvis_pending))
           : null;
         renderArgusConversationLane();
         // Text is the first visible final-state owner. Let the browser paint
@@ -1462,9 +1473,12 @@
     pollPttStatus();
     pollArgusSpeechMeter();
     setInterval(() => { pollPttStatus().catch(() => {}); }, 1500);
-    // The speech meter is tiny and local. An 80 ms cadence removes the
-    // quarter-second visual discovery lag without coupling it to galaxy work.
-    setInterval(() => { pollArgusSpeechMeter().catch(() => {}); }, 80);
+    // Speech envelopes are rendered locally at animation-frame cadence once
+    // discovered. Polling the sidecar every 80 ms created a continuous HTTP
+    // storm alongside the 3D galaxy and could starve Chrome's main renderer.
+    // A 400 ms discovery cadence preserves a responsive speaking indicator
+    // while keeping status traffic bounded.
+    setInterval(() => { pollArgusSpeechMeter().catch(() => {}); }, 400);
   }
 
   async function refreshIdentity() {
@@ -1518,7 +1532,7 @@
     syncModelFromDom();
     updateIdentityChip();
     forceChromeLabels();
-    installJarvisResponseLabels();
+    installArgusResponseLabels();
     installComposerBranding();
     installBiggyVoiceLabels();
     installGuiDiagnostics();
@@ -1532,8 +1546,8 @@
     diagnosticsEnabledDefault: false,
     guiId: GUI_ID,
     profileId: PROFILE_ID,
-    // Later Ask Jarvis voice path routes here. This slice does not replace Austin.
-    askJarvisV6Voice: Object.freeze({
+    // Later A.R.G.U.S. voice path routes here. This slice does not replace Austin.
+    argusVoice: Object.freeze({
       enabled: false,
       route: 'austin',
       note: 'Voice seam only — Austin remains the Biggy default.',
@@ -1556,9 +1570,9 @@
     ).forEach((node) => node.remove());
   }
 
-  let jarvisOrbFlight = false;
-  let jarvisHealthTimer = null;
-  let jarvisOrbState = 'offline';
+  let argusOrbFlight = false;
+  let argusHealthTimer = null;
+  let argusOrbState = 'offline';
 
   // Mirrors V6's own STATE_STYLE table (3d.html) — label, css color, pulse —
   // extended with offline/tool-running/error, which the standalone V6 orb
@@ -1584,9 +1598,9 @@
     error: 'is-error',
   });
 
-  function setJarvisOrbState(state, detail) {
+  function setArgusOrbState(state, detail) {
     const next = ORB_STATES.includes(state) ? state : 'error';
-    jarvisOrbState = next;
+    argusOrbState = next;
     const frame = document.getElementById('biggyV6World');
     if (frame && frame.contentWindow) {
       try {
@@ -1660,7 +1674,7 @@
     const index = Math.floor(Math.max(0, elapsed) / argusSpeechPulseSampleMs);
     if (index >= argusSpeechPulseEnvelope.length) {
       stopArgusSpeechPulse();
-      if (!jarvisOrbFlight) pollJarvisV6Health().catch(() => {});
+      if (!argusOrbFlight) pollArgusHealth().catch(() => {});
       return;
     }
     const measured = Number(argusSpeechPulseEnvelope[index] || 0);
@@ -1815,23 +1829,23 @@
     return response.json();
   }
 
-  function appendJarvisV6Turn(question, answer, ok, errorText) {
+  function appendArgusTurn(question, answer, ok, errorText) {
     const userLine = String(question || '').trim();
     const reply = ok
       ? String(answer || '').trim()
       : (`**A.R.G.U.S. unavailable:** ${String(errorText || 'request failed')}`);
     try {
       if (typeof S !== 'undefined' && S && Array.isArray(S.messages)) {
-        S.messages.push({ role: 'user', content: userLine, jarvis_v6: true });
+        S.messages.push({ role: 'user', content: userLine, argus_runtime: true });
         S.messages.push({
           role: 'assistant',
           content: reply,
-          assistant_identity: 'jarvis',
-          jarvis_response: true,
-          jarvis_v6: true,
+          assistant_identity: 'argus',
+          argus_response: true,
+          argus_runtime: true,
         });
         if (typeof renderMessages === 'function') renderMessages();
-        labelJarvisResponses(document);
+        labelArgusResponses(document);
         return;
       }
     } catch (_) {}
@@ -1839,29 +1853,29 @@
     if (note) note.textContent = reply.slice(0, 180);
   }
 
-  async function pollJarvisV6Health() {
-    if (jarvisOrbFlight || argusSpeechPulseSignature) return;
+  async function pollArgusHealth() {
+    if (argusOrbFlight || argusSpeechPulseSignature) return;
     try {
       const data = await jsonGet(V6_HEALTH_PATH);
       const state = String((data && data.state) || (data && data.online ? 'online' : 'offline'));
       const detail = data && (data.model || data.error) ? String(data.model || data.error) : '';
-      setJarvisOrbState(ORB_STATES.includes(state) ? state : 'error', detail);
+      setArgusOrbState(ORB_STATES.includes(state) ? state : 'error', detail);
       setReactorModelChip(data && data.model);
     } catch (err) {
-      setJarvisOrbState('error', String(err && err.message || err));
+      setArgusOrbState('error', String(err && err.message || err));
       setReactorModelChip('');
     }
   }
 
-  async function askJarvisV6(raw) {
+  async function askArgus(raw) {
     const question = String(raw || '').trim();
     const note = document.getElementById('biggyHeaderNote');
     if (!question) {
       if (note) note.textContent = 'Type a question, then Ask Argus.';
       return;
     }
-    jarvisOrbFlight = true;
-    setJarvisOrbState('thinking', 'request in flight');
+    argusOrbFlight = true;
+    setArgusOrbState('thinking', 'request in flight');
     if (note) note.textContent = 'A.R.G.U.S. thinking…';
     try {
       const data = await jsonPost(V6_CHAT_PATH, {
@@ -1870,29 +1884,29 @@
         context: collectBiggyContext(),
       });
       if (data && data.ok) {
-        setJarvisOrbState('online', 'reply received');
-        appendJarvisV6Turn(question, data.answer, true);
+        setArgusOrbState('online', 'reply received');
+        appendArgusTurn(question, data.answer, true);
         if (note) note.textContent = '';
       } else {
         const state = String((data && data.state) || 'error');
-        setJarvisOrbState(state === 'offline' ? 'offline' : 'error', data && data.error);
-        appendJarvisV6Turn(question, '', false, (data && data.error) || 'A.R.G.U.S. request failed');
+        setArgusOrbState(state === 'offline' ? 'offline' : 'error', data && data.error);
+        appendArgusTurn(question, '', false, (data && data.error) || 'A.R.G.U.S. request failed');
         if (note) note.textContent = String((data && data.error) || 'A.R.G.U.S. error');
       }
     } catch (err) {
-      setJarvisOrbState('error', String(err && err.message || err));
-      appendJarvisV6Turn(question, '', false, err && err.message || err);
+      setArgusOrbState('error', String(err && err.message || err));
+      appendArgusTurn(question, '', false, err && err.message || err);
       if (note) note.textContent = String(err && err.message || err);
     } finally {
-      jarvisOrbFlight = false;
+      argusOrbFlight = false;
     }
   }
 
-  function installJarvisV6Bridge(header) {
-    if (!header || header.dataset.jarvisV6Bound === '1') return;
-    header.dataset.jarvisV6Bound = '1';
-    const prompt = header.querySelector('#biggyAskJarvisPrompt');
-    const btn = header.querySelector('#biggyAskJarvis');
+  function installArgusBridge(header) {
+    if (!header || header.dataset.argusBound === '1') return;
+    header.dataset.argusBound = '1';
+    const prompt = header.querySelector('#biggyAskArgusPrompt');
+    const btn = header.querySelector('#biggyAskArgus');
     const submit = () => {
       const typed = prompt && prompt.value ? String(prompt.value) : '';
       const composer = document.getElementById('msg');
@@ -1901,7 +1915,7 @@
         : String((composer && composer.textContent) || '');
       const question = typed.trim() || fallback.trim();
       if (prompt) prompt.value = '';
-      askJarvisV6(question);
+      askArgus(question);
     };
     if (btn) {
       btn.addEventListener('click', (ev) => {
@@ -1918,15 +1932,15 @@
         }
       });
     }
-    pollJarvisV6Health();
-    if (jarvisHealthTimer) clearInterval(jarvisHealthTimer);
-    jarvisHealthTimer = setInterval(() => { pollJarvisV6Health().catch(() => {}); }, 5000);
+    pollArgusHealth();
+    if (argusHealthTimer) clearInterval(argusHealthTimer);
+    argusHealthTimer = setInterval(() => { pollArgusHealth().catch(() => {}); }, 5000);
   }
 
-  // Jarvis V6 3D graph/galaxy — replaces the static Iwo background image.
+  // A.R.G.U.S. 3D graph/galaxy — replaces the static Iwo background image.
   // Loaded from Biggy's own same-origin, fixed, read-only proxy route
   // (never a direct browser request to the standalone V6 service port);
-  // see api/jarvis_v6_world.py. Falls back to a clean placeholder if WebGL
+  // see api/argus_world.py. Falls back to a clean placeholder if WebGL
   // is unsupported or the embedded scene fails to initialize (e.g. no
   // network access to the Three.js CDN the V6 viewer's importmap points at).
   function hasWebGLSupport() {
@@ -2002,9 +2016,11 @@
   }
 
   function isGalaxyTraceEligibleMessage(message) {
-    if (!message || message.role !== 'assistant' || message.ask_jarvis_pending) return false;
+    if (!message || message.role !== 'assistant'
+        || message.ask_argus_pending || message.ask_jarvis_pending) return false;
     const identity = String(message.assistant_identity || '').toLowerCase();
     const isArgus = identity === 'argus' || identity === 'jarvis'
+      || message.ask_argus_hard_bind || message.argus_response || message.argus_v1
       || message.ask_jarvis_hard_bind || message.jarvis_response || message.jarvis_v6;
     if (!isArgus) return false;
     // Travel and other action cards can legitimately carry agent evidence for
@@ -2157,18 +2173,20 @@
   function syncArgusConversationLaneBoundary(lane, host) {
     lane = lane || document.getElementById('biggyArgusConversationLane');
     host = host || document.getElementById('mainChat');
-    const composer = document.getElementById('composerBox') || document.getElementById('composerWrap');
-    if (!lane || !host || !composer) return;
+    // Always clear the full-width bottom overlay band (#composerWrap). The
+    // half-width centered #composerBox often does not horizontally intersect
+    // the left conversation lane, so gating on that box let cards paint under
+    // the opaque composer/fleet overlay.
+    const overlay = document.getElementById('composerWrap');
+    if (!lane || !host || !overlay) return;
     const hostRect = host.getBoundingClientRect();
-    const composerRect = composer.getBoundingClientRect();
-    const laneStyle = window.getComputedStyle(lane);
-    const laneLeft = hostRect.left + (parseFloat(laneStyle.left) || 0);
-    const laneRight = laneLeft + (parseFloat(laneStyle.width) || 410);
-    const overlapsLane = composerRect.left < laneRight && composerRect.right > laneLeft;
-    const overlapBoundary = overlapsLane
-      ? Math.max(132, Math.round(hostRect.bottom - composerRect.top + 18))
-      : 18;
+    const overlayRect = overlay.getBoundingClientRect();
+    const overlapBoundary = Math.max(132, Math.round(hostRect.bottom - overlayRect.top + 18));
     lane.style.setProperty('--biggy-conversation-bottom', overlapBoundary + 'px');
+  }
+
+  function scheduleArgusConversationLaneBoundary() {
+    requestAnimationFrame(() => syncArgusConversationLaneBoundary());
   }
 
   function argusConversationText(message) {
@@ -2191,10 +2209,31 @@
       .trim();
   }
 
+  // Voice clients append private operator-channel instructions after the
+  // owner's spoken words. Those instructions are model context, never
+  // conversation content. Keep this boundary in the renderer as well as the
+  // request path so older contaminated sessions are safe to display.
+  function argusVisibleOwnerPrompt(message) {
+    const text = argusConversationText(message);
+    if (!message || message.role !== 'user' || !text) return text;
+    const privateContextMarkers = [
+      /\n\s*\[Voice PTT turn\b/i,
+      /\n\s*\[Full spoken mode\b/i,
+      /\n\s*Active Operator behavior\s*:/i,
+    ];
+    let boundary = text.length;
+    privateContextMarkers.forEach((pattern) => {
+      const match = pattern.exec(text);
+      if (match) boundary = Math.min(boundary, match.index);
+    });
+    return text.slice(0, boundary).trim();
+  }
+
   function argusConversationIdentity(message) {
     if (!message || message.role === 'user') return { key: 'operator', label: 'PROMPT' };
     const identity = String(message.assistant_identity || '').toLowerCase();
     const isArgus = identity === 'argus' || identity === 'jarvis'
+      || message.ask_argus_hard_bind || message.argus_response || message.argus_v1
       || message.ask_jarvis_hard_bind || message.jarvis_response || message.jarvis_v6;
     return isArgus ? { key: 'argus', label: 'A.R.G.U.S.' } : { key: 'biggy', label: 'BIGGY' };
   }
@@ -2218,12 +2257,15 @@
     // repeatedly from this timer-driven transcript decorator.
     const turns = visible.slice(-8).flatMap((message, index) => {
       const identity = argusConversationIdentity(message);
-      const pending = !!(message.ask_jarvis_pending || message._live);
-      const raw = argusConversationText(message);
+      const pending = !!(message.ask_argus_pending || message.ask_jarvis_pending || message._live);
+      const raw = message.role === 'user'
+        ? argusVisibleOwnerPrompt(message)
+        : argusConversationText(message);
       const text = pending && !raw ? 'Tracing the retrieval path…' : raw;
       const result = [];
       const ackText = String(message && message._ack_spoken_text || '').trim();
-      if (message.role === 'assistant' && message.ask_jarvis_hard_bind && ackText) {
+      if (message.role === 'assistant'
+          && (message.ask_argus_hard_bind || message.ask_jarvis_hard_bind) && ackText) {
         result.push({ identity: { key: 'biggy', label: 'BIGGY' }, pending: false, text: ackText.slice(0, 1400), index: `${index}-ack` });
       }
       result.push({ identity, pending, text: text.slice(0, 1400), index });
@@ -2545,7 +2587,7 @@
           fallback.classList.remove('is-active');
           try {
             iframe.contentWindow.postMessage(
-              { type: 'biggy-argus-state', state: jarvisOrbState },
+              { type: 'biggy-argus-state', state: argusOrbState },
               window.location.origin,
             );
           } catch (_) {}
@@ -2579,13 +2621,12 @@
       `<button id="biggyAudioRoute" type="button" data-testid="biggy-audio-route" title="Cycle Room / Headset / Mute audio">ROOM</button>` +
       `</div>` +
       `<div class="biggy-brand-status" aria-label="A.R.G.U.S. model">` +
-      `<div id="j-brain"><span id="j-brain-chip" data-testid="biggy-jarvis-model">—</span></div>` +
+      `<div id="j-brain"><span id="j-brain-chip" data-testid="biggy-argus-model">—</span></div>` +
       `</div>`;
     return header;
   }
 
-  // Jarvis V6 reactor — a verbatim transplant of the real V6 presence unit
-  // from brain-jarvis/viewer/3d.html (#j-orb / #j-state / #j-brain-chip),
+  // A.R.G.U.S. reactor presence unit (#j-orb / #j-state / #j-brain-chip),
   // native 204x204, unmodified markup/classes/ids. Only the outer wrapper's
   // positioning differs (centered over the header/workspace seam here
   // instead of viewport-right-docked as in the standalone V6 page); see the
@@ -2593,12 +2634,12 @@
   // styling. This is inserted as a sibling of the header so it can overlap
   // the header/workspace boundary without being clipped by the header box.
   function makeReactorDock() {
-    const dock = el('div', 'biggy-jarvis-transplant');
-    dock.id = 'biggyJarvisTransplant';
+    const dock = el('div', 'biggy-argus-reactor');
+    dock.id = 'biggyArgusReactor';
     dock.dataset.biggyLayer = 'reactor';
     dock.setAttribute('data-testid', 'biggy-reactor-dock');
     dock.innerHTML =
-      `<div id="j-orb" data-testid="biggy-jarvis-orb" role="status" aria-live="polite" aria-label="A.R.G.U.S. offline">` +
+      `<div id="j-orb" data-testid="biggy-argus-orb" role="status" aria-live="polite" aria-label="A.R.G.U.S. offline">` +
       // Opaque freeze underlay: full 204px Orb circumference above Galaxy,
       // beneath every SVG ring/label. Blocks node/trace bleed without covering
       // Orb art, model chip, state, or fleet/cockpit interaction.
@@ -2626,7 +2667,7 @@
       `</g>` +
       `</svg>` +
       `</div>` +
-      `<div id="j-state" data-testid="biggy-jarvis-state"><span class="dot"></span><span id="j-state-txt">OFFLINE</span></div>`;
+      `<div id="j-state" data-testid="biggy-argus-state"><span class="dot"></span><span id="j-state-txt">OFFLINE</span></div>`;
     return dock;
   }
 
@@ -2646,6 +2687,7 @@
   const MAP_CONFIG_URL = '/api/biggy/mapbox-public-config';
   let mapboxLoadPromise = null;
   let mapInstance = null;
+  let staticMapImage = null;
   let lastMapModelKey = '';
   let mapRenderPromise = null;
 
@@ -2665,6 +2707,10 @@
       if (mapInstance) mapInstance.remove();
     } catch (_) {}
     mapInstance = null;
+    try {
+      if (staticMapImage && staticMapImage.parentNode) staticMapImage.parentNode.removeChild(staticMapImage);
+    } catch (_) {}
+    staticMapImage = null;
     setGalaxyRenderPaused(false);
   }
 
@@ -3224,7 +3270,7 @@
   function renderPhoneHistory(panel, items) {
     panel.appendChild(operatorHeading('Recent calls and messages'));
     if (!items.length) {
-      appendOperatorRow(panel, 'No recent phone activity.', 'Calls and texts will appear here after Twilio is connected.', 'muted');
+      appendOperatorRow(panel, 'No recent phone activity.', 'Twilio call and fallback-text activity will appear here.', 'muted');
       return;
     }
     items.slice(0, 20).forEach((item) => {
@@ -3242,11 +3288,18 @@
     clearOperatorPanel(panel);
     panel.appendChild(operatorHeading('Galaxy S25 Ultra'));
     const state = String(phone.state || 'disconnected');
+    const google = phone.google_messages && typeof phone.google_messages === 'object' ? phone.google_messages : {};
+    const googleReady = Boolean(google.ready);
+    const twilioFallback = Boolean(phone.twilio_fallback_ready);
+    const twilioConfigured = Boolean(phone.twilio_configured);
+    const twilioDetail = String(phone.twilio_fallback_detail || 'Twilio fallback is unavailable.');
     appendOperatorRow(
       panel,
       `${String(phone.device_label || 'Galaxy S25 Ultra')} · ${String(phone.carrier || 'Verizon')}`,
-      phone.connected ? 'Twilio voice and SMS are ready.' : 'Twilio is not connected. Calls and texts remain disabled.',
-      phone.connected ? 'ready' : 'warning',
+      googleReady
+        ? 'Google Messages is primary. Twilio is retained as the SMS fallback and voice bridge.'
+        : `Google Messages needs attention. ${String(google.detail || 'Pair the dedicated Messages window.')} ${twilioFallback ? 'Twilio fallback is ready.' : (twilioConfigured ? `Twilio fallback is blocked: ${twilioDetail}` : 'Twilio fallback is unavailable.')}`,
+      googleReady ? 'ready' : 'warning',
     );
     if (!phone.connected) {
       const missing = Array.isArray(phone.missing) ? phone.missing.join(', ') : '';
@@ -3275,9 +3328,16 @@
       send.disabled = true;
       operatorFormStatus(sms, 'Sending text…', 'loading');
       try {
-        await operatorFetch('/api/biggy/phone/sms/send', { method: 'POST', body: { to, body, confirmed: true } });
+        const result = await operatorFetch('/api/biggy/phone/sms/send', { method: 'POST', body: { to, body, confirmed: true } });
         sms.reset();
-        operatorFormStatus(sms, 'Text queued through Twilio.', 'ready');
+        const transport = String(result.transport || '');
+        operatorFormStatus(
+          sms,
+          transport === 'google_messages'
+            ? 'Text submitted through Google Messages.'
+            : `Google Messages was unavailable; text ${String(result.status || 'queued')} through Twilio fallback.`,
+          'ready',
+        );
         window.setTimeout(() => refreshOperatorPanel(dlg, 'phone'), 900);
       } catch (error) {
         operatorFormStatus(sms, String(error && error.message || 'Text failed.'), 'warning');
@@ -3306,8 +3366,8 @@
       dial.disabled = true;
       operatorFormStatus(call, 'Starting call…', 'loading');
       try {
-        await operatorFetch('/api/biggy/phone/call/start', { method: 'POST', body: { to, confirmed: true } });
-        operatorFormStatus(call, 'Call queued through Twilio.', 'ready');
+        const result = await operatorFetch('/api/biggy/phone/call/start', { method: 'POST', body: { to, confirmed: true } });
+        operatorFormStatus(call, `Call ${String(result.status || 'queued')} through the Twilio voice bridge.`, 'ready');
         window.setTimeout(() => refreshOperatorPanel(dlg, 'phone'), 900);
       } catch (error) {
         operatorFormStatus(call, String(error && error.message || 'Call failed.'), 'warning');
@@ -3358,9 +3418,33 @@
         view: 'month',
         cursor: calendarDateKey(new Date()),
         calendarIds: ['primary'],
+        overlaysUserModified: false,
       };
     }
     return dlg.__biggyCalendarState;
+  }
+
+  function resetCalendarOverlayDefaults(dlg) {
+    const state = calendarWorkspaceState(dlg);
+    state.calendarIds = ['primary'];
+    state.overlaysUserModified = false;
+  }
+
+  function calendarSourceIds(calendar) {
+    const sources = Array.isArray(calendar && calendar.calendar_sources) ? calendar.calendar_sources : [];
+    const ids = sources.map((source) => String(source && source.id || '').trim()).filter(Boolean);
+    return ids.length ? Array.from(new Set(ids)) : ['primary'];
+  }
+
+  function syncCalendarOverlayDefaults(dlg, calendar) {
+    const state = calendarWorkspaceState(dlg);
+    if (state.overlaysUserModified) return false;
+    const allIds = calendarSourceIds(calendar);
+    const current = Array.isArray(state.calendarIds) ? state.calendarIds.map(String) : [];
+    const same = current.length === allIds.length && allIds.every((id) => current.includes(id));
+    if (same) return false;
+    state.calendarIds = allIds;
+    return true;
   }
 
   function calendarRequestWindow(state) {
@@ -3552,6 +3636,7 @@
       sourceBar.appendChild(label);
       check.addEventListener('change', () => {
         const id = String(source.id || '');
+        state.overlaysUserModified = true;
         state.calendarIds = check.checked ? Array.from(new Set([...state.calendarIds, id])) : state.calendarIds.filter((item) => item !== id);
         refreshOperatorPanel(dlg, 'calendar');
       });
@@ -3924,8 +4009,13 @@
       }
       if (key === 'calendar') {
         const state = calendarWorkspaceState(dlg);
-        const calendar = await operatorFetch(calendarRequestUrl(state));
+        let calendar = await operatorFetch(calendarRequestUrl(state));
         if (!current()) return;
+        // Late-arriving calendarList rows: enable every listed overlay on initial open.
+        if (syncCalendarOverlayDefaults(dlg, calendar)) {
+          calendar = await operatorFetch(calendarRequestUrl(state));
+          if (!current()) return;
+        }
         renderCalendarWorkspace(panel, dlg, calendar);
         return;
       }
@@ -4079,6 +4169,8 @@
 
     const setActiveCategory = (category, { open = true } = {}) => {
       const key = mapRecCategoryToRail(category);
+      // Each Calendar card open resets overlays to every listed calendar enabled.
+      if (key === 'calendar') resetCalendarOverlayDefaults(dlg);
       dlg.setAttribute('data-active-category', key);
       categoryButtons().forEach((btn) => {
         const on = btn.getAttribute('data-category') === key;
@@ -4259,6 +4351,44 @@
     return cfg && typeof cfg === 'object' ? cfg : { available: false, reason: 'BAD_CONFIG' };
   }
 
+  function staticMapUrl(mvm, token) {
+    const route = mvm && mvm.route && mvm.route.geometry;
+    const coordinates = route && route.type === 'LineString' && Array.isArray(route.coordinates)
+      ? route.coordinates.filter((point) => Array.isArray(point) && point.length >= 2)
+      : [];
+    const stride = Math.max(1, Math.ceil(coordinates.length / 80));
+    const simplified = coordinates.filter((_, index) => index % stride === 0);
+    if (coordinates.length && simplified[simplified.length - 1] !== coordinates[coordinates.length - 1]) {
+      simplified.push(coordinates[coordinates.length - 1]);
+    }
+    const origin = mvm.origin || {};
+    const destination = mvm.destination || {};
+    const features = [];
+    if (simplified.length >= 2) {
+      features.push({
+        type: 'Feature',
+        properties: { stroke: '#2f6fed', 'stroke-width': 5, 'stroke-opacity': 0.92 },
+        geometry: { type: 'LineString', coordinates: simplified },
+      });
+    }
+    [
+      [origin, '#1a7f37', 'a'],
+      [destination, '#cf222e', 'b'],
+    ].forEach(([point, color, symbol]) => {
+      if (Number.isFinite(Number(point.lon)) && Number.isFinite(Number(point.lat))) {
+        features.push({
+          type: 'Feature',
+          properties: { 'marker-color': color, 'marker-size': 'small', 'marker-symbol': symbol },
+          geometry: { type: 'Point', coordinates: [Number(point.lon), Number(point.lat)] },
+        });
+      }
+    });
+    if (!features.length) return '';
+    const overlay = encodeURIComponent(JSON.stringify({ type: 'FeatureCollection', features }));
+    return `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/geojson(${overlay})/auto/900x500@2x`
+      + `?padding=48&access_token=${encodeURIComponent(String(token || ''))}`;
+  }
+
   async function renderMapViewModelOnce(mvm) {
     if (!mvm || typeof mvm !== 'object') return false;
     const renderEpoch = travelVisualEpoch;
@@ -4273,8 +4403,10 @@
       if (note) note.textContent = 'Map unavailable: ' + String(mvm.reason || 'no route model');
       return false;
     }
-    if (mvm.schema !== 'jarvis.map_view_model.v1' ||
-        (mvm.emitted_by !== '3 AI Agent' && mvm.emitted_by !== 'Jarvis II PA Tool')) {
+    const mapSchema = String(mvm.schema || '');
+    const mapEmitter = String(mvm.emitted_by || '');
+    if (!['argus.map_view_model.v1', 'jarvis.map_view_model.v1'].includes(mapSchema) ||
+        !['A.R.G.U.S. PA Tool', '3 AI Agent', 'Jarvis II PA Tool'].includes(mapEmitter)) {
       return false; // refuse untrusted map models
     }
     const dlg = ensureTravelMapDialog();
@@ -4331,12 +4463,11 @@
       }
     }
     const key = modelKey(mvm);
-    if (key === lastMapModelKey && mapInstance) {
+    if (key === lastMapModelKey && staticMapImage) {
       if (note) note.textContent = 'Display only · Agent map_view_model';
       return true;
     }
     lastMapModelKey = key;
-    setGalaxyRenderPaused(true);
 
     let cfg;
     try {
@@ -4353,81 +4484,39 @@
           '). Config var: ' +
           String(cfg.token_env || 'BIGGY_MAPBOX_PUBLIC_TOKEN');
       }
-      setGalaxyRenderPaused(false);
       return false;
     }
     try {
-      const mapboxgl = await loadMapboxAssets();
-      if (renderEpoch !== travelVisualEpoch) return false;
-      if (!mapboxgl) throw new Error('mapboxgl_missing');
-      mapboxgl.accessToken = cfg.token;
-      if (mapInstance) {
-        try { mapInstance.remove(); } catch (_) {}
-        mapInstance = null;
-      }
-      if (canvas) canvas.innerHTML = '';
-      mapInstance = new mapboxgl.Map({
-        container: canvas,
-        style: 'mapbox://styles/mapbox/streets-v12',
-        center: [Number(o.lon) || 0, Number(o.lat) || 0],
-        zoom: 11,
-        attributionControl: true,
-      });
-      mapInstance.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
+      const url = staticMapUrl(mvm, cfg.token);
+      if (!url) throw new Error('route_geometry_missing');
+      if (!canvas) throw new Error('map_container_missing');
+      releaseTravelMap();
+      canvas.innerHTML = '';
+      const image = document.createElement('img');
+      image.className = 'biggy-travel-static-map';
+      image.alt = `Route from ${String(o.label || 'origin')} to ${String(d.label || 'destination')}`;
+      image.decoding = 'async';
+      image.loading = 'eager';
+      staticMapImage = image;
+      canvas.appendChild(image);
+      if (note) note.textContent = 'Loading verified Mapbox route…';
       await new Promise((resolve, reject) => {
-        const timeout = window.setTimeout(() => reject(new Error('mapbox_load_timeout')), 12000);
-        mapInstance.once('error', (event) => {
+        const timeout = window.setTimeout(() => reject(new Error('mapbox_static_timeout')), 12000);
+        image.addEventListener('error', () => {
           window.clearTimeout(timeout);
-          reject(new Error(String(event && event.error && event.error.message || 'mapbox_load_error')));
-        });
-        mapInstance.once('load', () => {
+          reject(new Error('mapbox_static_load_error'));
+        }, { once: true });
+        image.addEventListener('load', () => {
           window.clearTimeout(timeout);
-          try {
-            const geom = mvm.route && mvm.route.geometry;
-            if (geom && geom.type === 'LineString' && Array.isArray(geom.coordinates)) {
-              mapInstance.addSource('route', {
-                type: 'geojson',
-                data: { type: 'Feature', properties: {}, geometry: geom },
-              });
-              mapInstance.addLayer({
-                id: 'route-line',
-                type: 'line',
-                source: 'route',
-                layout: { 'line-join': 'round', 'line-cap': 'round' },
-                paint: { 'line-color': '#2f6fed', 'line-width': 5 },
-              });
-              const bounds = new mapboxgl.LngLatBounds();
-              geom.coordinates.forEach((c) => bounds.extend(c));
-              if (o.lon != null && o.lat != null) bounds.extend([o.lon, o.lat]);
-              if (d.lon != null && d.lat != null) bounds.extend([d.lon, d.lat]);
-              mapInstance.fitBounds(bounds, { padding: 48, maxZoom: 14 });
-            }
-            if (o.lon != null && o.lat != null) {
-              new mapboxgl.Marker({ color: '#1a7f37' })
-                .setLngLat([o.lon, o.lat])
-                .setPopup(new mapboxgl.Popup().setText(String(o.label || 'Origin')))
-                .addTo(mapInstance);
-            }
-            if (d.lon != null && d.lat != null) {
-              new mapboxgl.Marker({ color: '#cf222e' })
-                .setLngLat([d.lon, d.lat])
-                .setPopup(new mapboxgl.Popup().setText(String(d.label || 'Destination')))
-                .addTo(mapInstance);
-            }
-            resolve(true);
-          } catch (_) {
-            resolve(false);
-          }
-        });
+          resolve(true);
+        }, { once: true });
+        image.src = url;
       });
       if (renderEpoch !== travelVisualEpoch) {
         releaseTravelMap();
         return false;
       }
       if (note) note.textContent = 'Display only · Agent map_view_model · not a decision-maker';
-      // Mapbox and Three.js compete during WebGL initialization only. Resume
-      // the galaxy as soon as the map is ready, even while its panel is open.
-      setGalaxyRenderPaused(false);
       return true;
     } catch (err) {
       releaseTravelMap();
@@ -4519,15 +4608,15 @@
 
   function postRenderAck(payload) {
     try {
-      const corr = String((payload && payload.correlation_id) || window.__askJarvisActiveCorrelation || '');
+      const corr = String((payload && payload.correlation_id) || window.__askArgusActiveCorrelation || '');
       if (!corr) return;
       const body = Object.assign({}, payload || {}, {
-        schema: 'jarvis.ask_jarvis_render_ack.v1',
+        schema: 'argus.render_ack.v1',
         correlation_id: corr,
         client: 'biggy_owner_webui',
       });
-      window.__askJarvisLastRenderAck = body;
-      fetch('/api/biggy/ask-jarvis-render-ack', {
+      window.__askArgusLastRenderAck = body;
+      fetch('/api/biggy/argus-render-ack', {
         method: 'POST',
         credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
@@ -4535,18 +4624,20 @@
       }).catch(function () {});
     } catch (_) {}
   }
-  window.__biggyPostAskJarvisRenderAck = postRenderAck;
+  window.__biggyPostArgusRenderAck = postRenderAck;
 
   const recommendationModelsByCategory = Object.create(null);
 
   function renderRecommendationViewModel(rvm) {
     if (!rvm || typeof rvm !== 'object') return { rendered: false, count: 0, category: null };
     const okSchema =
-      (rvm.schema === 'jarvis.recommendation_view_model.v1' ||
+      (rvm.schema === 'argus.recommendation_view_model.v1' ||
+        rvm.schema === 'argus.lodging_view_model.v1' ||
+        rvm.schema === 'jarvis.recommendation_view_model.v1' ||
         rvm.schema === 'jarvis.lodging_view_model.v1') &&
-      (rvm.emitted_by === '3 AI Agent' || rvm.emitted_by === 'Jarvis II PA Tool');
+      (rvm.emitted_by === 'A.R.G.U.S. PA Tool' || rvm.emitted_by === '3 AI Agent' || rvm.emitted_by === 'Jarvis II PA Tool');
     if (!okSchema) return { rendered: false, count: 0, category: null };
-    const category = String(rvm.category || (rvm.schema === 'jarvis.lodging_view_model.v1' ? 'lodging' : '') || '');
+    const category = String(rvm.category || (/^(?:argus|jarvis)\.lodging_view_model\.v1$/.test(String(rvm.schema || '')) ? 'lodging' : '') || '');
     if (category) recommendationModelsByCategory[mapRecCategoryToRail(category)] = rvm;
     const title =
       String(rvm.title || '').trim() ||
@@ -4636,7 +4727,7 @@
   function renderLodgingViewModel(lvm) {
     // Back-compat: lodging schema only when category is lodging.
     if (!lvm || typeof lvm !== 'object') return { rendered: false, count: 0, category: 'lodging' };
-    if (lvm.schema === 'jarvis.recommendation_view_model.v1') {
+    if (lvm.schema === 'argus.recommendation_view_model.v1' || lvm.schema === 'jarvis.recommendation_view_model.v1') {
       return renderRecommendationViewModel(lvm);
     }
     const aliased = Object.assign({}, lvm, {
@@ -4649,8 +4740,9 @@
   window.__biggyRenderLodgingViewModel = renderLodgingViewModel;
   window.__biggyRenderRecommendationViewModel = renderRecommendationViewModel;
   function cacheTripPlanViewModels(tvm) {
-    if (!tvm || typeof tvm !== 'object' || tvm.schema !== 'jarvis.trip_plan_view_model.v1' ||
-        tvm.emitted_by !== 'Jarvis II PA Tool') return [];
+    if (!tvm || typeof tvm !== 'object' ||
+        !['argus.trip_plan_view_model.v1', 'jarvis.trip_plan_view_model.v1'].includes(String(tvm.schema || '')) ||
+        !['A.R.G.U.S. PA Tool', 'Jarvis II PA Tool'].includes(String(tvm.emitted_by || ''))) return [];
     const models = Array.isArray(tvm.categories) ? tvm.categories : [];
     models.forEach((model) => {
       if (model && typeof model === 'object' && model.category) {
@@ -4667,7 +4759,7 @@
     return first ? renderRecommendationViewModel(first) : { rendered: false, count: 0, category: null };
   };
 
-  function safeJarvisVisualActionHref(value) {
+  function safeArgusVisualActionHref(value) {
     // The browser resolves this custom protocol on the workstation displaying
     // Biggy.  Thus a TD browser opens TD's MyRadar, while Smedley opens its own.
     // Never turn arbitrary model text into a custom-protocol launch link.
@@ -4682,13 +4774,14 @@
 
   function renderVisualActionViewModel(vm) {
     if (!vm || typeof vm !== 'object') return false;
-    if (vm.schema !== 'jarvis.visual_action_view_model.v1' || vm.emitted_by !== 'Jarvis II PA Tool') {
+    if (!['argus.visual_action_view_model.v1', 'jarvis.visual_action_view_model.v1'].includes(String(vm.schema || '')) ||
+        !['A.R.G.U.S. PA Tool', 'Jarvis II PA Tool'].includes(String(vm.emitted_by || ''))) {
       return false;
     }
     if (mapRecCategoryToRail(vm.category) !== 'weather') return false;
     const actionsIn = Array.isArray(vm.actions) ? vm.actions : [];
     const actions = actionsIn
-      .map((item) => ({ label: String(item && item.label || '').trim(), href: safeJarvisVisualActionHref(item && item.href) }))
+      .map((item) => ({ label: String(item && item.label || '').trim(), href: safeArgusVisualActionHref(item && item.href) }))
       .filter((item) => item.label && item.href);
     if (!actions.length) return false;
 
@@ -4729,9 +4822,9 @@
     const list = Array.isArray(messages) ? messages : (typeof S !== 'undefined' && S && S.messages) || [];
     for (let i = list.length - 1; i >= 0; i--) {
       const m = list[i];
-      if (!m || m.role !== 'assistant' || m.ask_jarvis_pending) continue;
-      const corr = String(correlationId || m._correlation_id || window.__askJarvisActiveCorrelation || '');
-      if (corr) window.__askJarvisActiveCorrelation = corr;
+      if (!m || m.role !== 'assistant' || m.ask_argus_pending || m.ask_jarvis_pending) continue;
+      const corr = String(correlationId || m._correlation_id || window.__askArgusActiveCorrelation || '');
+      if (corr) window.__askArgusActiveCorrelation = corr;
       const mvm = m.map_view_model;
       const rvm = m.recommendation_view_model;
       const tpm = m.trip_plan_view_model;
@@ -4832,12 +4925,109 @@
 
   window.__biggyHandoffTravelVisualsFromMessages = handoffTravelVisualsFromMessages;
 
+  function activeSessionCompletionSignature(sessionId, session, messages) {
+    const latest = [...messages].reverse().find((message) => message
+      && message.role === 'assistant'
+      && !(message.ask_argus_pending || message.ask_jarvis_pending));
+    if (!latest) return '';
+    const visualKinds = [
+      latest.map_view_model && 'map',
+      latest.recommendation_view_model && 'recommendation',
+      latest.trip_plan_view_model && 'trip',
+      latest.lodging_view_model && 'lodging',
+      latest.visual_action_view_model && 'action',
+      latest.weather_briefing && 'weather',
+    ].filter(Boolean).join(',');
+    return [
+      sessionId,
+      Number(latest.timestamp || session.updated_at || 0),
+      String(latest._correlation_id || ''),
+      String(latest.content || '').length,
+      visualKinds,
+    ].join('|');
+  }
+
+  async function reconcileActiveBiggySessionCompletion({ force = false } = {}) {
+    const sid = currentHermesSessionId();
+    if (!isValidSessionId(sid) || activeSessionReconcileInFlight) return false;
+    activeSessionReconcileInFlight = true;
+    try {
+      const response = await fetch(
+        `/api/session?session_id=${encodeURIComponent(sid)}&messages=1&msg_limit=24&resolve_model=0`,
+        { credentials: 'same-origin', cache: 'no-store', headers: { 'X-Biggy-Completion-Reason': 'glass-reconcile' } },
+      );
+      if (!response.ok) return false;
+      const payload = await response.json();
+      const session = payload && payload.session;
+      const messages = session && Array.isArray(session.messages) ? session.messages : null;
+      if (!messages || session.active_stream_id || session.pending_user_message) return false;
+      const signature = activeSessionCompletionSignature(sid, session, messages);
+      if (!signature || (!force && signature === activeSessionReconcileSignature)) return false;
+      activeSessionReconcileSignature = signature;
+      completionMessages = messages;
+      completionMessagesSessionId = sid;
+      persistGuiSessionId(sid);
+
+      // A dropped SSE completion must not leave a settled server turn looking
+      // permanently busy on glass. Reconcile only after server truth says the
+      // session has no active stream or pending owner message.
+      try {
+        if (typeof S !== 'undefined' && S && S.session && S.session.session_id === sid) {
+          S.messages = messages;
+          S.activeStreamId = null;
+          S.session.active_stream_id = null;
+          S.session.pending_user_message = null;
+          if (typeof INFLIGHT !== 'undefined') delete INFLIGHT[sid];
+          if (typeof clearInflightState === 'function') clearInflightState(sid);
+          if (typeof clearOptimisticSessionStreaming === 'function') clearOptimisticSessionStreaming(sid);
+          if (typeof setBusy === 'function') setBusy(false); else S.busy = false;
+          if (typeof updateSendBtn === 'function') updateSendBtn();
+          if (typeof renderMessages === 'function') renderMessages();
+          if (typeof renderSessionList === 'function') void renderSessionList();
+        }
+      } catch (_) {}
+
+      renderArgusConversationLane();
+      const latestAssistant = [...messages].reverse().find((message) => message
+        && message.role === 'assistant'
+        && !(message.ask_argus_pending || message.ask_jarvis_pending));
+      invalidateTravelVisuals();
+      if (latestAssistant && isGalaxyTraceEligibleMessage(latestAssistant)
+          && galaxyTraceCitation(latestAssistant)) {
+        window.__biggyHandleDocumentResult(latestAssistant);
+        return true;
+      }
+      return await handoffTravelVisualsFromMessages(messages);
+    } catch (error) {
+      try { console.warn('[biggy] active session completion reconcile will retry', error); } catch (_) {}
+      return false;
+    } finally {
+      activeSessionReconcileInFlight = false;
+    }
+  }
+
+  window.__biggyReconcileActiveSessionCompletion = reconcileActiveBiggySessionCompletion;
+
+  function installActiveSessionCompletionReconciler() {
+    if (activeSessionReconcileTimer) clearInterval(activeSessionReconcileTimer);
+    setTimeout(() => {
+      reconcileActiveBiggySessionCompletion({ force: true }).catch(() => {});
+    }, 600);
+    // This local, low-frequency safety path closes the gap left by a dropped
+    // normal-chat SSE completion. PTT and direct-response hooks remain the
+    // fast path; every path converges on the persisted session as truth.
+    activeSessionReconcileTimer = setInterval(() => {
+      reconcileActiveBiggySessionCompletion().catch(() => {});
+    }, 2500);
+  }
+
   async function scanMessagesForMapModel() {
     // One boot-time restore for the latest completed turn. Live turns are
     // owned by their direct-response/PTT completion boundaries.
     const list = (typeof S !== 'undefined' && S && Array.isArray(S.messages)) ? S.messages : [];
     const latestAssistant = [...list].reverse().find((message) => message
-      && message.role === 'assistant' && !message.ask_jarvis_pending);
+      && message.role === 'assistant'
+      && !(message.ask_argus_pending || message.ask_jarvis_pending));
     if (latestAssistant && isGalaxyTraceEligibleMessage(latestAssistant)
         && galaxyTraceCitation(latestAssistant)) {
       window.__biggyHandleDocumentResult(latestAssistant);
@@ -4856,7 +5046,7 @@
     document.body.classList.add(BODY_CLASS);
     mainChat.classList.add(IWO_CLASS);
     document.querySelectorAll('.biggy-brand-header').forEach((node) => node.remove());
-    document.querySelectorAll('.biggy-jarvis-transplant').forEach((node) => node.remove());
+    document.querySelectorAll('.biggy-argus-reactor').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-composer-controls').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-fleet-strip').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-cockpit-strip').forEach((node) => node.remove());
@@ -4878,7 +5068,7 @@
     buildReactorHud();
     installPttBridge(header);
     installCockpitStrip(header);
-    installJarvisV6Bridge(header);
+    installArgusBridge(header);
     installRagTraceObserver();
     purgeOwnerAckArtifacts();
     installBiggyVoiceLabels();
@@ -4890,12 +5080,11 @@
     scheduleBiggySharedCenterline();
     setTimeout(scheduleBiggySharedCenterline, 350);
     forceChromeLabels();
-    installJarvisResponseLabels();
+    installArgusResponseLabels();
     removeCaduceus();
     updateIdentityChip();
     ensureTravelMapDialog();
-    // Do not replay saved response cards into a fresh cockpit. New assistant
-    // results invoke the handoff directly; the landing page stays collapsed.
+    installActiveSessionCompletionReconciler();
     return true;
   }
 
@@ -4930,7 +5119,10 @@
     tryStart().catch(() => {});
   }
 
-  window.addEventListener('resize', scheduleBiggySharedCenterline);
+  window.addEventListener('resize', () => {
+    scheduleBiggySharedCenterline();
+    scheduleArgusConversationLaneBoundary();
+  });
 
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', start, { once: true });

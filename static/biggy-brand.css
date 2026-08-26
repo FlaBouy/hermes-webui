@@ -11,8 +11,7 @@ body.biggy-brand > .app-titlebar{display:none!important}
 /* A.R.G.U.S. reactor — the native V6 presence unit, now independently docked
    immediately above the bottom Fleet rail. The model chip travels with the
    reactor so the top-center slot is reserved for the Cockpit rail. */
-/* Jarvis V6 reactor — verbatim transplant of the real V6 presence unit from
-   brain-jarvis/viewer/3d.html (#j-orb / #j-state / #j-brain-chip), native
+/* A.R.G.U.S. reactor presence unit (#j-orb / #j-state / #j-brain-chip), native
    204x204, unscaled, unrestyled. It is a sibling of the header (inserted
    immediately after it), not a descendant, so its lower portion can render
    past the header's own box, over the workspace — the header was made tall
@@ -21,7 +20,7 @@ body.biggy-brand > .app-titlebar{display:none!important}
    scheme changed from the original (viewport-fixed, docked right) to
    wrapper-relative + horizontally centered over the header/workspace seam;
    every id, class, and style value below is copied unmodified from 3d.html. */
-.biggy-jarvis-transplant{
+.biggy-argus-reactor{
   position:absolute;left:50%;top:auto;bottom:calc(100% - 8px);transform:translateX(-50%);
   width:204px;height:330px;z-index:var(--biggy-layer-reactor, 10);pointer-events:none;
 }
@@ -189,10 +188,10 @@ body.biggy-brand > .app-titlebar{display:none!important}
   .biggy-fleet-strip-label{display:none}
 }
 
-/* Jarvis V6 3D graph/galaxy — occupies the full center canvas behind the
+/* A.R.G.U.S. 3D graph/galaxy — occupies the full center canvas behind the
    conversation surface, replacing the static Iwo background image. Iframe
    points at Biggy's own same-origin, narrow, fixed proxy route (never port
-   4719 directly); see api/jarvis_v6_world.py. */
+   4719 directly); see api/argus_world.py. */
 .biggy-v6-world{
   position:absolute;inset:0;width:100%;height:100%;
   border:0;z-index:var(--biggy-layer-galaxy);background:#04050a;
@@ -468,6 +467,9 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo > .biggy-category-ra
   flex:1;font:11px/1.3 ui-sans-serif,system-ui,sans-serif;color:#94a3b8;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 #mainChat.biggy-brand-iwo .biggy-travel-map-canvas{flex:1 1 auto;min-height:160px;width:100%}
+#mainChat.biggy-brand-iwo .biggy-travel-static-map{
+  display:block;width:100%;height:100%;min-height:160px;object-fit:cover;background:#dfe8ef;
+}
 #mainChat.biggy-brand-iwo .biggy-travel-dock.has-lodging .biggy-travel-map-canvas{min-height:140px;flex:1 1 46%}
 #mainChat.biggy-brand-iwo .biggy-travel-map-actions{
   display:flex;gap:8px;flex-wrap:wrap;padding:8px 10px;border-top:1px solid rgba(148,163,184,.25);
