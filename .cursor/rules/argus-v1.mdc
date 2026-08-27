@@ -1,0 +1,24 @@
+---
+description: Argus V1.0 authority, glass gate, and implementation checkpoints for Hermes WebUI
+alwaysApply: true
+---
+
+# Argus V1.0
+
+Before any Argus or Biggy interface work in this repository, read:
+
+1. `/Users/rick/argus-v1/AGENTS.md`
+2. `/Users/rick/argus-v1/manifests/argus-v1.json`
+3. `/Users/rick/argus-v1/docs/ARCHITECTURE.md`
+4. `/Users/rick/argus-v1/docs/RELEASE_NOTES.md`
+5. `/Users/rick/argus-v1/CURSOR_PROJECT_BRIEF.md`
+
+`/Users/rick/argus-v1` is project authority. This repo is the implementation component only.
+
+- Current branch: `fix/v6-embed-console-cleanup`
+- Operational checkpoint: `ddcf7932a099acde90f219894cdf82d54d40ec60`
+- Jarvis-named modules are compatibility-only shims. Extend canonical `argus_*` routing/bridge/travel/world, not the Jarvis-named surface.
+- Named task must be on HAL physical glass before a worker begins. Glass is acceptance truth; APIs/backend are not visual proof.
+- Preserve unrelated changes. Never store credentials, contact data, OAuth tokens, or API keys.
+- Run scoped tests for the change (`./scripts/test.sh` for pytest).
+- After an owner-accepted change, update the authority manifest, release notes, Build Docs, and Fleet registries.
