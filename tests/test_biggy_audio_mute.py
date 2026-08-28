@@ -97,6 +97,14 @@ def test_argus_orb_status_tracks_server_owned_alistar_playback():
     assert "word.length / 28" not in brand
 
 
+def test_argus_voice_has_independent_twenty_five_percent_reduction():
+    speaker = (Path.home() / "bin" / "speak_on_smedley.py").read_text(encoding="utf-8")
+
+    assert "ARGUS_VOLUME = 0.5625" in speaker
+    assert "volume = min(1.0, max(0.0, float(ARGUS_VOLUME)))" in speaker
+    assert "DEFAULT_VOLUME = 0.42" in speaker
+
+
 def test_argus_orb_ring_motion_remains_continuous():
     css = (ROOT / "static" / "biggy-brand.css").read_text(encoding="utf-8")
     assert "#j-orb .rot-a{animation:hudCCW 64s linear infinite;}" in css

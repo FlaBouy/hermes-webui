@@ -16,6 +16,23 @@ import json
 from api.argus_route import argus_voice_id, is_argus_command
 
 
+def _verified_route_plan(*, origin, destination):
+    label = "Neyland Stadium, Knoxville, Tennessee" if "game" in destination.lower() else destination
+    return {
+        "ok": True,
+        "source": "deterministic test planner",
+        "map_view_model": {
+            "schema": "argus.map_view_model.v1",
+            "emitted_by": "A.R.G.U.S. PA Tool",
+            "available": True,
+            "origin": {"label": origin},
+            "destination": {"label": label},
+            "route": {"distance_m": 1, "duration_min": 1, "geometry": {"coordinates": []}},
+        },
+        "recommendation_view_models": [],
+    }
+
+
 def test_argus_voice_is_alistar():
     assert argus_voice_id() == "rvugSNzdY0NcpG2PKe4B"
 
@@ -242,12 +259,103 @@ def test_argus_pa_core_empty_response_uses_governed_briefing_fallback():
         session_id="session-1",
         try_pa_core=_core,
         try_briefing=_briefing,
+        route_planner=_verified_route_plan,
     )
 
     assert calls == ["core", "briefing"]
     assert result["ok"] is True
     assert result["transport_fallback"] is True
     assert result["primary_transport_error"] == "JSONDecodeError"
+
+
+def test_argus_completed_map_request_without_map_model_uses_governed_fallback():
+    """COMPLETED prose is not a completed route when the card model is absent."""
+    from api.routes import _run_argus_with_transport_fallback
+
+    calls = []
+
+    def _core(*_args, **_kwargs):
+        calls.append("core")
+        return {
+            "handled": True,
+            "ok": True,
+            "reply": "Route is 480.6 miles.",
+            "map_view_model": None,
+        }
+
+    def _briefing(*_args, **_kwargs):
+        calls.append("briefing")
+        return {
+            "handled": True,
+            "ok": True,
+            "map_view_model": {"schema": "argus.map_view_model.v1", "available": True},
+        }
+
+    result = _run_argus_with_transport_fallback(
+        "Ask Argus to map me a route to the Tennessee-Auburn game.",
+        pa_core_enabled=True,
+        biggy_ingress_ts=1.0,
+        correlation_id="corr-map-contract",
+        session_id="session-map-contract",
+        try_pa_core=_core,
+        try_briefing=_briefing,
+        route_planner=_verified_route_plan,
+    )
+
+    assert calls == ["core", "briefing"]
+    assert result["ok"] is True
+    assert result["map_view_model"]["available"] is True
+    assert result["transport_fallback"] is True
+    assert result["primary_transport_error"] == "MISSING_REQUIRED_MAP_VIEW_MODEL"
+
+
+def test_argus_map_request_fails_closed_when_both_transports_omit_map_model():
+    from api.routes import _run_argus_with_transport_fallback
+
+    def _missing(*_args, **_kwargs):
+        return {"handled": True, "ok": True, "reply": "Route ready.", "map_view_model": None}
+
+    result = _run_argus_with_transport_fallback(
+        "Map a route to Neyland Stadium.",
+        pa_core_enabled=True,
+        biggy_ingress_ts=1.0,
+        correlation_id="corr-map-missing",
+        session_id="session-map-missing",
+        try_pa_core=_missing,
+        try_briefing=_missing,
+        route_planner=lambda **_kwargs: {"ok": False, "reason": "ROUTE_NOT_FOUND"},
+    )
+
+    assert result["ok"] is False
+    assert result["error"] == "ROUTE_CONTRACT_FAILED"
+    assert result["map_view_model"] is None
+
+
+def test_weather_only_followup_does_not_require_a_redundant_map_model():
+    from api.routes import _run_argus_with_transport_fallback
+
+    calls = []
+
+    def _core(*_args, **_kwargs):
+        calls.append("core")
+        return {"handled": True, "ok": True, "weather_briefing": {"zip": "30313"}}
+
+    result = _run_argus_with_transport_fallback(
+        (
+            "Ask Argus: Continue the active A.R.G.U.S. travel task. "
+            "Owner request: What will the weather be there?. "
+            "Complete each requested route, lodging, meal, fuel, and weather category independently."
+        ),
+        pa_core_enabled=True,
+        biggy_ingress_ts=1.0,
+        correlation_id="corr-weather-only",
+        session_id="session-weather-only",
+        try_pa_core=_core,
+        try_briefing=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no fallback")),
+    )
+
+    assert calls == ["core"]
+    assert result["ok"] is True
 
 
 def test_argus_verified_negative_does_not_cross_transport_boundary():

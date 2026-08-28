@@ -109,6 +109,31 @@ def test_city_level_search_result_falls_through_to_exact_named_venue(monkeypatch
     assert travel._geocode("Jordan-Hare Stadium, Auburn, Alabama") == exact
 
 
+def test_named_venue_with_in_locality_is_normalized_for_exact_fallback(monkeypatch):
+    """Natural speech uses 'venue in city'; exact place search expects commas."""
+    attempts = []
+
+    def fallback(query):
+        attempts.append(query)
+        if query == "Neyland Stadium, Knoxville, Tennessee":
+            return {
+                "label": "Neyland Stadium, Knoxville, Tennessee 37916",
+                "lon": -83.9259,
+                "lat": 35.9550,
+            }
+        return None
+
+    monkeypatch.setattr(travel, "_public_place_fallback", fallback)
+
+    assert travel._exact_named_place_fallback(
+        "Neyland Stadium in Knoxville, Tennessee"
+    )["label"].startswith("Neyland Stadium")
+    assert attempts == [
+        "Neyland Stadium in Knoxville, Tennessee",
+        "Neyland Stadium, Knoxville, Tennessee",
+    ]
+
+
 def test_trip_recommendations_are_all_local_to_destination(monkeypatch):
     origin = {"label": "Lynn Haven, FL", "lon": -85.65, "lat": 30.25}
     destination = {"label": "Mercedes-Benz Stadium, Atlanta, GA 30313", "lon": -84.40, "lat": 33.76}

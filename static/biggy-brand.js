@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260828-story-continuity-33';
+  const BUILD_ID = '20260828-travel-atomic-34';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -4422,6 +4422,35 @@
     mapZoomStep = 0;
     mapZoomRouteKey = '';
     hideTravelMap();
+    const dlg = document.getElementById('biggyTravelMapDialog');
+    if (dlg) {
+      const meta = dlg.querySelector('#biggyTravelMapMeta');
+      const canvas = dlg.querySelector('#biggyTravelMapCanvas');
+      const actions = dlg.querySelector('#biggyTravelMapActions');
+      const note = dlg.querySelector('#biggyTravelMapNote');
+      const cards = dlg.querySelector('#biggyTravelLodgingCards');
+      const recNote = dlg.querySelector('#biggyTravelLodgingNote');
+      const recSection = dlg.querySelector('#biggyTravelLodging, #biggyTravelRecommendations');
+      if (meta) meta.textContent = '';
+      if (canvas) canvas.replaceChildren();
+      if (actions) {
+        actions.replaceChildren();
+        actions.removeAttribute('data-action-category');
+      }
+      if (note) note.textContent = '';
+      if (cards) cards.replaceChildren();
+      if (recNote) recNote.textContent = '';
+      if (recSection) {
+        recSection.hidden = true;
+        recSection.removeAttribute('data-has-cards');
+        recSection.removeAttribute('data-rec-category');
+      }
+      dlg.classList.remove('has-lodging');
+      dlg.removeAttribute('data-rec-category');
+    }
+    Object.keys(recommendationModelsByCategory).forEach((key) => {
+      delete recommendationModelsByCategory[key];
+    });
     return travelVisualEpoch;
   }
 
@@ -5310,6 +5339,21 @@
 
   window.__biggyRenderVisualActionViewModel = renderVisualActionViewModel;
 
+  function isUsableTravelVisual(vm, kind) {
+    if (!vm || typeof vm !== 'object' || vm.available === false) return false;
+    if (kind === 'recommendation' || kind === 'lodging') {
+      return Array.isArray(vm.options) && vm.options.length > 0;
+    }
+    if (kind === 'trip') {
+      return Array.isArray(vm.categories) && vm.categories.some((model) =>
+        isUsableTravelVisual(model, 'recommendation'));
+    }
+    if (kind === 'action') {
+      return Array.isArray(vm.actions) && vm.actions.length > 0;
+    }
+    return true;
+  }
+
   async function handoffTravelVisualsFromMessages(messages, correlationId) {
     const list = Array.isArray(messages) ? messages : (typeof S !== 'undefined' && S && S.messages) || [];
     for (let i = list.length - 1; i >= 0; i--) {
@@ -5323,7 +5367,14 @@
       const lvm = m.lodging_view_model;
       const avm = m.visual_action_view_model;
       const weatherBriefing = m.weather_briefing;
-      const hasVisual = [mvm, rvm, tpm, lvm, avm, weatherBriefing].some((vm) => vm && typeof vm === 'object');
+      const hasVisual = [
+        isUsableTravelVisual(mvm, 'map'),
+        isUsableTravelVisual(rvm, 'recommendation'),
+        isUsableTravelVisual(tpm, 'trip'),
+        isUsableTravelVisual(lvm, 'lodging'),
+        isUsableTravelVisual(avm, 'action'),
+        isUsableTravelVisual(weatherBriefing, 'weather'),
+      ].some(Boolean);
       // Only the latest completed assistant turn is eligible.  Do not walk
       // back through history: a RAG result must never resurrect travel cards.
       if (!hasVisual) {
@@ -5336,11 +5387,20 @@
             || m.jarvis_ii_generic_rag_vnext) {
           invalidateTravelVisuals();
         }
+        // A completed A.R.G.U.S. turn with no usable visual owns an empty
+        // workspace. Never retain a previous trip's title, map, or cards.
+        if (m.argus_response || m.ask_argus_hard_bind || m.ask_jarvis_hard_bind) {
+          invalidateTravelVisuals();
+        }
         return false;
       }
 
       // A travel/action response owns the dock, never the corpus graph.  An
       // earlier document trace must be cleared before the new cards render.
+      // Clear every prior category and invalidate in-flight Mapbox work before
+      // hydrating this generation, so route identity and card body change as
+      // one transaction rather than mixing two trips.
+      invalidateTravelVisuals();
       clearRagTrace();
 
       let recInfo = { rendered: false, count: 0, category: null };

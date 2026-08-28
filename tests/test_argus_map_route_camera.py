@@ -418,6 +418,43 @@ def test_inflight_session_hydration_queues_latest_route_model_for_one_retry():
     assert "pendingMapViewModel = null" in invalidation_src
 
 
+def test_new_argus_visual_generation_clears_every_stale_travel_surface_first():
+    invalidation_src = extract_function(BIGGY_JS, "invalidateTravelVisuals")
+    handoff_src = extract_function(
+        BIGGY_JS, "handoffTravelVisualsFromMessages", prefix="async function"
+    )
+    for stale_surface in (
+        "biggyTravelMapMeta",
+        "biggyTravelMapCanvas",
+        "biggyTravelMapActions",
+        "biggyTravelMapNote",
+        "biggyTravelLodgingCards",
+        "biggyTravelLodgingNote",
+    ):
+        assert stale_surface in invalidation_src
+    assert "Object.keys(recommendationModelsByCategory)" in invalidation_src
+    assert "invalidateTravelVisuals();" in handoff_src
+    assert handoff_src.index("invalidateTravelVisuals();") < handoff_src.index(
+        "renderRecommendationViewModel(rvm)"
+    )
+    assert "isUsableTravelVisual" in handoff_src
+
+
+def test_unavailable_empty_recommendation_is_not_a_visual_card():
+    source = extract_function(BIGGY_JS, "isUsableTravelVisual")
+    script = f"""
+{source}
+const unavailable = isUsableTravelVisual({{available:false, options:[]}}, 'recommendation');
+const map = isUsableTravelVisual({{available:true, route:{{}}}}, 'map');
+const cards = isUsableTravelVisual({{available:true, options:[{{name:'Hotel'}}]}}, 'recommendation');
+console.log(JSON.stringify({{ unavailable, map, cards }}));
+"""
+    result = subprocess.run(
+        ["node", "-e", script], check=True, capture_output=True, text=True, timeout=30
+    )
+    assert json.loads(result.stdout) == {"unavailable": False, "map": True, "cards": True}
+
+
 def test_map_zoom_control_order_and_availability_lifecycle():
     zoom_html = BIGGY_JS.split('id="biggyTravelMapZoom"', 1)[1].split("</div>", 1)[0]
     assert zoom_html.index("biggy-map-zoom-in") < zoom_html.index("biggy-map-zoom-out")

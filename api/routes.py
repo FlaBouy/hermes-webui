@@ -23438,6 +23438,9 @@ def _handle_chat_start(handler, body, diag=None):
                                     "trip_plan_view_model": ask_jarvis.get("trip_plan_view_model")
                                     if isinstance(ask_jarvis.get("trip_plan_view_model"), dict)
                                     else None,
+                                    "route_contract": ask_jarvis.get("route_contract")
+                                    if isinstance(ask_jarvis.get("route_contract"), dict)
+                                    else None,
                                     "weather_briefing": ask_jarvis.get("weather_briefing")
                                     if isinstance(ask_jarvis.get("weather_briefing"), dict)
                                     else None,
@@ -24495,26 +24498,80 @@ def _run_argus_with_transport_fallback(
     session_id: str,
     try_pa_core,
     try_briefing,
+    route_planner=None,
 ):
-    """Fall back only when PA Core failed to return a governed decision."""
+    """Fall back on transport failure, then enforce the route acceptance gate.
+
+    n8n remains the agentic planner and compliance orchestrator.  A successful
+    route response is nevertheless materialized from its verified endpoints by
+    the deterministic travel layer before it may reach session state or glass.
+    This prevents success prose, city-degraded destinations, and incomplete
+    view models from becoming the route-card authority.
+    """
+
+    def _owner_request_text(value: str) -> str:
+        text = str(value or "")
+        match = re.search(r"(?is)\bOwner request:\s*(.+)", text)
+        if not match:
+            return text
+        owner = match.group(1)
+        owner = re.split(
+            r"(?is)\.\s+(?:The relevant event date|Complete each requested|Weather must use|Return only verified)",
+            owner,
+            maxsplit=1,
+        )[0]
+        return owner
+
+    def _requires_map_model(value: str) -> bool:
+        owner = _owner_request_text(value)
+        return bool(
+            re.search(
+                r"(?i)\b(?:map(?:ped|ping)?|route(?:d|s|ing)?|directions?|drive|driving)\b",
+                owner,
+            )
+        )
+
+    def _has_map_model(result) -> bool:
+        if not isinstance(result, dict):
+            return False
+        model = result.get("map_view_model")
+        return isinstance(model, dict) and model.get("available") is not False
+
+    def _enforce_map_contract(result):
+        if not requires_map or not isinstance(result, dict) or not result.get("ok"):
+            return result
+        from api.argus_route_contract import enforce_route_contract
+        if route_planner is None:
+            from api.argus_travel import plan_trip
+            planner = plan_trip
+        else:
+            planner = route_planner
+        return enforce_route_contract(objective, result, plan_trip=planner)
+
+    requires_map = _requires_map_model(objective)
     if not pa_core_enabled:
-        return try_briefing(
+        return _enforce_map_contract(try_briefing(
             objective,
             biggy_ingress_ts=biggy_ingress_ts,
             correlation_id=correlation_id,
-        )
+        ))
     primary = try_pa_core(
         objective,
         biggy_ingress_ts=biggy_ingress_ts,
         correlation_id=correlation_id,
         session_id=session_id,
     )
-    if isinstance(primary, dict) and primary.get("ok"):
-        return primary
-    error = str((primary or {}).get("error") or "") if isinstance(primary, dict) else "empty_result"
+    if isinstance(primary, dict) and primary.get("ok") and (
+        not requires_map or _has_map_model(primary)
+    ):
+        return _enforce_map_contract(primary)
+    if isinstance(primary, dict) and primary.get("ok") and requires_map:
+        error = "MISSING_REQUIRED_MAP_VIEW_MODEL"
+    else:
+        error = str((primary or {}).get("error") or "") if isinstance(primary, dict) else "empty_result"
     if error not in {
         "JSONDecodeError", "URLError", "HTTPError", "TimeoutError", "OSError",
-        "empty_result", "pa_core_auth_unavailable",
+        "empty_result", "pa_core_auth_unavailable", "MISSING_REQUIRED_MAP_VIEW_MODEL",
     }:
         return primary
     logger.warning(
@@ -24531,7 +24588,7 @@ def _run_argus_with_transport_fallback(
         fallback = dict(fallback)
         fallback["primary_transport_error"] = error
         fallback["transport_fallback"] = True
-    return fallback
+    return _enforce_map_contract(fallback)
 
 
 def _handle_argus_sync_hard_bind(handler, s, objective: str):
@@ -24712,6 +24769,9 @@ def _handle_argus_sync_hard_bind(handler, s, objective: str):
         "trip_plan_view_model": ask_jarvis.get("trip_plan_view_model")
         if isinstance(ask_jarvis.get("trip_plan_view_model"), dict)
         else None,
+        "route_contract": ask_jarvis.get("route_contract")
+        if isinstance(ask_jarvis.get("route_contract"), dict)
+        else None,
         "weather_briefing": ask_jarvis.get("weather_briefing")
         if isinstance(ask_jarvis.get("weather_briefing"), dict)
         else None,
@@ -24829,6 +24889,7 @@ def _handle_argus_sync_hard_bind(handler, s, objective: str):
             "lodging_view_model": final_msg.get("lodging_view_model"),
             "recommendation_view_model": final_msg.get("recommendation_view_model"),
             "trip_plan_view_model": final_msg.get("trip_plan_view_model"),
+            "route_contract": final_msg.get("route_contract"),
             "weather_briefing": final_msg.get("weather_briefing"),
             "calendar_evidence": final_msg.get("calendar_evidence"),
             "evidence_footer": evidence_footer or None,

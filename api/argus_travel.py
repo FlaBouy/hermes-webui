@@ -79,6 +79,24 @@ def _public_place_fallback(query: str) -> dict[str, Any] | None:
     }
 
 
+def _exact_named_place_fallback(query: str) -> dict[str, Any] | None:
+    """Try speech-friendly named-place variants without accepting a locality.
+
+    Nominatim reliably resolves ``Neyland Stadium, Knoxville`` but may return
+    nothing for the natural utterance ``Neyland Stadium in Knoxville``.  Keep
+    the complete venue and locality; only normalize the joining preposition.
+    """
+    query = str(query or "").strip()
+    variants = [query]
+    comma_joined = re.sub(r"(?i)\s+in\s+(?=[A-Z])", ", ", query, count=1)
+    if comma_joined and comma_joined != query:
+        variants.append(comma_joined)
+    for candidate in variants:
+        if resolved := _public_place_fallback(candidate):
+            return resolved
+    return None
+
+
 def _coordinates(feature: dict[str, Any]) -> tuple[float, float] | None:
     geometry = feature.get("geometry") if isinstance(feature.get("geometry"), dict) else {}
     point = geometry.get("coordinates") if isinstance(geometry.get("coordinates"), list) else []
@@ -176,17 +194,17 @@ def _geocode(query: str) -> dict[str, Any] | None:
     payload = _get_json("https://api.mapbox.com/search/geocode/v6/forward", {"q": query, "limit": 1, "autocomplete": "false", "country": "US"})
     features = payload.get("features") if isinstance(payload.get("features"), list) else []
     if not features or not isinstance(features[0], dict):
-        return _public_place_fallback(query)
+        return _exact_named_place_fallback(query)
     point = _coordinates(features[0])
     if not point:
-        return _public_place_fallback(query)
+        return _exact_named_place_fallback(query)
     lon, lat = point
     label = _label(features[0], query)
     resolved = {"label": label, "lon": lon, "lat": lat, "postal_code": _postal_code(features[0], label), "place_source": "Mapbox Geocoding v6"}
     # A generic geocoder can return a surrounding city for a named POI. Do
     # not discard the exact query in that case; seek a named-place fallback.
     if not _place_matches_query(query, resolved["label"]):
-        return _public_place_fallback(query) or resolved
+        return _exact_named_place_fallback(query) or resolved
     return resolved
 
 
