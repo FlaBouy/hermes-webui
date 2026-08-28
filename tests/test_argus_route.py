@@ -11,6 +11,8 @@ Regression coverage for two 2026-08-18 reports:
 
 from __future__ import annotations
 
+import json
+
 from api.argus_route import argus_voice_id, is_argus_command
 
 
@@ -189,6 +191,20 @@ def test_argus_multi_category_travel_retry_uses_prior_verified_destination():
     assert objective is not None
     assert "Start a fresh A.R.G.U.S. travel resolution" in objective
     assert "route, lodging, meal, fuel, and weather" in objective
+
+
+def test_destination_followup_reuses_verified_map_without_repeating_it():
+    from api.routes import _argus_active_followup_objective
+
+    objective = _argus_active_followup_objective(
+        _argus_travel_session_for_followup_tests(),
+        "What will the weather be there?",
+    )
+
+    assert objective is not None
+    assert "owner-confirmed destination exactly as" in objective
+    assert "Jordan-Hare Stadium" in objective
+    assert "Owner request: What will the weather be there?" in objective
 
 
 def test_new_explicit_map_destination_never_reuses_prior_card_destination():
@@ -464,6 +480,45 @@ def test_short_term_pa_context_is_bounded_and_session_scoped():
     assert len(turns) == 10
     assert turns[0]["objective"] == "Manual request 2"
     assert recent_context("another-biggy-chat") == []
+
+
+def test_pa_adapter_returns_destination_weather_briefing(monkeypatch):
+    import api.argus_route as ajr
+    from api import jarvis_pa_conversation_memory as conversation_memory
+    from api import jarvis_pa_strategy_memory as strategy_memory
+
+    monkeypatch.setattr(ajr, "_pa_core_token", lambda: "test-token")
+    monkeypatch.setattr(strategy_memory, "record_outcome", lambda **_kwargs: None)
+    monkeypatch.setattr(conversation_memory, "record_turn", lambda *_a, **_k: None)
+    forecast = {
+        "schema": "jarvis.weather_briefing.v1",
+        "location_echo": "30313",
+        "forecast": {"periods": [{"day": "Saturday", "high_f": 84}]},
+    }
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps({
+                "status": "COMPLETED",
+                "spokenText": "I loaded the destination forecast.",
+                "weather_briefing": forecast,
+                "requestedTools": ["weather"],
+                "citations": [],
+            }).encode("utf-8")
+
+    monkeypatch.setattr(ajr.urllib.request, "urlopen", lambda *_a, **_k: Response())
+    result = ajr.try_jarvis_ii_pa_core(
+        "Ask Argus for the destination forecast.", session_id="weather-card-test"
+    )
+
+    assert result["ok"] is True
+    assert result["weather_briefing"]["location_echo"] == "30313"
 
 
 def test_argus_identity_and_server_tts_guard_are_durable():

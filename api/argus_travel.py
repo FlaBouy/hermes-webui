@@ -242,13 +242,8 @@ def plan_trip(*, origin: str, destination: str) -> dict[str, Any]:
         return {"ok": False, "reason": "ROUTE_NOT_FOUND", "source": _SOURCE}
     route = routes[0]
     geometry = route.get("geometry") if isinstance(route.get("geometry"), dict) else None
-    mid_lon, mid_lat = (origin_place["lon"] + destination_place["lon"]) / 2, (origin_place["lat"] + destination_place["lat"]) / 2
-    if isinstance(geometry, dict) and isinstance(geometry.get("coordinates"), list) and geometry["coordinates"]:
-        middle = geometry["coordinates"][len(geometry["coordinates"]) // 2]
-        if isinstance(middle, list) and len(middle) >= 2 and isinstance(middle[0], (int, float)) and isinstance(middle[1], (int, float)):
-            mid_lon, mid_lat = float(middle[0]), float(middle[1])
     requests = [(category, canonical, destination_place["lon"], destination_place["lat"], destination_place["label"], title, notice) for category, canonical, title, notice in _CATEGORY_SPECS]
-    requests.append(("fuel", "gas_station", mid_lon, mid_lat, "the route midpoint area", "Fuel planning", "Public midpoint-area POIs only; not verified as on-route or open."))
+    requests.append(("fuel", "gas_station", destination_place["lon"], destination_place["lat"], destination_place["label"], "Fuel", "Public destination-area POIs only; verify hours and availability directly."))
     with ThreadPoolExecutor(max_workers=len(requests)) as pool:
         groups = list(pool.map(lambda item: _category_pois(item[1], lon=item[2], lat=item[3]), requests))
     models = [_recommendation(item[0], item[5], item[6], features, item[4]) for item, features in zip(requests, groups)]

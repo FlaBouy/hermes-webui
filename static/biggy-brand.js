@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260827-argus-travel-zoom-31';
+  const BUILD_ID = '20260828-destination-forecast-sync-32';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -1634,13 +1634,26 @@
   let argusSpeechPulseGain = 1;
   let argusSpeechPulseLeadMs = 80;
 
-  function loadArgusSpeechSyncSettings() {
+  async function loadArgusSpeechSyncSettings() {
     try {
       const saved = JSON.parse(localStorage.getItem(ARGUS_SYNC_STORAGE_KEY) || '{}');
       const gain = Number(saved.gain);
       const leadMs = Number(saved.lead_ms);
       if (Number.isFinite(gain)) argusSpeechPulseGain = Math.max(.5, Math.min(2, gain));
       if (Number.isFinite(leadMs)) argusSpeechPulseLeadMs = Math.max(-250, Math.min(300, leadMs));
+    } catch (_) {}
+    try {
+      const saved = await operatorFetch('/api/biggy/operator-settings');
+      const gain = Number(saved.speech_sync_gain);
+      const leadMs = Number(saved.speech_sync_lead_ms);
+      if (Number.isFinite(gain)) argusSpeechPulseGain = Math.max(.5, Math.min(2, gain));
+      if (Number.isFinite(leadMs)) argusSpeechPulseLeadMs = Math.max(-250, Math.min(300, leadMs));
+      try {
+        localStorage.setItem(ARGUS_SYNC_STORAGE_KEY, JSON.stringify({
+          gain: argusSpeechPulseGain,
+          lead_ms: argusSpeechPulseLeadMs,
+        }));
+      } catch (_) {}
     } catch (_) {}
   }
 
@@ -1651,6 +1664,14 @@
         lead_ms: argusSpeechPulseLeadMs,
       }));
     } catch (_) {}
+    operatorFetch('/api/biggy/operator-settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        speech_sync_gain: argusSpeechPulseGain,
+        speech_sync_lead_ms: argusSpeechPulseLeadMs,
+      }),
+    }).catch(() => {});
   }
 
   function stopArgusSpeechPulse() {
@@ -1702,7 +1723,6 @@
 
   function installArgusSpeechSyncTuner(dock) {
     if (!dock) return;
-    loadArgusSpeechSyncSettings();
     const toggle = dock.querySelector('#argusSpeechSyncToggle');
     const panel = dock.querySelector('#argusSpeechSyncPanel');
     const gain = dock.querySelector('#argusSpeechSyncGain');
@@ -1720,6 +1740,7 @@
       leadOut.textContent = `${argusSpeechPulseLeadMs >= 0 ? '+' : ''}${Math.round(argusSpeechPulseLeadMs)} ms`;
     };
     render();
+    loadArgusSpeechSyncSettings().then(render).catch(() => {});
     toggle.addEventListener('click', () => {
       const open = panel.hidden;
       panel.hidden = !open;

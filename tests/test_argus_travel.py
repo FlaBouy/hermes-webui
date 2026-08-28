@@ -1,5 +1,6 @@
 """Regression coverage for generic PA destination resolution."""
 
+from api import argus_travel
 from api import argus_travel as travel
 
 
@@ -105,3 +106,37 @@ def test_city_level_search_result_falls_through_to_exact_named_venue(monkeypatch
     monkeypatch.setattr(travel, "_public_place_fallback", lambda _query: exact)
 
     assert travel._geocode("Jordan-Hare Stadium, Auburn, Alabama") == exact
+
+
+def test_trip_recommendations_are_all_local_to_destination(monkeypatch):
+    origin = {"label": "Lynn Haven, FL", "lon": -85.65, "lat": 30.25}
+    destination = {"label": "Mercedes-Benz Stadium, Atlanta, GA 30313", "lon": -84.40, "lat": 33.76}
+    monkeypatch.setattr(
+        argus_travel,
+        "_geocode",
+        lambda query: origin if "Lynn" in query else destination,
+    )
+    monkeypatch.setattr(
+        argus_travel,
+        "_get_json",
+        lambda *_args, **_kwargs: {
+            "routes": [{"distance": 1000, "duration": 600, "geometry": {"type": "LineString", "coordinates": []}}]
+        },
+    )
+    calls = []
+
+    def category(category, *, lon, lat):
+        calls.append((category, lon, lat))
+        return []
+
+    monkeypatch.setattr(argus_travel, "_category_pois", category)
+
+    result = argus_travel.plan_trip(
+        origin="Lynn Haven, Florida", destination="Mercedes-Benz Stadium"
+    )
+
+    assert result["ok"] is True
+    assert {item[0] for item in calls} == {"hotel", "food_and_drink", "museum", "gas_station"}
+    assert all((lon, lat) == (destination["lon"], destination["lat"]) for _, lon, lat in calls)
+    fuel = next(model for model in result["recommendation_view_models"] if model["category"] == "fuel")
+    assert fuel["title"].startswith("Fuel near Mercedes-Benz Stadium")

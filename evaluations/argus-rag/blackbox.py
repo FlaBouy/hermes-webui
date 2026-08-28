@@ -83,6 +83,24 @@ def call_biggy_adapter(objective: str, correlation_id: str):
     return 200, result, int((time.monotonic() - started) * 1000)
 
 
+def validate_destination_weather(status, body):
+    briefing = body.get("weather_briefing") if isinstance(body, dict) else None
+    forecast = briefing.get("forecast") if isinstance(briefing, dict) else None
+    periods = forecast.get("periods") if isinstance(forecast, dict) else None
+    requested = body.get("requestedTools") if isinstance(body, dict) else None
+    if status != 200 or body.get("status") != "COMPLETED":
+        return "destination weather request did not complete"
+    if requested != ["weather"]:
+        return f"destination follow-up routed unexpected tools: {requested!r}"
+    if body.get("weatherLocation") != "30313":
+        return "destination ZIP was not inherited from the prior trip"
+    if not isinstance(periods, list) or len(periods) < 5:
+        return "destination forecast card contract is incomplete"
+    if isinstance(body.get("map_view_model"), dict):
+        return "weather-only follow-up unnecessarily rebuilt the map"
+    return None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repeat", type=int, default=3)
@@ -152,6 +170,28 @@ def main() -> int:
             if status == 200 and body.get("status") == "COMPLETED" and isinstance(body.get("map_view_model"), dict)
             else "map did not reach a completed card contract",
         ))
+        weather_corr = "argus-eval-weather-" + uuid4().hex[:10]
+        results.append(run_case(
+            "argus_pa_destination_weather",
+            lambda corr=weather_corr: request_json(
+                "http://127.0.0.1:5680/webhook/jarvis-ii-pa",
+                body={
+                    "objective": (
+                        "Continue the prior travel request to Mercedes-Benz Stadium, "
+                        "1 AMB Drive NW, Atlanta, GA 30313. Owner request: What will "
+                        "the weather be there? Complete route, lodging, meal, fuel, "
+                        "and weather categories independently."
+                    ),
+                    "authority": "owner_local_biggy_chat",
+                    "source": "argus-evaluator",
+                    "requester": "argus-evaluator",
+                    "correlation_id": corr,
+                },
+                headers={"Content-Type": "application/json", "Authorization": f"Bearer {token}"},
+                timeout=30,
+            ),
+            validate_destination_weather,
+        ))
         os.environ.setdefault(
             "GPT_BIGGY_PROPOSE_TOKEN_FILE",
             "/Users/rick/.jarvis-ptt/gpt-biggy-propose-token",
@@ -168,6 +208,22 @@ def main() -> int:
             and isinstance(body.get("map_view_model"), dict)
             and bool(body.get("spoken_text"))
             else "Biggy adapter did not return a spoken completed map contract",
+        ))
+        adapter_weather_corr = "argus-eval-biggy-weather-" + uuid4().hex[:8]
+        results.append(run_case(
+            "biggy_argus_adapter_destination_weather",
+            lambda: call_biggy_adapter(
+                (
+                    "Continue the prior trip to Mercedes-Benz Stadium, 1 AMB Drive NW, "
+                    "Atlanta, GA 30313. Owner request: What will the weather be there?"
+                ),
+                adapter_weather_corr,
+            ),
+            lambda status, body: None
+            if body.get("ok") is True
+            and isinstance(body.get("weather_briefing"), dict)
+            and bool(body.get("spoken_text"))
+            else "Biggy adapter did not return a spoken destination forecast contract",
         ))
     passed = sum(1 for result in results if result["ok"])
     summary = {

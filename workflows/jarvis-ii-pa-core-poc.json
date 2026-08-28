@@ -303,7 +303,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const uuid=()=>('xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx').replace(/[xy]/g,c=>{const r=Math.floor(Math.random()*16);return (c==='x'?r:((r&3)|8)).toString(16)});\nconst req=$('Validate PA Request').first().json; const body=$json.body||{}; let plan={}; try{plan=JSON.parse(body.choices?.[0]?.message?.content||'{}')}catch(e){}\nconst rawTools=Array.isArray(plan.required_tools)?plan.required_tools:[]; const canonical=x=>{const t=String(x||'').toLowerCase(); if(/firecrawl|public_web_research|\\bresearch\\b/.test(t))return 'research'; if(/gmail/.test(t))return 'gmail_read'; if(/calendar/.test(t))return 'calendar_read'; if(/weather/.test(t))return 'weather'; if(/lodging/.test(t))return 'lodging_poi'; if(/map/.test(t))return 'maps'; if(/rag/.test(t))return 'rag_core'; return String(x||'')};\nconst requested=rawTools.map(canonical).filter(x=>['rag_core','weather','maps','lodging_poi','calendar_read','gmail_read','research'].includes(String(x))); const objective=String(req.objective||''); const shortTermTurns=Array.isArray(req.conversationContext)?req.conversationContext.slice(-10):[]; const followUp=/^(?:yes|yeah|yep|please|selection\\s*\\d+|option\\s*\\d+)\\b|\\b(?:dig\\s+deeper|pull\\s+(?:that|the)\\s+(?:figure|page|manual|schematic)|previous\\s+(?:manual|figure|page|schematic)|take\\s+a\\s+look)\\b/i.test(objective.trim()); const priorRagTurn=followUp?[...shortTermTurns].reverse().find(turn=>turn&&Array.isArray(turn.tools)&&turn.tools.includes('rag_core')&&String(turn.objective||'').trim()):null; const recoveredTarget=priorRagTurn?String(priorRagTurn.objective).trim().slice(0,500):''; const effectiveRagObjective=recoveredTarget?(recoveredTarget+' Follow-up request: '+objective).slice(0,700):objective;\nconst ragRequested=requested.includes('rag_core')||/\\b(schematic|wiring|manual|datasheet|part\\s*(number|no\\.?|#)|1756[-\\s]?[a-z0-9]+|honeywell|allen[-\\s]?bradley|tdc3000|control(edge|logix))\\b/i.test(objective); if(ragRequested&&!requested.includes('rag_core'))requested.push('rag_core');\nconst tripRequested=requested.includes('maps')||requested.includes('lodging_poi')||/\\b(route|drive|trip|travel|lodging|hotel|fuel|gas|restaurant|eat|dining|meal|entertainment|museum|cinema|theatre|venue|plant\\s+site|attraction|sight)\\b/i.test(objective); if(tripRequested&&!requested.some(x=>x==='maps'||x==='lodging_poi'))requested.push('maps','lodging_poi');\nconst calendarRequested=requested.includes('calendar_read')||/\\b(calendar|schedule|conflict|availability)\\b/i.test(objective); if(calendarRequested&&!requested.includes('calendar_read'))requested.push('calendar_read'); const weatherRequested=requested.includes('weather')||/\\b(weather|forecast|radar|myradar|storm|wildfire|hurricane|tornado)\\b/i.test(objective); const researchRequested=requested.includes('research')||/\\b(research|verify|source lookup)\\b/i.test(objective); const mailRequested=requested.includes('gmail_read')||/\\b(email|emails|inbox|mail|message search)\\b/i.test(objective);\nconst eventDestination=tripRequested&&/\\b(?:game|match|vs\\.?|concert|festival|race|tournament)\\b/i.test(objective); const explicitOrigin=/\\b(?:from|leaving\\s+from|starting\\s+(?:from|in|at))\\s+[^,.!?]+/i.test(objective); const origin=tripRequested?(explicitOrigin?String(plan.origin||'').trim()||'Lynn Haven, Florida':'Lynn Haven, Florida'):''; const plannedDestination=String(plan.destination||'').trim(); const destination=ragRequested?effectiveRagObjective:(eventDestination?'':plannedDestination); const destinationQuery=tripRequested?(eventDestination?objective:(plannedDestination||objective)):'';\nconst memoryAction=String(plan.memory_action||'read_none'); const memoryWrite=memoryAction.includes('write')||/\\b(remember|store|save|retain|lasting preference|durable memory)\\b/i.test(objective); const operationId=uuid(); const status=memoryWrite?'MEMORY_WRITE_REQUIRES_OWNER_POLICY':researchRequested?'RESEARCH_EVIDENCE_REQUIRED':(weatherRequested||calendarRequested||mailRequested||tripRequested)?'TOOL_PENDING':'PLANNED';\nconst spoken=memoryWrite?'Durable memory is read-only until you approve its retention and write policy.':tripRequested?'I am verifying the destination and checking the approved Mapbox travel sources now.':weatherRequested?String(plan.spoken_summary||'Weather information is available from the selected Weather Underground source.')+' MyRadar is ready if you want the full visual view.':calendarRequested?'I am checking your calendar for the requested date.':String(plan.spoken_summary||'I have a plan ready.'); const plannerPath=String($json.plannerPath||'local_120b');\nreturn [{json:{schemaVersion:1,correlationId:req.correlationId,operationId,status,intent:String(plan.intent||'unknown'),origin,destination,destinationQuery,destinationResearchRequired:eventDestination,requestedTools:requested,evidenceRequired:Boolean(plan.evidence_required),requiresApproval:Boolean(plan.requires_approval)||memoryWrite,memory:{action:memoryAction,writeAllowed:false},spokenText:spoken,answer:{plan,evidence:null,notice:'Tool results, if any, are assembled separately from the planner.'},citations:[],auditChain:[...req.auditChain,{stage:'short_term_context',status:recoveredTarget?'target_recovered':'not_used',turns:shortTermTurns.length},{stage:'pa_plan',status:'completed',path:plannerPath,model:plannerPath==='local_120b'?'openai/gpt-oss-120b':'deterministic'},{stage:'policy',status:'enforced'}]}}];"
+          "jsCode": "const uuid=()=>('xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx').replace(/[xy]/g,c=>{const r=Math.floor(Math.random()*16);return (c==='x'?r:((r&3)|8)).toString(16)});\nconst req=$('Validate PA Request').first().json; const body=$json.body||{}; let plan={}; try{plan=JSON.parse(body.choices?.[0]?.message?.content||'{}')}catch(e){}\nconst rawTools=Array.isArray(plan.required_tools)?plan.required_tools:[]; const canonical=x=>{const t=String(x||'').toLowerCase(); if(/firecrawl|public_web_research|\\bresearch\\b/.test(t))return 'research'; if(/gmail/.test(t))return 'gmail_read'; if(/calendar/.test(t))return 'calendar_read'; if(/weather/.test(t))return 'weather'; if(/lodging/.test(t))return 'lodging_poi'; if(/map/.test(t))return 'maps'; if(/rag/.test(t))return 'rag_core'; return String(x||'')};\nconst requested=rawTools.map(canonical).filter(x=>['rag_core','weather','maps','lodging_poi','calendar_read','gmail_read','research'].includes(String(x))); const objective=String(req.objective||''); const ownerRequestMatch=objective.match(/Owner request:\\s*([\\s\\S]*?)(?:[.!?]\\s+(?:The relevant event date|Complete\\b|Weather must use|Return only)|$)/i); const routingObjective=String(ownerRequestMatch?.[1]||objective).trim(); if(routingObjective!==objective)requested.splice(0,requested.length); const shortTermTurns=Array.isArray(req.conversationContext)?req.conversationContext.slice(-10):[]; const followUp=/^(?:yes|yeah|yep|please|selection\\s*\\d+|option\\s*\\d+)\\b|\\b(?:dig\\s+deeper|pull\\s+(?:that|the)\\s+(?:figure|page|manual|schematic)|previous\\s+(?:manual|figure|page|schematic)|take\\s+a\\s+look)\\b/i.test(objective.trim()); const priorRagTurn=followUp?[...shortTermTurns].reverse().find(turn=>turn&&Array.isArray(turn.tools)&&turn.tools.includes('rag_core')&&String(turn.objective||'').trim()):null; const recoveredTarget=priorRagTurn?String(priorRagTurn.objective).trim().slice(0,500):''; const effectiveRagObjective=recoveredTarget?(recoveredTarget+' Follow-up request: '+objective).slice(0,700):objective;\nconst ragRequested=requested.includes('rag_core')||/\\b(schematic|wiring|manual|datasheet|part\\s*(number|no\\.?|#)|1756[-\\s]?[a-z0-9]+|honeywell|allen[-\\s]?bradley|tdc3000|control(edge|logix))\\b/i.test(routingObjective); if(ragRequested&&!requested.includes('rag_core'))requested.push('rag_core');\nconst tripRequested=requested.includes('maps')||requested.includes('lodging_poi')||/\\b(route|drive|trip|travel|lodging|hotel|fuel|gas|restaurant|eat|dining|meal|entertainment|museum|cinema|theatre|venue|plant\\s+site|attraction|sight)\\b/i.test(routingObjective); if(tripRequested&&!requested.some(x=>x==='maps'||x==='lodging_poi'))requested.push('maps','lodging_poi');\nconst calendarRequested=requested.includes('calendar_read')||/\\b(calendar|schedule|conflict|availability)\\b/i.test(routingObjective); if(calendarRequested&&!requested.includes('calendar_read'))requested.push('calendar_read'); const weatherRequested=requested.includes('weather')||/\\b(weather|forecast|radar|myradar|storm|wildfire|hurricane|tornado)\\b/i.test(routingObjective); if(weatherRequested&&!requested.includes('weather'))requested.push('weather'); const radarRequested=/\\b(?:radar|myradar)\\b/i.test(routingObjective); const explicitWeatherZip=(objective.match(/\\b(\\d{5})(?:-\\d{4})?\\b/)||[])[1]||''; const contextWeatherZip=[...shortTermTurns].reverse().map(turn=>{const source=String((turn&&turn.context&&turn.context.trip&&turn.context.trip.postal_code)||turn?.summary||turn?.objective||''); return (source.match(/\\b(\\d{5})(?:-\\d{4})?\\b/)||[])[1]||''}).find(Boolean)||''; const weatherLocation=explicitWeatherZip||contextWeatherZip||'32444'; const researchRequested=requested.includes('research')||/\\b(research|verify|source lookup)\\b/i.test(routingObjective); const mailRequested=requested.includes('gmail_read')||/\\b(email|emails|inbox|mail|message search)\\b/i.test(routingObjective);\nconst eventDestination=tripRequested&&/\\b(?:game|match|vs\\.?|concert|festival|race|tournament)\\b/i.test(routingObjective); const explicitOrigin=/\\b(?:from|leaving\\s+from|starting\\s+(?:from|in|at))\\s+[^,.!?]+/i.test(routingObjective); const origin=tripRequested?(explicitOrigin?String(plan.origin||'').trim()||'Lynn Haven, Florida':'Lynn Haven, Florida'):''; const plannedDestination=String(plan.destination||'').trim(); const destination=ragRequested?effectiveRagObjective:(eventDestination?'':plannedDestination); const destinationQuery=tripRequested?(eventDestination?routingObjective:(plannedDestination||routingObjective)):'';\nconst memoryAction=String(plan.memory_action||'read_none'); const memoryWrite=memoryAction.includes('write')||/\\b(remember|store|save|retain|lasting preference|durable memory)\\b/i.test(objective); const operationId=uuid(); const status=memoryWrite?'MEMORY_WRITE_REQUIRES_OWNER_POLICY':researchRequested?'RESEARCH_EVIDENCE_REQUIRED':(weatherRequested||calendarRequested||mailRequested||tripRequested)?'TOOL_PENDING':'PLANNED';\nconst spoken=memoryWrite?'Durable memory is read-only until you approve its retention and write policy.':tripRequested?'I am verifying the destination and checking the approved Mapbox travel sources now.':weatherRequested?(radarRequested?'I am opening the current radar source for the selected location.':'I am loading the destination forecast for ZIP '+weatherLocation+' now.'):calendarRequested?'I am checking your calendar for the requested date.':String(plan.spoken_summary||'I have a plan ready.'); const plannerPath=String($json.plannerPath||'local_120b');\nreturn [{json:{schemaVersion:1,correlationId:req.correlationId,operationId,status,intent:String(plan.intent||'unknown'),origin,destination,destinationQuery,weatherLocation,radarRequested,destinationResearchRequired:eventDestination,requestedTools:requested,evidenceRequired:Boolean(plan.evidence_required),requiresApproval:Boolean(plan.requires_approval)||memoryWrite,memory:{action:memoryAction,writeAllowed:false},spokenText:spoken,answer:{plan,evidence:null,notice:'Tool results, if any, are assembled separately from the planner.'},citations:[],auditChain:[...req.auditChain,{stage:'short_term_context',status:recoveredTarget?'target_recovered':'not_used',turns:shortTermTurns.length},{stage:'pa_plan',status:'completed',path:plannerPath,model:plannerPath==='local_120b'?'openai/gpt-oss-120b':'deterministic'},{stage:'policy',status:'enforced'}]}}];"
         },
         "id": "pa_6",
         "name": "Governed PA Response",
@@ -1185,6 +1185,92 @@
         "parameters": {
           "jsCode": "const raw=$json||{}; const base=$('Build Official Destination Search').first().json; const groups=[raw.data?.web,raw.data?.results,raw.data,raw.results,raw.web]; const rows=groups.find(Array.isArray)||[]; const bad=/(facebook|instagram|tiktok|x\\.com|twitter|reddit|seatgeek|stubhub|ticketmaster|expedia|booking)/i; const official=/(athletic|athletics|tigers|university|college|\\.edu$|\\.gov$|official)/i; const all=[...(base.sources||[])]; const seen=new Set(all.map(s=>s.url)); for(const row of rows){const url=String(row?.url||row?.metadata?.sourceURL||'').trim(); const m=url.match(/^https?:\\/\\/([^\\/?#]+)/i); const host=m?m[1].toLowerCase():''; if(!host||bad.test(host)||seen.has(url))continue; seen.add(url); all.push({title:String(row?.title||row?.metadata?.title||host).replace(/\\s+/g,' ').trim().slice(0,180),url:url.slice(0,1000),source_host:host.slice(0,180),summary:String(row?.description||row?.metadata?.description||'').replace(/\\s+/g,' ').trim().slice(0,600)});} const score=s=>(official.test(s.source_host)?100:0)+(/schedule|location|stadium|venue|football/i.test(s.title+' '+s.summary)?20:0); all.sort((a,b)=>score(b)-score(a)); return [{json:{base:base.base,objective:base.objective,sources:all.slice(0,8)}}];"
         }
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "pa-weather-tool-requested",
+                "leftValue": "={{ ($json.requestedTools || []).includes('weather') ? 'WEATHER' : 'NO_WEATHER' }}",
+                "rightValue": "WEATHER",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "caseSensitive": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "3cfabf22-31e1-44a9-889e-argusweather01",
+        "name": "Weather Tool Requested?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2.2,
+        "position": [
+          880,
+          520
+        ]
+      },
+      {
+        "parameters": {
+          "method": "POST",
+          "url": "http://host.docker.internal:8790/api/jarvis-ii/pa-weather",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "={{ 'Bearer ' + $env.GPT_BIGGY_PROPOSE_TOKEN }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({zip:String($json.weatherLocation || '32444')}) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 30000
+          }
+        },
+        "id": "6ea321b5-4fa0-49b2-9b02-argusweather02",
+        "name": "Retrieve Destination Forecast",
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
+        "position": [
+          1100,
+          500
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const base=$('Weather Tool Requested?').first().json; const raw=$json.body&&typeof $json.body==='object'?$json.body:$json; const periods=Array.isArray(raw.forecast)?raw.forecast.slice(0,7):[]; const ok=raw.ok===true&&periods.length>0; const trip=Array.isArray(base.requestedTools)&&base.requestedTools.some(t=>t==='maps'||t==='lodging_poi'); const location=String(raw.location||base.weatherLocation||'the destination'); const briefing=ok?{schema:'jarvis.weather_briefing.v1',outcome:'ok',side_effect:'none',durable_memory_write:false,location_echo:String(raw.zip||base.weatherLocation||''),location_label:location,source:{provider:String(raw.source||'National Weather Service'),host:'weather.gov',products:['5-7-day-forecast']},currents:raw.current&&typeof raw.current==='object'?{location,temp_f:raw.current.temp_f,summary:raw.current.summary,humidity_percent:raw.current.humidity_percent,wind_mph:raw.current.wind_mph,observed_at:raw.updated||null}:null,forecast:{periods},alerts:[],spoken:'I loaded the destination forecast for '+location+' on the weather card.'}:null; const spoken=ok?briefing.spoken:'I could not load the verified destination forecast for ZIP '+String(base.weatherLocation||'')+'.'; const status=trip?base.status:(ok?'COMPLETED':'NO_WEATHER_EVIDENCE'); return [{json:{...base,status,spokenText:spoken,weather_briefing:briefing,answer:{...(base.answer||{}),weather:ok?{zip:String(raw.zip||base.weatherLocation||''),location,forecast_days:periods.length,source:String(raw.source||'National Weather Service')}:null},citations:ok?[...(Array.isArray(base.citations)?base.citations:[]),{title:'National Weather Service destination forecast',url:'https://www.weather.gov/',source_host:'National Weather Service'}]:(Array.isArray(base.citations)?base.citations:[]),auditChain:[...(Array.isArray(base.auditChain)?base.auditChain:[]),{stage:'weather_evidence',status:ok?'completed':'unavailable',zip:String(raw.zip||base.weatherLocation||'')} ]}}];"
+        },
+        "id": "9bbf293e-7ead-4ee0-9c0a-argusweather03",
+        "name": "Render Destination Forecast",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1320,
+          500
+        ]
       }
     ],
     "connections": {
@@ -1513,7 +1599,7 @@
           ],
           [
             {
-              "node": "Destination Evidence Required?",
+              "node": "Weather Tool Requested?",
               "type": "main",
               "index": 0
             }
@@ -1546,7 +1632,7 @@
         "main": [
           [
             {
-              "node": "Destination Evidence Required?",
+              "node": "Weather Tool Requested?",
               "type": "main",
               "index": 0
             }
@@ -1744,6 +1830,46 @@
           [
             {
               "node": "Build Destination Extraction",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Weather Tool Requested?": {
+        "main": [
+          [
+            {
+              "node": "Retrieve Destination Forecast",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Destination Evidence Required?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Retrieve Destination Forecast": {
+        "main": [
+          [
+            {
+              "node": "Render Destination Forecast",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Render Destination Forecast": {
+        "main": [
+          [
+            {
+              "node": "Destination Evidence Required?",
               "type": "main",
               "index": 0
             }

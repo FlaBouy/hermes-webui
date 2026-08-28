@@ -1,5 +1,6 @@
 """Weather-card contracts for Biggy's persistent PA rail."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -91,3 +92,30 @@ def test_weather_card_is_persistent_with_zip_and_myradar_controls():
 def test_weather_route_is_same_origin_and_validated_server_side():
     assert 'parsed.path == "/api/biggy/pa/weather"' in ROUTES
     assert "weather_snapshot(zip_code)" in ROUTES
+
+
+def test_argus_weather_followup_executes_destination_forecast_branch():
+    workflow = json.loads(
+        (ROOT / "workflows" / "jarvis-ii-pa-core-poc.json").read_text(encoding="utf-8")
+    )[0]
+    nodes = {node["name"]: node for node in workflow["nodes"]}
+    governed = nodes["Governed PA Response"]["parameters"]["jsCode"]
+    rendered = nodes["Render Destination Forecast"]["parameters"]["jsCode"]
+
+    assert "explicitWeatherZip" in governed
+    assert "contextWeatherZip" in governed
+    assert "ownerRequestMatch" in governed
+    assert "routingObjective" in governed
+    assert "MyRadar is ready" not in governed
+    assert "weatherLocation" in governed
+    assert "Weather Tool Requested?" in nodes
+    assert "Retrieve Destination Forecast" in nodes
+    assert "/api/jarvis-ii/pa-weather" in nodes["Retrieve Destination Forecast"]["parameters"]["url"]
+    assert "Authorization" in str(nodes["Retrieve Destination Forecast"]["parameters"])
+    assert "weather_briefing" in rendered
+    assert "National Weather Service" in rendered
+
+    calendar_false = workflow["connections"]["Calendar Tool Requested?"]["main"][1][0]["node"]
+    calendar_merge = workflow["connections"]["Merge Calendar Evidence"]["main"][0][0]["node"]
+    assert calendar_false == "Weather Tool Requested?"
+    assert calendar_merge == "Weather Tool Requested?"

@@ -12863,6 +12863,15 @@ def handle_get(handler, parsed) -> bool:
             logger.exception("biggy weather source failed")
             return j(handler, {"schema": "biggy.pa.weather.v1", "ok": False, "forecast": [], "error": "weather unavailable"}, status=200)
 
+    if parsed.path == "/api/biggy/operator-settings":
+        try:
+            from api.biggy_operator_settings import read_operator_settings
+
+            return j(handler, read_operator_settings(), status=200)
+        except Exception:
+            logger.exception("biggy operator settings read failed")
+            return j(handler, {"schema": "biggy.operator_settings.v1", "error": "settings unavailable"}, status=500)
+
     if parsed.path == "/api/biggy/phone/status":
         try:
             from api.biggy_phone import phone_status
@@ -14583,6 +14592,18 @@ def handle_post(handler, parsed) -> bool:
                 status=500,
             )
 
+    if parsed.path == "/api/biggy/operator-settings":
+        try:
+            body = _read_json_request_body(handler, max_bytes=8 * 1024)
+            from api.biggy_operator_settings import write_operator_settings
+
+            return j(handler, write_operator_settings(body), status=200)
+        except ValueError as exc:
+            return bad(handler, _sanitize_error(exc), 400)
+        except Exception:
+            logger.exception("biggy operator settings write failed")
+            return bad(handler, "settings write failed", 500)
+
     if parsed.path == "/api/biggy/v6/world/retry":
         try:
             body = _read_json_request_body(handler)
@@ -16033,6 +16054,9 @@ def handle_post(handler, parsed) -> bool:
 
     if parsed.path == "/api/jarvis-ii/pa-travel":
         return _handle_jarvis_ii_pa_travel(handler, body)
+
+    if parsed.path == "/api/jarvis-ii/pa-weather":
+        return _handle_jarvis_ii_pa_weather(handler, body)
 
     if parsed.path == "/api/jarvis-ii/pa-place-resolve":
         return _handle_jarvis_ii_pa_place_resolve(handler, body)
@@ -23411,6 +23435,9 @@ def _handle_chat_start(handler, body, diag=None):
                                     "trip_plan_view_model": ask_jarvis.get("trip_plan_view_model")
                                     if isinstance(ask_jarvis.get("trip_plan_view_model"), dict)
                                     else None,
+                                    "weather_briefing": ask_jarvis.get("weather_briefing")
+                                    if isinstance(ask_jarvis.get("weather_briefing"), dict)
+                                    else None,
                                     "_correlation_id": correlation_id,
                                     "_receipt": ask_jarvis.get("receipt"),
                                     "retrieval_receipt": ask_jarvis.get("retrieval_receipt")
@@ -24672,6 +24699,9 @@ def _handle_argus_sync_hard_bind(handler, s, objective: str):
         "trip_plan_view_model": ask_jarvis.get("trip_plan_view_model")
         if isinstance(ask_jarvis.get("trip_plan_view_model"), dict)
         else None,
+        "weather_briefing": ask_jarvis.get("weather_briefing")
+        if isinstance(ask_jarvis.get("weather_briefing"), dict)
+        else None,
         "_correlation_id": corr,
         "_receipt": ask_jarvis.get("receipt"),
         "retrieval_receipt": ask_jarvis.get("retrieval_receipt")
@@ -24785,6 +24815,7 @@ def _handle_argus_sync_hard_bind(handler, s, objective: str):
             "lodging_view_model": final_msg.get("lodging_view_model"),
             "recommendation_view_model": final_msg.get("recommendation_view_model"),
             "trip_plan_view_model": final_msg.get("trip_plan_view_model"),
+            "weather_briefing": final_msg.get("weather_briefing"),
             "evidence_footer": evidence_footer or None,
             "title": getattr(sess, "title", None),
             "error": ask_jarvis.get("error"),
@@ -24901,6 +24932,23 @@ def _handle_jarvis_ii_pa_travel(handler, body):
         return j(handler, {"ok": False, "error": str(exc)}, status=400)
     except Exception as exc:
         logger.exception("Jarvis II PA travel adapter failed")
+        return j(handler, {"ok": False, "error": type(exc).__name__}, status=502)
+
+
+def _handle_jarvis_ii_pa_weather(handler, body):
+    """Return a read-only destination forecast to the governed PA workflow."""
+    if not _jarvis_ii_authenticated(handler):
+        logger.warning("Jarvis II PA weather rejected auth")
+        return j(handler, {"ok": False, "error": "authenticated Biggy ingress required"}, status=401)
+    try:
+        from api.biggy_pa_sources import weather_snapshot
+
+        result = weather_snapshot(str(body.get("zip") or body.get("postal_code") or "32444"))
+        return j(handler, result, status=200 if result.get("ok") else 502)
+    except ValueError as exc:
+        return j(handler, {"ok": False, "error": str(exc)}, status=400)
+    except Exception as exc:
+        logger.exception("Jarvis II PA weather adapter failed")
         return j(handler, {"ok": False, "error": type(exc).__name__}, status=502)
 
 

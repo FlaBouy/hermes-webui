@@ -18,6 +18,23 @@ Successful n8n executions are retained for correlation autopsy. An empty
 webhook body is never blindly replayed: Biggy recovers the already-completed
 terminal result by correlation ID or takes the governed transport fallback.
 
+## Destination PA contract
+
+A travel destination is active short-term context, not a one-turn string. On
+the first destination request Argus resolves the route and prepares
+destination-local lodging, meals, entertainment, and fuel cards. A follow-up
+such as “What will the weather be there?” inherits that resolved destination
+and ZIP without asking the operator to repeat it.
+
+Forecast questions use the National Weather Service destination forecast and
+open the Weather card automatically. MyRadar remains a current-radar action;
+it is not treated as a long-range forecast source. A weather-only follow-up
+must not rebuild the map or re-run unrelated travel categories.
+
+The Biggy SYNC controls load their baseline and saved values from the local
+operator-settings service. Gain and lead changes are also mirrored in browser
+storage for immediate use, but browser storage is no longer the sole copy.
+
 ## Runtime isolation
 
 Executable RAG Python is local:
@@ -40,7 +57,8 @@ Run the independent black-box gate:
 ```
 
 It verifies repeated health, Smedley direct retrieval, Argus manual retrieval,
-the live PA map contract, and the Biggy-to-Argus adapter including spoken text.
+the live PA map contract, destination-ZIP forecast inheritance, rejection of
+unrelated tool reruns, and the Biggy-to-Argus adapter including spoken text.
 
 Run the third-party semantic contract gate:
 
@@ -90,6 +108,19 @@ without printing request bodies, tokens, or retrieved document text.
 - Repeated black-box suite: 14/14 passed.
 - Promptfoo semantic suite: 2/2 passed.
 - Focused Python suite: 198 passed.
+
+## 2026-08-28 destination follow-up checkpoint
+
+- Biggy base speech output: 0.30 to 0.42 (+40%).
+- Recovered SYNC baseline: 110% gain and +80 ms lead.
+- SYNC settings persist under `~/.config/argus/biggy-operator-settings.json`.
+- Destination forecast: National Weather Service, inherited stadium ZIP,
+  automatic Weather card, and no unrelated map rebuild.
+- Destination recommendations: lodging, meals, entertainment, and fuel all
+  search around the resolved destination.
+- Focused destination/SYNC test suite: 64/64 passed.
+- Live black-box suite: 12/12 passed, including direct PA and Biggy adapter
+  destination-weather cases.
 
 The physical glass remains the final UI authority, but glass is no longer the
 only diagnostic source: every accepted turn must now be explainable by its

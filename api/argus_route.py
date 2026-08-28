@@ -344,6 +344,9 @@ def try_argus_pa_core(
         "trip_plan_view_model": result.get("trip_plan_view_model")
         if isinstance(result.get("trip_plan_view_model"), dict)
         else None,
+        "weather_briefing": result.get("weather_briefing")
+        if isinstance(result.get("weather_briefing"), dict)
+        else None,
         "error": None if completed else str(result.get("status") or "pa_core_unverified"),
     }
     terminal_event(
