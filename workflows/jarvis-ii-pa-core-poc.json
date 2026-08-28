@@ -93,6 +93,19 @@
       },
       {
         "parameters": {
+          "jsCode": "const base=$json; const destination=base.map_view_model?.destination||base.destinationEvidence?.place||{}; const label=String(destination.label||base.answer?.destination||base.destination||''); const labelZips=[...label.matchAll(/\\b(\\d{5})(?:-\\d{4})?\\b/g)].map(match=>match[1]); const destinationZip=String(destination.postal_code||labelZips[labelZips.length-1]||'').trim(); const tools=Array.isArray(base.requestedTools)?[...base.requestedTools]:[]; const trip=tools.some(tool=>tool==='maps'||tool==='lodging_poi'); const wantsWeather=tools.includes('weather'); if(trip&&wantsWeather&&!destinationZip){const index=tools.indexOf('weather'); if(index>=0)tools.splice(index,1);} const missingNote=trip&&wantsWeather&&!destinationZip?' I could not verify a destination ZIP, so I did not substitute the home forecast.':''; return [{json:{...base,requestedTools:tools,weatherLocation:destinationZip||base.weatherLocation,spokenText:String(base.spokenText||'')+missingNote,auditChain:[...(Array.isArray(base.auditChain)?base.auditChain:[]),{stage:'destination_weather_context',status:destinationZip?'resolved':(trip&&wantsWeather?'unavailable':'not_required'),zip:destinationZip||null}]}}];"
+        },
+        "id": "argus-weather-prepare-after-travel",
+        "name": "Prepare Destination Weather",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3408,
+          320
+        ]
+      },
+      {
+        "parameters": {
           "conditions": {
             "options": {
               "caseSensitive": true,
@@ -1295,6 +1308,19 @@
         ]
       },
       {
+        "parameters": {
+          "jsCode": "const rendered=$json; const base=$('Prepare Destination Weather').first().json; const trip=Array.isArray(base.requestedTools)&&base.requestedTools.some(tool=>tool==='maps'||tool==='lodging_poi'); const briefing=rendered.weather_briefing&&typeof rendered.weather_briefing==='object'?{...rendered.weather_briefing}:null; const periods=Array.isArray(briefing?.forecast?.periods)?briefing.forecast.periods:[]; let requestedDate=String(base.time_min||'').slice(0,10); if(!requestedDate){const text=String(base.routingObjective||''); const match=text.match(/\\b(january|february|march|april|may|june|july|august|september|october|november|december)\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s*(\\d{4}))?/i); if(match){const months=['january','february','march','april','may','june','july','august','september','october','november','december']; const now=new Date(); const year=Number(match[3]||now.getUTCFullYear()); requestedDate=new Date(Date.UTC(year,months.indexOf(match[1].toLowerCase()),Number(match[2]))).toISOString().slice(0,10);}} const forecastDates=periods.map(period=>String(period?.date||'').slice(0,10)).filter(Boolean); const dateCovered=!requestedDate||forecastDates.includes(requestedDate); const dateNote=requestedDate&&!dateCovered?' The verified forecast for '+requestedDate+' is not available yet; the weather card shows the currently authorized destination outlook.':''; if(briefing){briefing.requested_date=requestedDate||null; briefing.requested_date_covered=dateCovered; briefing.spoken=String(briefing.spoken||'I loaded the destination forecast.')+dateNote;} const weatherSpeech=briefing?.spoken||String(rendered.spokenText||''); const spoken=trip?[String(base.spokenText||'').trim(),weatherSpeech].filter(Boolean).join(' '):weatherSpeech; const answer={...(rendered.answer||{})}; if(answer.weather)answer.weather={...answer.weather,requested_date:requestedDate||null,requested_date_covered:dateCovered}; return [{json:{...rendered,spokenText:spoken,weather_briefing:briefing,answer,auditChain:[...(Array.isArray(rendered.auditChain)?rendered.auditChain:[]),{stage:'weather_horizon',status:requestedDate?(dateCovered?'covered':'not_yet_available'):'not_requested',requested_date:requestedDate||null}]}}];"
+        },
+        "id": "argus-weather-finalize-combined",
+        "name": "Finalize Destination Weather",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1540,
+          500
+        ]
+      },
+      {
         "id": "pa_destination_official_present",
         "name": "Official Destination Source Present?",
         "type": "n8n-nodes-base.if",
@@ -1498,7 +1524,7 @@
           ],
           [
             {
-              "node": "Return PA Response",
+              "node": "Prepare Destination Weather",
               "type": "main",
               "index": 0
             }
@@ -1520,7 +1546,7 @@
         "main": [
           [
             {
-              "node": "Return PA Response",
+              "node": "Prepare Destination Weather",
               "type": "main",
               "index": 0
             }
@@ -1655,7 +1681,7 @@
           ],
           [
             {
-              "node": "Weather Tool Requested?",
+              "node": "Destination Evidence Required?",
               "type": "main",
               "index": 0
             }
@@ -1688,7 +1714,7 @@
         "main": [
           [
             {
-              "node": "Weather Tool Requested?",
+              "node": "Destination Evidence Required?",
               "type": "main",
               "index": 0
             }
@@ -1903,7 +1929,7 @@
           ],
           [
             {
-              "node": "Destination Evidence Required?",
+              "node": "Return PA Response",
               "type": "main",
               "index": 0
             }
@@ -1925,7 +1951,29 @@
         "main": [
           [
             {
-              "node": "Destination Evidence Required?",
+              "node": "Finalize Destination Weather",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Finalize Destination Weather": {
+        "main": [
+          [
+            {
+              "node": "Return PA Response",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Prepare Destination Weather": {
+        "main": [
+          [
+            {
+              "node": "Weather Tool Requested?",
               "type": "main",
               "index": 0
             }

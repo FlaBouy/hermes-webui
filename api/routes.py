@@ -24423,6 +24423,9 @@ def _argus_travel_followup_objective(session, message: str) -> str | None:
         if item.get("ask_jarvis_hard_bind") and label:
             prior = label
             prior_postal_code = str(destination.get("postal_code") or "").strip()
+            if not prior_postal_code:
+                legacy_postal_codes = re.findall(r"\b(\d{5})(?:-\d{4})?\b", label)
+                prior_postal_code = legacy_postal_codes[-1] if legacy_postal_codes else ""
             break
     if not prior:
         return None

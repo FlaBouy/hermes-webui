@@ -101,6 +101,8 @@ def test_argus_weather_followup_executes_destination_forecast_branch():
     nodes = {node["name"]: node for node in workflow["nodes"]}
     governed = nodes["Governed PA Response"]["parameters"]["jsCode"]
     rendered = nodes["Render Destination Forecast"]["parameters"]["jsCode"]
+    prepared = nodes["Prepare Destination Weather"]["parameters"]["jsCode"]
+    finalized = nodes["Finalize Destination Weather"]["parameters"]["jsCode"]
 
     assert "explicitWeatherZip" in governed
     assert "contextWeatherZip" in governed
@@ -116,6 +118,10 @@ def test_argus_weather_followup_executes_destination_forecast_branch():
     assert "Authorization" in str(nodes["Retrieve Destination Forecast"]["parameters"])
     assert "weather_briefing" in rendered
     assert "National Weather Service" in rendered
+    assert "destination.postal_code" in prepared
+    assert "did not substitute the home forecast" in prepared
+    assert "requested_date_covered" in finalized
+    assert "currently authorized destination outlook" in finalized
 
     calendar_read = nodes["Retrieve Calendar Evidence"]
     assert calendar_read["type"] == "n8n-nodes-base.httpRequest"
@@ -127,5 +133,40 @@ def test_argus_weather_followup_executes_destination_forecast_branch():
 
     calendar_false = workflow["connections"]["Calendar Tool Requested?"]["main"][1][0]["node"]
     calendar_merge = workflow["connections"]["Merge Calendar Evidence"]["main"][0][0]["node"]
-    assert calendar_false == "Weather Tool Requested?"
-    assert calendar_merge == "Weather Tool Requested?"
+    travel_false = workflow["connections"]["Travel Tool Requested?"]["main"][1][0]["node"]
+    travel_render = workflow["connections"]["Render Travel Evidence"]["main"][0][0]["node"]
+    weather_false = workflow["connections"]["Weather Tool Requested?"]["main"][1][0]["node"]
+    weather_render = workflow["connections"]["Render Destination Forecast"]["main"][0][0]["node"]
+    weather_finalize = workflow["connections"]["Finalize Destination Weather"]["main"][0][0]["node"]
+    assert calendar_false == "Destination Evidence Required?"
+    assert calendar_merge == "Destination Evidence Required?"
+    assert travel_false == "Prepare Destination Weather"
+    assert travel_render == "Prepare Destination Weather"
+    assert weather_false == "Return PA Response"
+    assert weather_render == "Finalize Destination Weather"
+    assert weather_finalize == "Return PA Response"
+
+
+def test_legacy_trip_followup_recovers_destination_zip_from_map_label():
+    from api.routes import _argus_travel_followup_objective
+
+    class Session:
+        messages = [
+            {
+                "role": "assistant",
+                "ask_jarvis_hard_bind": True,
+                "map_view_model": {
+                    "destination": {
+                        "label": "Mercedes-Benz Stadium, Atlanta, GA 30313",
+                    }
+                },
+            }
+        ]
+
+    objective = _argus_travel_followup_objective(
+        Session(),
+        "What will the weather look like for that game?",
+    )
+
+    assert objective is not None
+    assert "Destination ZIP is 30313" in objective
