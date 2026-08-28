@@ -298,6 +298,28 @@ def test_explicit_story_request_speaks_full_narrative():
     assert msgs[-1]["spoken_text"] == spoken
 
 
+def test_conversational_story_request_speaks_full_narrative():
+    """Natural follow-up wording must not silently fall back to the 700-char envelope."""
+    story = " ".join(
+        f"Paragraph sentence {index} keeps the complete foxhole story intact."
+        for index in range(1, 60)
+    )
+    msgs = [
+        {
+            "role": "user",
+            "content": "Hey Biggy, about telling me a story about a marine in a foxhole.",
+        },
+        {"role": "assistant", "content": story},
+    ]
+
+    spoken = docroute.attach_spoken_text_to_last_assistant(msgs)
+
+    assert spoken == story.rstrip(".")
+    assert "Paragraph sentence 59" in spoken
+    assert len(spoken) > docroute.GATEWAY_SPOKEN_MAX_CHARS
+    assert msgs[-1]["spoken_text"] == spoken
+
+
 def test_gateway_chat_writeback_attaches_spoken_text_not_spoken_reply():
     src = (ROOT / "api" / "gateway_chat.py").read_text(encoding="utf-8")
     assert "spoken_text_for_gateway_reply" in src

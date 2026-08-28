@@ -1381,7 +1381,7 @@ def attach_spoken_text_to_last_assistant(messages: object) -> str:
                 break
         full_narrative_requested = bool(
             re.search(
-                r"(?i)\b(?:tell\s+(?:me|us)\s+(?:a\s+)?story|"
+                r"(?i)\b(?:tell(?:ing)?\s+(?:me|us)\s+(?:a\s+)?story|"
                 r"tell\s+the\s+(?:whole|full)\s+story|expand|elaborate|"
                 r"go\s+longer|full\s+answer|speak\s+it\s+in\s+full)\b",
                 owner_request,

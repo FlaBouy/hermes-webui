@@ -85,6 +85,21 @@ def test_conversation_lane_clears_full_width_composer_overlay():
     assert "overflow:auto" in BRAND_CSS[BRAND_CSS.index(".biggy-argus-conversation-turns{"):BRAND_CSS.index(".biggy-argus-dialog{")]
 
 
+def test_conversation_lane_keeps_complete_assistant_text():
+    renderer = BRAND[BRAND.index("function renderArgusConversationLane"):BRAND.index("function installArgusConversationLane")]
+    assert "text: text.slice(0, 1400)" not in renderer
+    assert "result.push({ identity, pending, text, index })" in renderer
+
+
+def test_server_owned_speech_cannot_start_a_second_browser_reader():
+    policy = BRAND[BRAND.index("function installSmedleyAudioPolicy"):BRAND.index("function isBiggyInstance")]
+    assert "newestAssistant.ptt_owned_tts" in policy
+    assert "String(newestAssistant.tts_owner || '').trim()" in policy
+    ownership_guard = policy.index("newestAssistant.ptt_owned_tts")
+    browser_speech = policy.index("speakOnSmedley(raw")
+    assert ownership_guard < browser_speech
+
+
 def test_galaxy_canvas_remains_full_screen_while_home_camera_controls_framing():
     assert "const syncGalaxyViewportProfile = () =>" not in BRAND
     assert "iframe.style.top = `${profileTop}px`" not in BRAND

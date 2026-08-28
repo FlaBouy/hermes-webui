@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260828-destination-forecast-sync-32';
+  const BUILD_ID = '20260828-story-continuity-33';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -475,6 +475,21 @@
             // selection and can read the long display answer instead.
             return;
           }
+          // The synchronous PTT route has already queued this response on the
+          // room speaker.  Respect that ownership before inspecting the DOM;
+          // otherwise this wrapper starts a second, full browser-side reading
+          // while Austin is already speaking the server-owned envelope.
+          let newestAssistant = null;
+          for (let i = msgs.length - 1; i >= 0; i--) {
+            if (msgs[i] && msgs[i].role === 'assistant') {
+              newestAssistant = msgs[i];
+              break;
+            }
+          }
+          if (newestAssistant && (
+            newestAssistant.ptt_owned_tts
+            || String(newestAssistant.tts_owner || '').trim()
+          )) return;
           // Preserve the tablet's normal local auto-read behavior for ordinary
           // Biggy responses; only hard-bound Argus finals are server-owned.
           if (mobile) return prior.apply(this, arguments);
@@ -2290,7 +2305,10 @@
           && (message.ask_argus_hard_bind || message.ask_jarvis_hard_bind) && ackText) {
         result.push({ identity: { key: 'biggy', label: 'BIGGY' }, pending: false, text: ackText.slice(0, 1400), index: `${index}-ack` });
       }
-      result.push({ identity, pending, text: text.slice(0, 1400), index });
+      // The lane is independently scrollable.  Keep the complete response in
+      // the transcript so the displayed story and the spoken story cannot
+      // diverge merely because the answer crossed an arbitrary character cap.
+      result.push({ identity, pending, text, index });
       return result;
     }).filter((turn) => turn.text);
     const signature = JSON.stringify(turns.map((turn) => [turn.identity.key, turn.pending, turn.text]));
