@@ -45,6 +45,7 @@ def recent_context(session_id: str | None) -> list[dict[str, Any]]:
                 "status": turn["status"],
                 "summary": turn["summary"],
                 "tools": turn["tools"],
+                "context": turn.get("context") or {},
             }
             for turn in kept
         ]
@@ -57,6 +58,7 @@ def record_turn(
     status: str,
     spoken_summary: str,
     tools: list[Any] | None,
+    context: dict[str, Any] | None = None,
 ) -> None:
     """Keep one bounded, non-durable PA turn for same-chat follow-ups only."""
     key = _safe_session_id(session_id)
@@ -64,12 +66,20 @@ def record_turn(
         return
     allowed_tools = {"rag_core", "weather", "maps", "lodging_poi", "calendar_read", "gmail_read", "research"}
     safe_tools = [str(tool) for tool in (tools or []) if str(tool) in allowed_tools][:7]
+    raw_trip = context.get("trip") if isinstance(context, dict) and isinstance(context.get("trip"), dict) else {}
+    safe_trip = {
+        "destination": str(raw_trip.get("destination") or "").strip()[:240],
+        "postal_code": str(raw_trip.get("postal_code") or "").strip()[:10],
+        "event_date": str(raw_trip.get("event_date") or "").strip()[:40],
+    }
+    safe_trip = {key: value for key, value in safe_trip.items() if value}
     turn = {
         "at": time(),
         "objective": str(objective or "").strip()[:500],
         "status": str(status or "unknown").strip()[:80],
         "summary": str(spoken_summary or "").strip()[:1000],
         "tools": safe_tools,
+        "context": {"trip": safe_trip} if safe_trip else {},
     }
     with _LOCK:
         recent_context(key)

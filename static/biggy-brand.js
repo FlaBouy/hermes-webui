@@ -1286,9 +1286,10 @@
       } else if (ours && phase === 'processing') {
         stopArgusSpeechPulse();
         setArgusOrbState('thinking', 'gathering information');
-      } else if (argusSpeechPulseSignature) {
-        stopArgusSpeechPulse();
-        if (!argusOrbFlight) pollArgusHealth().catch(() => {});
+      } else if (!argusSpeechPulseSignature && !argusOrbFlight) {
+        // A server-owned Alistar utterance is governed by the real audio
+        // envelope. An idle pedal/status tick must not cancel that pulse.
+        pollArgusHealth().catch(() => {});
       }
       applyAudioRouteStatus(status);
     }

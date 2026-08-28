@@ -482,6 +482,34 @@ def test_short_term_pa_context_is_bounded_and_session_scoped():
     assert recent_context("another-biggy-chat") == []
 
 
+def test_short_term_pa_context_retains_bounded_destination_zip():
+    from api.jarvis_pa_conversation_memory import record_turn, recent_context
+
+    session_id = "test-trip-destination-context"
+    record_turn(
+        session_id,
+        objective="Map the Auburn game.",
+        status="COMPLETED",
+        spoken_summary="Route ready.",
+        tools=["maps", "lodging_poi"],
+        context={
+            "trip": {
+                "destination": "Mercedes-Benz Stadium, Atlanta, GA 30313",
+                "postal_code": "30313",
+                "event_date": "2026-09-05T00:00:00Z",
+                "ignored": "must not survive",
+            }
+        },
+    )
+
+    trip = recent_context(session_id)[-1]["context"]["trip"]
+    assert trip == {
+        "destination": "Mercedes-Benz Stadium, Atlanta, GA 30313",
+        "postal_code": "30313",
+        "event_date": "2026-09-05T00:00:00Z",
+    }
+
+
 def test_pa_adapter_returns_destination_weather_briefing(monkeypatch):
     import api.argus_route as ajr
     from api import jarvis_pa_conversation_memory as conversation_memory

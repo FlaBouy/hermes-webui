@@ -88,6 +88,8 @@ def test_argus_orb_status_tracks_server_owned_alistar_playback():
     assert "pollArgusSpeechMeter" in brand
     assert "requestAnimationFrame(renderArgusSpeechFrame)" in brand
     assert "setInterval(() => { pollArgusSpeechMeter().catch(() => {}); }, 400)" in brand
+    assert "An idle pedal/status tick must not cancel that pulse" in brand
+    assert "else if (argusSpeechPulseSignature)" not in brand
     assert "argusSpeechSyncGain" in brand
     assert "argusSpeechSyncLead" in brand
     assert "ARGUS_SYNC_STORAGE_KEY" in brand

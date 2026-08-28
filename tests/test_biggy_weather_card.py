@@ -108,12 +108,22 @@ def test_argus_weather_followup_executes_destination_forecast_branch():
     assert "routingObjective" in governed
     assert "MyRadar is ready" not in governed
     assert "weatherLocation" in governed
+    assert "explicitWeatherZips" in governed
+    assert "explicitWeatherZips[explicitWeatherZips.length-1]" in governed
     assert "Weather Tool Requested?" in nodes
     assert "Retrieve Destination Forecast" in nodes
     assert "/api/jarvis-ii/pa-weather" in nodes["Retrieve Destination Forecast"]["parameters"]["url"]
     assert "Authorization" in str(nodes["Retrieve Destination Forecast"]["parameters"])
     assert "weather_briefing" in rendered
     assert "National Weather Service" in rendered
+
+    calendar_read = nodes["Retrieve Calendar Evidence"]
+    assert calendar_read["type"] == "n8n-nodes-base.httpRequest"
+    assert calendar_read["parameters"]["url"].endswith("/api/jarvis-ii/pa-calendar")
+    assert "neverError" in str(calendar_read["parameters"])
+    calendar_window = nodes["Prepare Calendar Window"]["parameters"]["jsCode"]
+    assert "base.routingObjective||base.destinationQuery||base.destination" in calendar_window
+    assert "routingObjective,origin,destination" in governed
 
     calendar_false = workflow["connections"]["Calendar Tool Requested?"]["main"][1][0]["node"]
     calendar_merge = workflow["connections"]["Merge Calendar Evidence"]["main"][0][0]["node"]

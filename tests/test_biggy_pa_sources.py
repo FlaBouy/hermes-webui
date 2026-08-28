@@ -54,6 +54,43 @@ def test_google_source_routes_include_guarded_write_contracts():
         assert path in routes
 
 
+def test_argus_calendar_adapter_reads_every_enabled_calendar_without_aborting(monkeypatch):
+    from api import routes
+
+    calls = []
+
+    def fake_snapshot(start, end, calendar_ids):
+        calls.append((start, end, list(calendar_ids)))
+        return {
+            "connected": True,
+            "range": {"start": start, "end": end},
+            "calendar_sources": [
+                {"id": "primary", "summary": "Primary", "selected": True},
+                {"id": "work@example.com", "summary": "Work", "selected": True},
+                {"id": "hidden@example.com", "summary": "Hidden", "selected": False},
+            ],
+            "events": [
+                {"id": "event-1", "calendar_id": "work@example.com", "summary": "Existing appointment"}
+            ] if "work@example.com" in calendar_ids else [],
+            "error": "",
+        }
+
+    monkeypatch.setattr(routes, "_jarvis_ii_authenticated", lambda _handler: True)
+    monkeypatch.setattr(biggy_pa_sources, "calendar_snapshot", fake_snapshot)
+    monkeypatch.setattr(routes, "j", lambda _handler, payload, status=200: (status, payload))
+
+    status, payload = routes._handle_jarvis_ii_pa_calendar(
+        SimpleNamespace(headers={}),
+        {"time_min": "2026-09-05T00:00:00Z", "time_max": "2026-09-06T00:00:00Z"},
+    )
+
+    assert status == 200
+    assert payload["ok"] is True
+    assert payload["outcome"] == "conflicts"
+    assert payload["event_count"] == 1
+    assert calls[-1][2] == ["primary", "work@example.com"]
+
+
 def _write_token(tmp_path: Path) -> None:
     (tmp_path / "google_token.json").write_text(
         '{"scopes":["https://www.googleapis.com/auth/gmail.readonly",'

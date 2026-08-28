@@ -16058,6 +16058,9 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/jarvis-ii/pa-weather":
         return _handle_jarvis_ii_pa_weather(handler, body)
 
+    if parsed.path == "/api/jarvis-ii/pa-calendar":
+        return _handle_jarvis_ii_pa_calendar(handler, body)
+
     if parsed.path == "/api/jarvis-ii/pa-place-resolve":
         return _handle_jarvis_ii_pa_place_resolve(handler, body)
 
@@ -23438,6 +23441,9 @@ def _handle_chat_start(handler, body, diag=None):
                                     "weather_briefing": ask_jarvis.get("weather_briefing")
                                     if isinstance(ask_jarvis.get("weather_briefing"), dict)
                                     else None,
+                                    "calendar_evidence": ask_jarvis.get("calendar_evidence")
+                                    if isinstance(ask_jarvis.get("calendar_evidence"), dict)
+                                    else None,
                                     "_correlation_id": correlation_id,
                                     "_receipt": ask_jarvis.get("receipt"),
                                     "retrieval_receipt": ask_jarvis.get("retrieval_receipt")
@@ -23495,7 +23501,7 @@ def _handle_chat_start(handler, body, diag=None):
                                     logger.exception("ask_jarvis jarvis_final_ready timing failed")
 
                                 ack_gate = wait_ack_playback_complete(
-                                    correlation_id, timeout_s=120.0
+                                    correlation_id, timeout_s=8.0
                                 )
                                 t_release = time.time()
                                 ack_at = ack_gate.get("ack_complete_at")
@@ -24407,6 +24413,7 @@ def _argus_travel_followup_objective(session, message: str) -> str | None:
     ):
         return None
     prior = None
+    prior_postal_code = ""
     for item in reversed(list(getattr(session, "messages", None) or [])):
         if not isinstance(item, dict) or item.get("role") != "assistant":
             continue
@@ -24415,6 +24422,7 @@ def _argus_travel_followup_objective(session, message: str) -> str | None:
         label = str(destination.get("label") or "").strip() if isinstance(destination, dict) else ""
         if item.get("ask_jarvis_hard_bind") and label:
             prior = label
+            prior_postal_code = str(destination.get("postal_code") or "").strip()
             break
     if not prior:
         return None
@@ -24458,10 +24466,12 @@ def _argus_travel_followup_objective(session, message: str) -> str | None:
                 date_context = match.group(1)
                 break
     suffix = f" The relevant event date from this conversation is {date_context}." if date_context else ""
+    postal_context = f" Destination ZIP is {prior_postal_code}." if prior_postal_code else ""
     return (
         "Ask Argus: Continue the active A.R.G.U.S. travel task using the "
         "owner-confirmed destination exactly as " + prior + ". "
-        "Do not replace that destination with an event phrase or re-resolve it "
+        + postal_context
+        + " Do not replace that destination with an event phrase or re-resolve it "
         "to a different venue. Owner request: " + text + "."
         + suffix
         + " Complete each requested route, lodging, meal, fuel, and weather "
@@ -24702,6 +24712,9 @@ def _handle_argus_sync_hard_bind(handler, s, objective: str):
         "weather_briefing": ask_jarvis.get("weather_briefing")
         if isinstance(ask_jarvis.get("weather_briefing"), dict)
         else None,
+        "calendar_evidence": ask_jarvis.get("calendar_evidence")
+        if isinstance(ask_jarvis.get("calendar_evidence"), dict)
+        else None,
         "_correlation_id": corr,
         "_receipt": ask_jarvis.get("receipt"),
         "retrieval_receipt": ask_jarvis.get("retrieval_receipt")
@@ -24716,7 +24729,7 @@ def _handle_argus_sync_hard_bind(handler, s, objective: str):
         "_tts_ack_server_queued": bool(tts_ack.get("queued")),
     }
 
-    wait_ack_playback_complete(corr, timeout_s=120.0)
+    wait_ack_playback_complete(corr, timeout_s=8.0)
 
     # Replace pending assistant in-place before final TTS wait so GUI can leave
     # "Working with A.R.G.U.S.…" while Alistar speaks.
@@ -24768,16 +24781,14 @@ def _handle_argus_sync_hard_bind(handler, s, objective: str):
         except Exception:
             logger.exception("ask_jarvis sync final JM TTS failed")
             tts_final = {"queued": False, "reason": "exception"}
-    # Pedal skips local TTS when tts_server_handled — must block until JM completes
-    # or the owner hears Austin ack then silence while HTTP returns early.
-    final_gate = {"ok": False, "skipped": True}
-    if tts_final.get("queued"):
-        final_gate = wait_final_playback_complete(corr, timeout_s=180.0)
-        if final_gate.get("timed_out"):
-            logger.warning(
-                "ask_jarvis sync final TTS wait timed out corr=%s; returning anyway",
-                corr,
-            )
+    # Speech is server-owned, but the HTTP turn must not wait for an entire
+    # audio clip. The queued worker drives the meter and completion signal
+    # independently while the transcript and cards return immediately.
+    final_gate = {
+        "ok": False,
+        "queued": bool(tts_final.get("queued")),
+        "pending": bool(tts_final.get("queued")),
+    }
     try:
         # Stamp TTS queue result on the persisted final message when possible.
         for idx_m in range(len(sess.messages) - 1, -1, -1):
@@ -24816,6 +24827,7 @@ def _handle_argus_sync_hard_bind(handler, s, objective: str):
             "recommendation_view_model": final_msg.get("recommendation_view_model"),
             "trip_plan_view_model": final_msg.get("trip_plan_view_model"),
             "weather_briefing": final_msg.get("weather_briefing"),
+            "calendar_evidence": final_msg.get("calendar_evidence"),
             "evidence_footer": evidence_footer or None,
             "title": getattr(sess, "title", None),
             "error": ask_jarvis.get("error"),
@@ -24950,6 +24962,81 @@ def _handle_jarvis_ii_pa_weather(handler, body):
     except Exception as exc:
         logger.exception("Jarvis II PA weather adapter failed")
         return j(handler, {"ok": False, "error": type(exc).__name__}, status=502)
+
+
+def _handle_jarvis_ii_pa_calendar(handler, body):
+    """Return bounded, read-only calendar evidence without aborting a trip.
+
+    The production Biggy profile already owns the working Google connection.
+    Keep n8n out of the OAuth chain and normalize all calendar failures into a
+    usable evidence result so maps and destination recommendations can still
+    complete independently.
+    """
+    if not _jarvis_ii_authenticated(handler):
+        logger.warning("Jarvis II PA calendar rejected auth")
+        return j(handler, {"ok": False, "error": "authenticated Biggy ingress required"}, status=401)
+
+    start = str(body.get("time_min") or body.get("start") or "").strip()
+    end = str(body.get("time_max") or body.get("end") or "").strip()
+    try:
+        from api.biggy_pa_sources import calendar_snapshot
+
+        discovery = calendar_snapshot(start, end, ["primary"])
+        sources = discovery.get("calendar_sources") if isinstance(discovery.get("calendar_sources"), list) else []
+        selected_ids = [
+            str(source.get("id") or "").strip()
+            for source in sources
+            if isinstance(source, dict) and source.get("selected", True) and str(source.get("id") or "").strip()
+        ][:12]
+        if "primary" not in selected_ids:
+            selected_ids.insert(0, "primary")
+        selected_ids = list(dict.fromkeys(selected_ids))[:12]
+        snapshot = calendar_snapshot(start, end, selected_ids)
+        events = snapshot.get("events") if isinstance(snapshot.get("events"), list) else []
+        connected = bool(snapshot.get("connected"))
+        error = str(snapshot.get("error") or snapshot.get("connection_error") or "").strip()
+        ok = connected and not error
+        outcome = "conflicts" if ok and events else ("clear" if ok else "unavailable")
+        if outcome == "conflicts":
+            spoken = f"I found {len(events)} calendar event{'s' if len(events) != 1 else ''} in that date window."
+        elif outcome == "clear":
+            spoken = "Your enabled calendars are clear in that date window."
+        else:
+            spoken = "I could not verify your calendars for that window, so I left the trip results intact."
+        return j(
+            handler,
+            {
+                "ok": ok,
+                "schema": "argus.pa.calendar_evidence.v1",
+                "outcome": outcome,
+                "window": snapshot.get("range") or discovery.get("range"),
+                "event_count": len(events),
+                "events": events[:250],
+                "spoken": spoken,
+                "calendar_sources": snapshot.get("calendar_sources") or sources,
+                "selected_calendar_ids": selected_ids,
+                "error": error or None,
+            },
+            status=200,
+        )
+    except Exception as exc:
+        logger.exception("Jarvis II PA calendar adapter failed")
+        return j(
+            handler,
+            {
+                "ok": False,
+                "schema": "argus.pa.calendar_evidence.v1",
+                "outcome": "unavailable",
+                "window": {"start": start, "end": end},
+                "event_count": 0,
+                "events": [],
+                "spoken": "I could not verify your calendars for that window, so I left the trip results intact.",
+                "calendar_sources": [],
+                "selected_calendar_ids": [],
+                "error": type(exc).__name__,
+            },
+            status=200,
+        )
 
 
 def _handle_jarvis_ii_pa_place_resolve(handler, body):

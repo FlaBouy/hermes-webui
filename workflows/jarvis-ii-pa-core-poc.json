@@ -303,7 +303,7 @@
       },
       {
         "parameters": {
-          "jsCode": "const uuid=()=>('xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx').replace(/[xy]/g,c=>{const r=Math.floor(Math.random()*16);return (c==='x'?r:((r&3)|8)).toString(16)});\nconst req=$('Validate PA Request').first().json; const body=$json.body||{}; let plan={}; try{plan=JSON.parse(body.choices?.[0]?.message?.content||'{}')}catch(e){}\nconst rawTools=Array.isArray(plan.required_tools)?plan.required_tools:[]; const canonical=x=>{const t=String(x||'').toLowerCase(); if(/firecrawl|public_web_research|\\bresearch\\b/.test(t))return 'research'; if(/gmail/.test(t))return 'gmail_read'; if(/calendar/.test(t))return 'calendar_read'; if(/weather/.test(t))return 'weather'; if(/lodging/.test(t))return 'lodging_poi'; if(/map/.test(t))return 'maps'; if(/rag/.test(t))return 'rag_core'; return String(x||'')};\nconst requested=rawTools.map(canonical).filter(x=>['rag_core','weather','maps','lodging_poi','calendar_read','gmail_read','research'].includes(String(x))); const objective=String(req.objective||''); const ownerRequestMatch=objective.match(/Owner request:\\s*([\\s\\S]*?)(?:[.!?]\\s+(?:The relevant event date|Complete\\b|Weather must use|Return only)|$)/i); const routingObjective=String(ownerRequestMatch?.[1]||objective).trim(); if(routingObjective!==objective)requested.splice(0,requested.length); const shortTermTurns=Array.isArray(req.conversationContext)?req.conversationContext.slice(-10):[]; const followUp=/^(?:yes|yeah|yep|please|selection\\s*\\d+|option\\s*\\d+)\\b|\\b(?:dig\\s+deeper|pull\\s+(?:that|the)\\s+(?:figure|page|manual|schematic)|previous\\s+(?:manual|figure|page|schematic)|take\\s+a\\s+look)\\b/i.test(objective.trim()); const priorRagTurn=followUp?[...shortTermTurns].reverse().find(turn=>turn&&Array.isArray(turn.tools)&&turn.tools.includes('rag_core')&&String(turn.objective||'').trim()):null; const recoveredTarget=priorRagTurn?String(priorRagTurn.objective).trim().slice(0,500):''; const effectiveRagObjective=recoveredTarget?(recoveredTarget+' Follow-up request: '+objective).slice(0,700):objective;\nconst ragRequested=requested.includes('rag_core')||/\\b(schematic|wiring|manual|datasheet|part\\s*(number|no\\.?|#)|1756[-\\s]?[a-z0-9]+|honeywell|allen[-\\s]?bradley|tdc3000|control(edge|logix))\\b/i.test(routingObjective); if(ragRequested&&!requested.includes('rag_core'))requested.push('rag_core');\nconst tripRequested=requested.includes('maps')||requested.includes('lodging_poi')||/\\b(route|drive|trip|travel|lodging|hotel|fuel|gas|restaurant|eat|dining|meal|entertainment|museum|cinema|theatre|venue|plant\\s+site|attraction|sight)\\b/i.test(routingObjective); if(tripRequested&&!requested.some(x=>x==='maps'||x==='lodging_poi'))requested.push('maps','lodging_poi');\nconst calendarRequested=requested.includes('calendar_read')||/\\b(calendar|schedule|conflict|availability)\\b/i.test(routingObjective); if(calendarRequested&&!requested.includes('calendar_read'))requested.push('calendar_read'); const weatherRequested=requested.includes('weather')||/\\b(weather|forecast|radar|myradar|storm|wildfire|hurricane|tornado)\\b/i.test(routingObjective); if(weatherRequested&&!requested.includes('weather'))requested.push('weather'); const radarRequested=/\\b(?:radar|myradar)\\b/i.test(routingObjective); const explicitWeatherZip=(objective.match(/\\b(\\d{5})(?:-\\d{4})?\\b/)||[])[1]||''; const contextWeatherZip=[...shortTermTurns].reverse().map(turn=>{const source=String((turn&&turn.context&&turn.context.trip&&turn.context.trip.postal_code)||turn?.summary||turn?.objective||''); return (source.match(/\\b(\\d{5})(?:-\\d{4})?\\b/)||[])[1]||''}).find(Boolean)||''; const weatherLocation=explicitWeatherZip||contextWeatherZip||'32444'; const researchRequested=requested.includes('research')||/\\b(research|verify|source lookup)\\b/i.test(routingObjective); const mailRequested=requested.includes('gmail_read')||/\\b(email|emails|inbox|mail|message search)\\b/i.test(routingObjective);\nconst eventDestination=tripRequested&&/\\b(?:game|match|vs\\.?|concert|festival|race|tournament)\\b/i.test(routingObjective); const explicitOrigin=/\\b(?:from|leaving\\s+from|starting\\s+(?:from|in|at))\\s+[^,.!?]+/i.test(routingObjective); const origin=tripRequested?(explicitOrigin?String(plan.origin||'').trim()||'Lynn Haven, Florida':'Lynn Haven, Florida'):''; const plannedDestination=String(plan.destination||'').trim(); const destination=ragRequested?effectiveRagObjective:(eventDestination?'':plannedDestination); const destinationQuery=tripRequested?(eventDestination?routingObjective:(plannedDestination||routingObjective)):'';\nconst memoryAction=String(plan.memory_action||'read_none'); const memoryWrite=memoryAction.includes('write')||/\\b(remember|store|save|retain|lasting preference|durable memory)\\b/i.test(objective); const operationId=uuid(); const status=memoryWrite?'MEMORY_WRITE_REQUIRES_OWNER_POLICY':researchRequested?'RESEARCH_EVIDENCE_REQUIRED':(weatherRequested||calendarRequested||mailRequested||tripRequested)?'TOOL_PENDING':'PLANNED';\nconst spoken=memoryWrite?'Durable memory is read-only until you approve its retention and write policy.':tripRequested?'I am verifying the destination and checking the approved Mapbox travel sources now.':weatherRequested?(radarRequested?'I am opening the current radar source for the selected location.':'I am loading the destination forecast for ZIP '+weatherLocation+' now.'):calendarRequested?'I am checking your calendar for the requested date.':String(plan.spoken_summary||'I have a plan ready.'); const plannerPath=String($json.plannerPath||'local_120b');\nreturn [{json:{schemaVersion:1,correlationId:req.correlationId,operationId,status,intent:String(plan.intent||'unknown'),origin,destination,destinationQuery,weatherLocation,radarRequested,destinationResearchRequired:eventDestination,requestedTools:requested,evidenceRequired:Boolean(plan.evidence_required),requiresApproval:Boolean(plan.requires_approval)||memoryWrite,memory:{action:memoryAction,writeAllowed:false},spokenText:spoken,answer:{plan,evidence:null,notice:'Tool results, if any, are assembled separately from the planner.'},citations:[],auditChain:[...req.auditChain,{stage:'short_term_context',status:recoveredTarget?'target_recovered':'not_used',turns:shortTermTurns.length},{stage:'pa_plan',status:'completed',path:plannerPath,model:plannerPath==='local_120b'?'openai/gpt-oss-120b':'deterministic'},{stage:'policy',status:'enforced'}]}}];"
+          "jsCode": "const uuid=()=>('xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx').replace(/[xy]/g,c=>{const r=Math.floor(Math.random()*16);return (c==='x'?r:((r&3)|8)).toString(16)});\nconst req=$('Validate PA Request').first().json; const body=$json.body||{}; let plan={}; try{plan=JSON.parse(body.choices?.[0]?.message?.content||'{}')}catch(e){}\nconst rawTools=Array.isArray(plan.required_tools)?plan.required_tools:[]; const canonical=x=>{const t=String(x||'').toLowerCase(); if(/firecrawl|public_web_research|\\bresearch\\b/.test(t))return 'research'; if(/gmail/.test(t))return 'gmail_read'; if(/calendar/.test(t))return 'calendar_read'; if(/weather/.test(t))return 'weather'; if(/lodging/.test(t))return 'lodging_poi'; if(/map/.test(t))return 'maps'; if(/rag/.test(t))return 'rag_core'; return String(x||'')};\nconst requested=rawTools.map(canonical).filter(x=>['rag_core','weather','maps','lodging_poi','calendar_read','gmail_read','research'].includes(String(x))); const objective=String(req.objective||''); const ownerRequestMatch=objective.match(/Owner request:\\s*([\\s\\S]*?)(?:[.!?]\\s+(?:The relevant event date|Complete\\b|Weather must use|Return only)|$)/i); const routingObjective=String(ownerRequestMatch?.[1]||objective).trim(); if(routingObjective!==objective)requested.splice(0,requested.length); const shortTermTurns=Array.isArray(req.conversationContext)?req.conversationContext.slice(-10):[]; const followUp=/^(?:yes|yeah|yep|please|selection\\s*\\d+|option\\s*\\d+)\\b|\\b(?:dig\\s+deeper|pull\\s+(?:that|the)\\s+(?:figure|page|manual|schematic)|previous\\s+(?:manual|figure|page|schematic)|take\\s+a\\s+look)\\b/i.test(objective.trim()); const priorRagTurn=followUp?[...shortTermTurns].reverse().find(turn=>turn&&Array.isArray(turn.tools)&&turn.tools.includes('rag_core')&&String(turn.objective||'').trim()):null; const recoveredTarget=priorRagTurn?String(priorRagTurn.objective).trim().slice(0,500):''; const effectiveRagObjective=recoveredTarget?(recoveredTarget+' Follow-up request: '+objective).slice(0,700):objective;\nconst ragRequested=requested.includes('rag_core')||/\\b(schematic|wiring|manual|datasheet|part\\s*(number|no\\.?|#)|1756[-\\s]?[a-z0-9]+|honeywell|allen[-\\s]?bradley|tdc3000|control(edge|logix))\\b/i.test(routingObjective); if(ragRequested&&!requested.includes('rag_core'))requested.push('rag_core');\nconst tripRequested=requested.includes('maps')||requested.includes('lodging_poi')||/\\b(route|drive|trip|travel|lodging|hotel|fuel|gas|restaurant|eat|dining|meal|entertainment|museum|cinema|theatre|venue|plant\\s+site|attraction|sight)\\b/i.test(routingObjective); if(tripRequested&&!requested.some(x=>x==='maps'||x==='lodging_poi'))requested.push('maps','lodging_poi');\nconst calendarRequested=requested.includes('calendar_read')||/\\b(calendar|schedule|conflict|availability)\\b/i.test(routingObjective); if(calendarRequested&&!requested.includes('calendar_read'))requested.push('calendar_read'); const weatherRequested=requested.includes('weather')||/\\b(weather|forecast|radar|myradar|storm|wildfire|hurricane|tornado)\\b/i.test(routingObjective); if(weatherRequested&&!requested.includes('weather'))requested.push('weather'); const radarRequested=/\\b(?:radar|myradar)\\b/i.test(routingObjective); const explicitWeatherZips=[...objective.matchAll(/\\b(\\d{5})(?:-\\d{4})?\\b/g)].map(match=>match[1]); const explicitWeatherZip=explicitWeatherZips[explicitWeatherZips.length-1]||''; const contextWeatherZip=[...shortTermTurns].reverse().map(turn=>{const structured=String(turn&&turn.context&&turn.context.trip&&turn.context.trip.postal_code||''); if(structured)return structured; const source=String(turn?.summary||turn?.objective||''); const matches=[...source.matchAll(/\\b(\\d{5})(?:-\\d{4})?\\b/g)]; return matches.length?matches[matches.length-1][1]:''}).find(Boolean)||''; const weatherLocation=explicitWeatherZip||contextWeatherZip||'32444'; const researchRequested=requested.includes('research')||/\\b(research|verify|source lookup)\\b/i.test(routingObjective); const mailRequested=requested.includes('gmail_read')||/\\b(email|emails|inbox|mail|message search)\\b/i.test(routingObjective);\nconst eventDestination=tripRequested&&/\\b(?:game|match|vs\\.?|concert|festival|race|tournament)\\b/i.test(routingObjective); const explicitOrigin=/\\b(?:from|leaving\\s+from|starting\\s+(?:from|in|at))\\s+[^,.!?]+/i.test(routingObjective); const origin=tripRequested?(explicitOrigin?String(plan.origin||'').trim()||'Lynn Haven, Florida':'Lynn Haven, Florida'):''; const plannedDestination=String(plan.destination||'').trim(); const destination=ragRequested?effectiveRagObjective:(eventDestination?'':plannedDestination); const destinationQuery=tripRequested?(eventDestination?routingObjective:(plannedDestination||routingObjective)):'';\nconst memoryAction=String(plan.memory_action||'read_none'); const memoryWrite=memoryAction.includes('write')||/\\b(remember|store|save|retain|lasting preference|durable memory)\\b/i.test(objective); const operationId=uuid(); const status=memoryWrite?'MEMORY_WRITE_REQUIRES_OWNER_POLICY':researchRequested?'RESEARCH_EVIDENCE_REQUIRED':(weatherRequested||calendarRequested||mailRequested||tripRequested)?'TOOL_PENDING':'PLANNED';\nconst spoken=memoryWrite?'Durable memory is read-only until you approve its retention and write policy.':tripRequested?'I am verifying the destination and checking the approved Mapbox travel sources now.':weatherRequested?(radarRequested?'I am opening the current radar source for the selected location.':'I am loading the destination forecast for ZIP '+weatherLocation+' now.'):calendarRequested?'I am checking your calendar for the requested date.':String(plan.spoken_summary||'I have a plan ready.'); const plannerPath=String($json.plannerPath||'local_120b');\nreturn [{json:{schemaVersion:1,correlationId:req.correlationId,operationId,status,intent:String(plan.intent||'unknown'),routingObjective,origin,destination,destinationQuery,weatherLocation,radarRequested,destinationResearchRequired:eventDestination,requestedTools:requested,evidenceRequired:Boolean(plan.evidence_required),requiresApproval:Boolean(plan.requires_approval)||memoryWrite,memory:{action:memoryAction,writeAllowed:false},spokenText:spoken,answer:{plan,evidence:null,notice:'Tool results, if any, are assembled separately from the planner.'},citations:[],auditChain:[...req.auditChain,{stage:'short_term_context',status:recoveredTarget?'target_recovered':'not_used',turns:shortTermTurns.length},{stage:'pa_plan',status:'completed',path:plannerPath,model:plannerPath==='local_120b'?'openai/gpt-oss-120b':'deterministic'},{stage:'policy',status:'enforced'}]}}];"
         },
         "id": "pa_6",
         "name": "Governed PA Response",
@@ -767,24 +767,46 @@
           80
         ],
         "parameters": {
-          "jsCode": "const base=$json; const objective=String(base.destination||''); const month=objective.match(/\\b(january|february|march|april|may|june|july|august|september|october|november|december)\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s*(\\d{4}))?/i); let start=new Date(); if(month){const names=['january','february','march','april','may','june','july','august','september','october','november','december']; const year=Number(month[3]||start.getFullYear()); start=new Date(Date.UTC(year,names.indexOf(month[1].toLowerCase()),Number(month[2]),0,0,0));} else {start=new Date(Date.UTC(start.getUTCFullYear(),start.getUTCMonth(),start.getUTCDate(),0,0,0));} const end=new Date(start.getTime()+24*60*60*1000); return [{json:{...base,time_min:start.toISOString(),time_max:end.toISOString(),max_results:10}}];"
+          "jsCode": "const base=$json; const objective=String(base.routingObjective||base.destinationQuery||base.destination||''); const month=objective.match(/\\b(january|february|march|april|may|june|july|august|september|october|november|december)\\s+(\\d{1,2})(?:st|nd|rd|th)?(?:,?\\s*(\\d{4}))?/i); let start=new Date(); if(month){const names=['january','february','march','april','may','june','july','august','september','october','november','december']; const year=Number(month[3]||start.getFullYear()); start=new Date(Date.UTC(year,names.indexOf(month[1].toLowerCase()),Number(month[2]),0,0,0));} else {start=new Date(Date.UTC(start.getUTCFullYear(),start.getUTCMonth(),start.getUTCDate(),0,0,0));} const end=new Date(start.getTime()+24*60*60*1000); return [{json:{...base,time_min:start.toISOString(),time_max:end.toISOString(),max_results:10}}];"
         }
       },
       {
         "id": "pa_calendar_read",
         "name": "Retrieve Calendar Evidence",
-        "type": "n8n-nodes-base.executeWorkflow",
-        "typeVersion": 1,
+        "type": "n8n-nodes-base.httpRequest",
+        "typeVersion": 4.2,
         "position": [
           2208,
           80
         ],
         "parameters": {
-          "operation": "call_workflow",
-          "source": "database",
-          "workflowId": "pPRdrWBRJCIhga7g",
-          "mode": "each",
-          "options": {}
+          "method": "POST",
+          "url": "http://host.docker.internal:8790/api/jarvis-ii/pa-calendar",
+          "sendHeaders": true,
+          "headerParameters": {
+            "parameters": [
+              {
+                "name": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "name": "Authorization",
+                "value": "={{ 'Bearer ' + $env.GPT_BIGGY_PROPOSE_TOKEN }}"
+              }
+            ]
+          },
+          "sendBody": true,
+          "specifyBody": "json",
+          "jsonBody": "={{ JSON.stringify({time_min:$json.time_min,time_max:$json.time_max}) }}",
+          "options": {
+            "response": {
+              "response": {
+                "fullResponse": true,
+                "neverError": true
+              }
+            },
+            "timeout": 30000
+          }
         }
       },
       {
@@ -797,7 +819,7 @@
           80
         ],
         "parameters": {
-          "jsCode": "const base=$('Prepare Calendar Window').first().json; const calendar=$json||{}; const events=Array.isArray(calendar.events)?calendar.events:[]; const calendarSpeech=String(calendar.spoken||'I could not verify your calendar for that window.'); const trip=Array.isArray(base.requestedTools)&&base.requestedTools.some(t=>t==='maps'||t==='lodging_poi'); return [{json:{...base,status:trip?base.status:'COMPLETED',spokenText:trip?base.spokenText:calendarSpeech,calendar_evidence:{outcome:calendar.outcome||'unavailable',window:calendar.window||null,event_count:events.length,events,spoken:calendarSpeech},answer:{...(base.answer||{}),calendar:{outcome:calendar.outcome||'unavailable',event_count:events.length}},citations:[...(Array.isArray(base.citations)?base.citations:[]),{title:'Google Calendar read-only evidence',url:'https://calendar.google.com/',source_host:'Google Calendar'}],auditChain:[...(Array.isArray(base.auditChain)?base.auditChain:[]),{stage:'calendar_read',status:calendar.outcome||'unavailable',event_count:events.length}]}}];"
+          "jsCode": "const base=$('Prepare Calendar Window').first().json; const calendar=$json.body||$json||{}; const events=Array.isArray(calendar.events)?calendar.events:[]; const calendarSpeech=String(calendar.spoken||'I could not verify your calendar for that window.'); const trip=Array.isArray(base.requestedTools)&&base.requestedTools.some(t=>t==='maps'||t==='lodging_poi'); return [{json:{...base,status:trip?base.status:'COMPLETED',spokenText:trip?base.spokenText:calendarSpeech,calendar_evidence:{outcome:calendar.outcome||'unavailable',window:calendar.window||null,event_count:events.length,events,spoken:calendarSpeech},answer:{...(base.answer||{}),calendar:{outcome:calendar.outcome||'unavailable',event_count:events.length}},citations:[...(Array.isArray(base.citations)?base.citations:[]),{title:'Google Calendar read-only evidence',url:'https://calendar.google.com/',source_host:'Google Calendar'}],auditChain:[...(Array.isArray(base.auditChain)?base.auditChain:[]),{stage:'calendar_read',status:calendar.outcome||'unavailable',event_count:events.length}]}}];"
         }
       },
       {
@@ -1271,6 +1293,40 @@
           1320,
           500
         ]
+      },
+      {
+        "id": "pa_destination_official_present",
+        "name": "Official Destination Source Present?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          4128,
+          160
+        ],
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict",
+              "version": 2
+            },
+            "conditions": [
+              {
+                "id": "official-destination-present",
+                "leftValue": "={{ ($json.sources || []).some((source) => /(?:athletic|athletics|university|college|stadium|arena|\\.edu$|\\.gov$|official)/i.test(String(source && source.source_host || ''))) ? 'OFFICIAL' : 'NEEDS_SEARCH' }}",
+                "rightValue": "OFFICIAL",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals",
+                  "caseSensitive": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        }
       }
     ],
     "connections": {
@@ -1741,7 +1797,7 @@
         "main": [
           [
             {
-              "node": "Build Official Destination Search",
+              "node": "Official Destination Source Present?",
               "type": "main",
               "index": 0
             }
@@ -1870,6 +1926,24 @@
           [
             {
               "node": "Destination Evidence Required?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Official Destination Source Present?": {
+        "main": [
+          [
+            {
+              "node": "Build Destination Extraction",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [
+            {
+              "node": "Build Official Destination Search",
               "type": "main",
               "index": 0
             }

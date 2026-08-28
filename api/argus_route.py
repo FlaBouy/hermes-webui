@@ -311,12 +311,24 @@ def try_argus_pa_core(
     try:
         from api.jarvis_pa_conversation_memory import record_turn
 
+        map_model = result.get("map_view_model") if isinstance(result.get("map_view_model"), dict) else {}
+        destination = map_model.get("destination") if isinstance(map_model.get("destination"), dict) else {}
+        calendar = result.get("calendar_evidence") if isinstance(result.get("calendar_evidence"), dict) else {}
+        window = calendar.get("window") if isinstance(calendar.get("window"), dict) else {}
+
         record_turn(
             session,
             objective=objective,
             status=str(result.get("status") or "unknown"),
             spoken_summary=spoken,
             tools=result.get("requestedTools") if isinstance(result.get("requestedTools"), list) else [],
+            context={
+                "trip": {
+                    "destination": destination.get("label"),
+                    "postal_code": destination.get("postal_code"),
+                    "event_date": window.get("start"),
+                }
+            },
         )
     except Exception:
         logger.exception("Jarvis II PA short-term conversation record failed")
@@ -346,6 +358,9 @@ def try_argus_pa_core(
         else None,
         "weather_briefing": result.get("weather_briefing")
         if isinstance(result.get("weather_briefing"), dict)
+        else None,
+        "calendar_evidence": result.get("calendar_evidence")
+        if isinstance(result.get("calendar_evidence"), dict)
         else None,
         "error": None if completed else str(result.get("status") or "pa_core_unverified"),
     }

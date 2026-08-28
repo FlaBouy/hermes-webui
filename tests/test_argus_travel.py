@@ -47,7 +47,7 @@ def test_geocode_preserves_named_venue_through_search_box(monkeypatch):
             return {
                 "features": [
                     {
-                        "properties": {"full_address": "Jordan-Hare Stadium, Auburn, Alabama"},
+                        "properties": {"full_address": "Jordan-Hare Stadium, Auburn, Alabama 36849"},
                         "geometry": {"coordinates": [-85.489, 32.602]},
                     }
                 ]
@@ -57,9 +57,10 @@ def test_geocode_preserves_named_venue_through_search_box(monkeypatch):
     monkeypatch.setattr(travel, "_get_json", fake_get_json)
 
     assert travel._geocode("Jordan-Hare Stadium, Auburn, AL") == {
-        "label": "Jordan-Hare Stadium, Auburn, Alabama",
+        "label": "Jordan-Hare Stadium, Auburn, Alabama 36849",
         "lon": -85.489,
         "lat": 32.602,
+        "postal_code": "36849",
         "place_source": "Mapbox Search Box",
     }
     assert any(url.endswith("/suggest") for url in calls)

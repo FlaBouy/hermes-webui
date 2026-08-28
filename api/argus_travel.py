@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import urllib.parse
 import urllib.request
 import uuid
@@ -18,6 +19,8 @@ _CATEGORY_SPECS = (
     ("meals", "food_and_drink", "Meals", "Public POIs only; verify hours and reservations directly."),
     ("entertainment", "museum", "Entertainment", "Public POIs only; verify events, tickets, and hours directly."),
 )
+
+_US_POSTAL_CODE = re.compile(r"\b(\d{5})(?:-\d{4})?\b")
 
 
 class MapboxUnavailable(RuntimeError):
@@ -66,7 +69,14 @@ def _public_place_fallback(query: str) -> dict[str, Any] | None:
     except (TypeError, ValueError):
         return None
     label = str(row.get("display_name") or query).strip()
-    return {"label": label, "lon": lon, "lat": lat, "place_source": "OpenStreetMap Nominatim fallback"}
+    postal_match = _US_POSTAL_CODE.search(label)
+    return {
+        "label": label,
+        "lon": lon,
+        "lat": lat,
+        "postal_code": postal_match.group(1) if postal_match else "",
+        "place_source": "OpenStreetMap Nominatim fallback",
+    }
 
 
 def _coordinates(feature: dict[str, Any]) -> tuple[float, float] | None:
@@ -83,6 +93,26 @@ def _coordinates(feature: dict[str, Any]) -> tuple[float, float] | None:
 def _label(feature: dict[str, Any], fallback: str) -> str:
     props = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
     return str(props.get("full_address") or feature.get("place_name") or feature.get("name_preferred") or feature.get("text") or feature.get("name") or fallback).strip()
+
+
+def _postal_code(feature: dict[str, Any], label: str) -> str:
+    """Extract a destination ZIP from Mapbox's structured place context."""
+    props = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
+    context = props.get("context") if isinstance(props.get("context"), dict) else {}
+    postcode = context.get("postcode") if isinstance(context.get("postcode"), dict) else {}
+    candidates = (
+        postcode.get("name"),
+        postcode.get("text"),
+        props.get("full_address"),
+        props.get("address"),
+        feature.get("place_name"),
+        label,
+    )
+    for candidate in candidates:
+        match = _US_POSTAL_CODE.search(str(candidate or ""))
+        if match:
+            return match.group(1)
+    return ""
 
 
 def _place_matches_query(query: str, label: str) -> bool:
@@ -137,7 +167,7 @@ def _geocode(query: str) -> dict[str, Any] | None:
                     lon, lat = point
                     label = _label(features[0], query)
                     if _place_matches_query(query, label):
-                        return {"label": label, "lon": lon, "lat": lat, "place_source": "Mapbox Search Box"}
+                        return {"label": label, "lon": lon, "lat": lat, "postal_code": _postal_code(features[0], label), "place_source": "Mapbox Search Box"}
     except MapboxUnavailable:
         # The existing geocoder is still a valid fallback and reports its own
         # upstream failure if it is unavailable too.
@@ -151,7 +181,8 @@ def _geocode(query: str) -> dict[str, Any] | None:
     if not point:
         return _public_place_fallback(query)
     lon, lat = point
-    resolved = {"label": _label(features[0], query), "lon": lon, "lat": lat, "place_source": "Mapbox Geocoding v6"}
+    label = _label(features[0], query)
+    resolved = {"label": label, "lon": lon, "lat": lat, "postal_code": _postal_code(features[0], label), "place_source": "Mapbox Geocoding v6"}
     # A generic geocoder can return a surrounding city for a named POI. Do
     # not discard the exact query in that case; seek a named-place fallback.
     if not _place_matches_query(query, resolved["label"]):

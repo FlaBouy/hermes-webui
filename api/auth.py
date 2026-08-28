@@ -59,6 +59,7 @@ PUBLIC_PATHS = frozenset({
     '/api/jarvis-ii/pa-context',
     '/api/jarvis-ii/pa-travel',
     '/api/jarvis-ii/pa-weather',
+    '/api/jarvis-ii/pa-calendar',
     '/share',
     '/manifest.json', '/manifest.webmanifest',
     '/session/manifest.json', '/session/manifest.webmanifest',
