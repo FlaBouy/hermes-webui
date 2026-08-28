@@ -627,10 +627,26 @@ def _manifest_asset_url(value: object, asset_base: str = "") -> str:
     # bare relative paths resolve under /extensions/. Absolute same-origin paths
     # are still allowed and go through the same validator as env-configured URLs.
     if item.startswith("/"):
-        return _auto_fingerprint_static_asset(item)
+        return _auto_fingerprint_local_asset(item)
     base = asset_base.strip("/")
     rel = f"{base}/{item}" if base else item
-    return EXTENSION_ROUTE_PREFIX + rel
+    return _auto_fingerprint_local_asset(EXTENSION_ROUTE_PREFIX + rel)
+
+
+def _auto_fingerprint_local_asset(item: str) -> str:
+    """Resolve ``v=auto`` for local static and extension assets.
+
+    Static assets live under the application checkout while extension assets
+    live under the configured extension root.  Both are administrator-owned,
+    same-origin files, but they have different containment roots.  Resolve the
+    digest at app-shell render time so a changed file always receives a changed
+    URL without requiring a hand-maintained date pin or a server restart.
+    """
+    if item.startswith("/static/"):
+        return _auto_fingerprint_static_asset(item)
+    if item.startswith(EXTENSION_ROUTE_PREFIX):
+        return _auto_fingerprint_extension_asset(item)
+    return item
 
 
 def _auto_fingerprint_static_asset(item: str) -> str:
@@ -654,6 +670,32 @@ def _auto_fingerprint_static_asset(item: str) -> str:
         rel = unquote(parsed.path[len("/static/") :])
         asset = (static_root / rel).resolve()
         asset.relative_to(static_root)
+        if not asset.is_file():
+            return item
+        digest = hashlib.sha256(asset.read_bytes()).hexdigest()[:16]
+    except (OSError, ValueError):
+        return item
+    resolved_query = [(key, digest if key == "v" and value == "auto" else value) for key, value in query]
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(resolved_query), parsed.fragment))
+
+
+def _auto_fingerprint_extension_asset(item: str) -> str:
+    """Replace ``v=auto`` on a configured extension asset with its digest."""
+    parsed = urlsplit(item)
+    query = parse_qsl(parsed.query, keep_blank_values=True)
+    if not any(key == "v" and value == "auto" for key, value in query):
+        return item
+    if not parsed.path.startswith(EXTENSION_ROUTE_PREFIX):
+        return item
+    root = _extension_root()
+    if root is None:
+        return item
+    try:
+        rel = unquote(parsed.path[len(EXTENSION_ROUTE_PREFIX) :])
+        if not _is_safe_relative_path(rel):
+            return item
+        asset = (root / rel).resolve()
+        asset.relative_to(root)
         if not asset.is_file():
             return item
         digest = hashlib.sha256(asset.read_bytes()).hexdigest()[:16]

@@ -154,7 +154,11 @@ def manual_query_terms(query: object) -> list[str]:
         for word in _MANUAL_QUERY_WORD.findall(str(query or "").lower())
         if word not in _MANUAL_QUERY_STOP_WORDS
     ]
-    return list(dict.fromkeys(words))[:8]
+    # Keep exact hyphenated catalog identifiers intact.  Splitting 1756-IB32
+    # into unrelated words made a strong corpus hit look weak and triggered an
+    # unbounded shared-filesystem fallback.
+    exact = [term.lower() for term in catalog_terms(query)]
+    return list(dict.fromkeys([*exact, *words]))[:8]
 
 
 def manual_candidates(
@@ -426,7 +430,9 @@ def resolve_manual_request(
         snippet = " ".join(str(value) for value in candidate["snippets"])
         # Corpus retrieval plus an on-disk manual is the evidence threshold for
         # document discovery. It never represents an index workbook as a manual.
-        if len(matched_terms) < 2:
+        exact_terms = {term.lower() for term in catalog_terms(query)}
+        has_exact_catalog_match = bool(exact_terms.intersection(term.lower() for term in matched_terms))
+        if len(matched_terms) < 2 and not has_exact_catalog_match:
             continue
         score = len(matched_terms) * 100 + sum(
             10 for term in matched_terms if term.lower() in source.lower()
@@ -441,17 +447,20 @@ def resolve_manual_request(
         )
         if len(verified) >= maximum_sources:
             break
-    # The corpus can be incomplete or contain generic vendor passages. Compare
-    # its candidates with independently verified PDF-title evidence instead of
-    # treating the first corpus hit as authoritative.
-    verified.extend(
-        filesystem_manual_candidates(
-            query,
-            library_root=library_root,
-            page_reader=page_reader,
-            maximum_candidates=maximum_sources * 8,
+    # Only walk the shared filesystem when bounded corpus retrieval found no
+    # on-disk manual.  Walking the whole SMB library after an already-verified
+    # candidate made successful lookups exceed the UI timeout and left orphaned
+    # server threads consuming CPU.  The fast path already requires both a
+    # corpus match and ``os.path.isfile`` evidence.
+    if not verified and os.environ.get("ARGUS_RAG_ALLOW_FILESYSTEM_WALK") == "1":
+        verified.extend(
+            filesystem_manual_candidates(
+                query,
+                library_root=library_root,
+                page_reader=page_reader,
+                maximum_candidates=maximum_sources * 8,
+            )
         )
-    )
     if not verified:
         return {
             "ok": False,

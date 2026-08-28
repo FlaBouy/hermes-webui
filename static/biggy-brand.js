@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260826-argus-stable-runtime-29';
+  const BUILD_ID = '20260827-argus-travel-zoom-31';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -2689,7 +2689,19 @@
   let mapInstance = null;
   let staticMapImage = null;
   let lastMapModelKey = '';
+  let lastMapViewportKey = '';
+  let lastMapViewModel = null;
+  let lastAttemptedViewportKey = '';
+  let pendingMapCameraViewport = '';
+  let pendingMapViewModel = null;
+  let mapCameraFitTimer = 0;
   let mapRenderPromise = null;
+  let mapZoomStep = 0;
+  let mapZoomRouteKey = '';
+  const MAP_CAMERA_MIN_WIDTH = 80;
+  const MAP_CAMERA_MIN_HEIGHT = 80;
+  const MAP_ZOOM_STEP_MIN = -4;
+  const MAP_ZOOM_STEP_MAX = 6;
 
   function setGalaxyRenderPaused(paused) {
     const frame = document.getElementById('biggyV6World');
@@ -2711,7 +2723,9 @@
       if (staticMapImage && staticMapImage.parentNode) staticMapImage.parentNode.removeChild(staticMapImage);
     } catch (_) {}
     staticMapImage = null;
+    lastMapViewportKey = '';
     setGalaxyRenderPaused(false);
+    applyTravelMapZoomControls({ failed: false, loading: false });
   }
 
   function loadMapboxAssets() {
@@ -4116,7 +4130,13 @@
       `<button type="button" id="biggyTravelMapClose" class="biggy-travel-map-close" title="Close panel">×</button>` +
       `</div>` +
       `<div class="biggy-travel-dock-body" id="biggyTravelDockBody">` +
+      `<div class="biggy-travel-map-stage" id="biggyTravelMapStage">` +
       `<div id="biggyTravelMapCanvas" class="biggy-travel-map-canvas" role="img" aria-label="Route map"></div>` +
+      `<div class="biggy-travel-map-zoom" id="biggyTravelMapZoom" hidden>` +
+      `<button type="button" id="biggyTravelMapZoomIn" class="biggy-travel-map-zoom-btn" data-testid="biggy-map-zoom-in" title="Zoom in" aria-label="Zoom in">+</button>` +
+      `<button type="button" id="biggyTravelMapZoomOut" class="biggy-travel-map-zoom-btn" data-testid="biggy-map-zoom-out" title="Zoom out" aria-label="Zoom out">−</button>` +
+      `</div>` +
+      `</div>` +
       `<div class="biggy-travel-map-actions" id="biggyTravelMapActions"></div>` +
       `<div class="biggy-travel-lodging" id="biggyTravelLodging" hidden>` +
       `<div class="biggy-travel-lodging-title" id="biggyTravelRecTitle">Options</div>` +
@@ -4159,6 +4179,7 @@
       if (collapseBtn) collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       if (!collapsed) {
         try { if (mapInstance) mapInstance.resize(); } catch (_) {}
+        scheduleTravelMapCameraFit('open');
       }
     };
     dlg.__biggySetCollapsed = setCollapsed;
@@ -4182,6 +4203,7 @@
         titleEl.textContent = TRAVEL_CATEGORIES.find((x) => railCategoryKey(x) === key) || 'Travel';
       }
       const mapCanvas = dlg.querySelector('#biggyTravelMapCanvas');
+      const mapStage = dlg.querySelector('#biggyTravelMapStage');
       const mapActions = dlg.querySelector('#biggyTravelMapActions');
       const mapNote = dlg.querySelector('#biggyTravelMapNote');
       const lodging = dlg.querySelector('#biggyTravelLodging');
@@ -4201,7 +4223,9 @@
         lodging.getAttribute('data-has-cards') === '1'
       );
       if (mapCanvas) mapCanvas.hidden = !showTravel;
+      if (mapStage) mapStage.hidden = !showTravel;
       if (mapActions) mapActions.hidden = !showTravel;
+      applyTravelMapZoomControls({ travelCategoryVisible: showTravel });
       if (mapNote) mapNote.hidden = !showTravel;
       if (weatherState) weatherState.hidden = !showWeather;
       if (filterState) filterState.hidden = !showFilter;
@@ -4292,9 +4316,30 @@
         const next = Math.max(480, Math.min(860, startW + dx));
         dlg.style.setProperty('--biggy-travel-dock-width', next + 'px');
         try { if (mapInstance) mapInstance.resize(); } catch (_) {}
+        scheduleTravelMapCameraFit('resize');
       });
       handle.addEventListener('pointerup', () => { dragging = false; });
       handle.addEventListener('pointercancel', () => { dragging = false; });
+    }
+    const zoomOutBtn = dlg.querySelector('#biggyTravelMapZoomOut');
+    if (zoomOutBtn && zoomOutBtn.dataset.bound !== '1') {
+      zoomOutBtn.dataset.bound = '1';
+      zoomOutBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        nudgeTravelMapZoom(-1);
+      });
+    }
+    const zoomInBtn = dlg.querySelector('#biggyTravelMapZoomIn');
+    if (zoomInBtn && zoomInBtn.dataset.bound !== '1') {
+      zoomInBtn.dataset.bound = '1';
+      zoomInBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        nudgeTravelMapZoom(1);
+      });
+    }
+    if (!window.__biggyMapCameraResizeBound) {
+      window.__biggyMapCameraResizeBound = true;
+      window.addEventListener('resize', () => scheduleTravelMapCameraFit('resize'));
     }
     setActiveCategory('travel', { open: false });
     return dlg;
@@ -4330,6 +4375,12 @@
   function invalidateTravelVisuals() {
     travelVisualEpoch += 1;
     lastMapModelKey = '';
+    lastMapViewModel = null;
+    lastAttemptedViewportKey = '';
+    pendingMapCameraViewport = '';
+    pendingMapViewModel = null;
+    mapZoomStep = 0;
+    mapZoomRouteKey = '';
     hideTravelMap();
     return travelVisualEpoch;
   }
@@ -4351,18 +4402,337 @@
     return cfg && typeof cfg === 'object' ? cfg : { available: false, reason: 'BAD_CONFIG' };
   }
 
-  function staticMapUrl(mvm, token) {
-    const route = mvm && mvm.route && mvm.route.geometry;
-    const coordinates = route && route.type === 'LineString' && Array.isArray(route.coordinates)
-      ? route.coordinates.filter((point) => Array.isArray(point) && point.length >= 2)
-      : [];
-    const stride = Math.max(1, Math.ceil(coordinates.length / 80));
-    const simplified = coordinates.filter((_, index) => index % stride === 0);
-    if (coordinates.length && simplified[simplified.length - 1] !== coordinates[coordinates.length - 1]) {
-      simplified.push(coordinates[coordinates.length - 1]);
+  function decodePolyline(encoded, precision) {
+    const factor = Math.pow(10, precision == null ? 5 : precision);
+    const coordinates = [];
+    let index = 0;
+    let lat = 0;
+    let lng = 0;
+    const str = String(encoded || '');
+    while (index < str.length) {
+      let result = 0;
+      let shift = 0;
+      let byte = 0;
+      do {
+        byte = str.charCodeAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20 && index < str.length);
+      const dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+      lat += dlat;
+      result = 0;
+      shift = 0;
+      do {
+        byte = str.charCodeAt(index++) - 63;
+        result |= (byte & 0x1f) << shift;
+        shift += 5;
+      } while (byte >= 0x20 && index < str.length);
+      const dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+      lng += dlng;
+      coordinates.push([lng / factor, lat / factor]);
     }
-    const origin = mvm.origin || {};
-    const destination = mvm.destination || {};
+    return coordinates;
+  }
+
+  function decodeRouteCoordinates(geometry) {
+    if (!geometry) return [];
+    if (typeof geometry === 'string') return decodePolyline(geometry);
+    const coords = geometry.coordinates;
+    if (typeof coords === 'string') return decodePolyline(coords);
+    if (geometry.type === 'LineString' && Array.isArray(coords)) {
+      return coords.filter((point) => Array.isArray(point) && point.length >= 2 &&
+        Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1])));
+    }
+    return [];
+  }
+
+  function routeCameraBounds(coordinates) {
+    let west = Infinity;
+    let south = Infinity;
+    let east = -Infinity;
+    let north = -Infinity;
+    (coordinates || []).forEach((point) => {
+      const lon = Number(point && point[0]);
+      const lat = Number(point && point[1]);
+      if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
+      if (lon < west) west = lon;
+      if (lon > east) east = lon;
+      if (lat < south) south = lat;
+      if (lat > north) north = lat;
+    });
+    if (!Number.isFinite(west) || !Number.isFinite(south) || !Number.isFinite(east) || !Number.isFinite(north)) {
+      return null;
+    }
+    return { west, south, east, north };
+  }
+
+  function routeCameraPadding(width, height) {
+    const minSide = Math.max(1, Math.min(Number(width) || 0, Number(height) || 0));
+    return Math.round(Math.max(24, Math.min(72, minSide * 0.08)));
+  }
+
+  function shouldApplyRouteCameraFit(state) {
+    const width = Number(state && state.containerWidth);
+    const height = Number(state && state.containerHeight);
+    return width >= MAP_CAMERA_MIN_WIDTH && height >= MAP_CAMERA_MIN_HEIGHT;
+  }
+
+  function clampTravelMapZoomStep(step) {
+    const value = Math.round(Number(step) || 0);
+    return Math.max(MAP_ZOOM_STEP_MIN, Math.min(MAP_ZOOM_STEP_MAX, value));
+  }
+
+  function nextTravelMapZoomState(state) {
+    const routeKey = String((state && state.routeKey) || '');
+    const previousRouteKey = String((state && state.previousRouteKey) || '');
+    const delta = Number(state && state.delta);
+    if (routeKey && previousRouteKey && routeKey !== previousRouteKey) {
+      return { step: 0, reset: true };
+    }
+    const current = clampTravelMapZoomStep(state && state.step);
+    if (!Number.isFinite(delta) || delta === 0) return { step: current, reset: false };
+    return { step: clampTravelMapZoomStep(current + delta), reset: false };
+  }
+
+  function travelMapZoomAvailability(state) {
+    const travelCategoryVisible = !!(state && state.travelCategoryVisible);
+    const hasImage = !!(state && state.hasImage);
+    const loading = !!(state && state.loading);
+    const failed = !!(state && state.failed);
+    if (!travelCategoryVisible || loading || failed || !hasImage) {
+      return { visible: false, inEnabled: false, outEnabled: false };
+    }
+    const step = clampTravelMapZoomStep(state && state.zoomStep);
+    return {
+      visible: true,
+      inEnabled: step < MAP_ZOOM_STEP_MAX,
+      outEnabled: step > MAP_ZOOM_STEP_MIN,
+    };
+  }
+
+  function applyTravelMapZoomControls(state) {
+    const canvas = document.getElementById('biggyTravelMapCanvas');
+    const travelCategoryVisible = state && Object.prototype.hasOwnProperty.call(state, 'travelCategoryVisible')
+      ? !!(state.travelCategoryVisible)
+      : !!(canvas && !canvas.hidden);
+    const plan = travelMapZoomAvailability({
+      travelCategoryVisible,
+      hasImage: !!(state && Object.prototype.hasOwnProperty.call(state, 'hasImage') ? state.hasImage : staticMapImage),
+      loading: !!(state && state.loading),
+      failed: !!(state && state.failed),
+      zoomStep: mapZoomStep,
+    });
+    const zoom = document.getElementById('biggyTravelMapZoom');
+    const inn = document.getElementById('biggyTravelMapZoomIn');
+    const out = document.getElementById('biggyTravelMapZoomOut');
+    if (zoom) zoom.hidden = !plan.visible;
+    if (inn) inn.disabled = !plan.inEnabled;
+    if (out) out.disabled = !plan.outEnabled;
+    return plan;
+  }
+
+  function updateTravelMapZoomControls() {
+    return applyTravelMapZoomControls();
+  }
+
+  function nudgeTravelMapZoom(delta) {
+    const plan = travelMapZoomAvailability({
+      travelCategoryVisible: true,
+      hasImage: !!staticMapImage,
+      zoomStep: mapZoomStep,
+    });
+    if (!plan.visible) return;
+    const next = nextTravelMapZoomState({
+      step: mapZoomStep,
+      delta,
+      routeKey: mapZoomRouteKey,
+      previousRouteKey: mapZoomRouteKey,
+    });
+    if (next.step === mapZoomStep) {
+      updateTravelMapZoomControls();
+      return;
+    }
+    mapZoomStep = next.step;
+    updateTravelMapZoomControls();
+    if (lastMapViewModel) renderMapViewModel(lastMapViewModel);
+  }
+
+  function routeCameraLngLatToWorld(lon, lat) {
+    const x = (Number(lon) + 180) / 360;
+    const sin = Math.sin((Number(lat) * Math.PI) / 180);
+    const y = 0.5 - Math.log((1 + sin) / (1 - sin)) / (4 * Math.PI);
+    return { x, y };
+  }
+
+  function routeCameraCenterZoom(bounds, width, height, padding) {
+    if (!bounds) return null;
+    const lon = (Number(bounds.west) + Number(bounds.east)) / 2;
+    const lat = (Number(bounds.south) + Number(bounds.north)) / 2;
+    if (!Number.isFinite(lon) || !Number.isFinite(lat)) return null;
+    const usableW = Math.max(1, Number(width) - 2 * Number(padding || 0));
+    const usableH = Math.max(1, Number(height) - 2 * Number(padding || 0));
+    const nw = routeCameraLngLatToWorld(bounds.west, bounds.north);
+    const se = routeCameraLngLatToWorld(bounds.east, bounds.south);
+    const dx = Math.max(1e-12, Math.abs(se.x - nw.x));
+    const dy = Math.max(1e-12, Math.abs(se.y - nw.y));
+    const zoomX = Math.log2(usableW / (dx * 512));
+    const zoomY = Math.log2(usableH / (dy * 512));
+    const zoom = Math.max(0, Math.min(20, Math.min(zoomX, zoomY)));
+    return { lon, lat, zoom };
+  }
+
+  function travelMapFitBounds(mvm) {
+    const routeCoordinates = decodeRouteCoordinates(mvm && mvm.route && mvm.route.geometry);
+    const points = simplifyRouteCoordinates(routeCoordinates).slice();
+    const origin = (mvm && mvm.origin) || {};
+    const destination = (mvm && mvm.destination) || {};
+    if (Number.isFinite(Number(origin.lon)) && Number.isFinite(Number(origin.lat))) {
+      points.push([Number(origin.lon), Number(origin.lat)]);
+    }
+    if (Number.isFinite(Number(destination.lon)) && Number.isFinite(Number(destination.lat))) {
+      points.push([Number(destination.lon), Number(destination.lat)]);
+    }
+    return routeCameraBounds(points);
+  }
+
+  function simplifyRouteCoordinates(coordinates) {
+    const valid = (coordinates || []).filter((point) => Array.isArray(point) && point.length >= 2 &&
+      Number.isFinite(Number(point[0])) && Number.isFinite(Number(point[1])));
+    if (valid.length <= 80) return valid.slice();
+    const stride = Math.max(1, Math.ceil(valid.length / 80));
+    const seen = Object.create(null);
+    const indexes = [];
+    const addIndex = (index) => {
+      if (index < 0 || index >= valid.length || seen[index]) return;
+      seen[index] = true;
+      indexes.push(index);
+    };
+    for (let index = 0; index < valid.length; index += stride) addIndex(index);
+    addIndex(0);
+    addIndex(valid.length - 1);
+    const bounds = routeCameraBounds(valid);
+    if (bounds) {
+      valid.forEach((point, index) => {
+        const lon = Number(point[0]);
+        const lat = Number(point[1]);
+        if (lon === bounds.west || lon === bounds.east || lat === bounds.south || lat === bounds.north) {
+          addIndex(index);
+        }
+      });
+    }
+    indexes.sort((left, right) => left - right);
+    return indexes.map((index) => valid[index]);
+  }
+
+  function mapViewportKey(width, height, padding, zoomStep) {
+    return [
+      Math.round(width),
+      Math.round(height),
+      Math.round(padding),
+      clampTravelMapZoomStep(zoomStep),
+    ].join('x');
+  }
+
+  async function waitForVisibleMapCanvas(canvas) {
+    if (!canvas) return { width: 900, height: 500, ready: false };
+    const timeoutMs = 2500;
+    const started = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+    const now = () => ((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now());
+    let lastW = 0;
+    let lastH = 0;
+    let stableFrames = 0;
+    return await new Promise((resolve) => {
+      const tick = () => {
+        const dlg = canvas.closest ? canvas.closest('#biggyTravelMapDialog') : null;
+        const collapsed = !!(dlg && dlg.classList && dlg.classList.contains('is-collapsed'));
+        const width = Number(canvas.clientWidth || 0);
+        const height = Number(canvas.clientHeight || 0);
+        if (!collapsed && !canvas.hidden && width >= MAP_CAMERA_MIN_WIDTH && height >= MAP_CAMERA_MIN_HEIGHT) {
+          if (width === lastW && height === lastH) stableFrames += 1;
+          else {
+            lastW = width;
+            lastH = height;
+            stableFrames = 0;
+          }
+          if (stableFrames >= 2) {
+            resolve({ width, height, ready: true });
+            return;
+          }
+        } else {
+          lastW = 0;
+          lastH = 0;
+          stableFrames = 0;
+        }
+        if (now() - started >= timeoutMs) {
+          resolve({
+            width: Math.max(width, 900),
+            height: Math.max(height, 500),
+            ready: false,
+          });
+          return;
+        }
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(tick);
+        else setTimeout(tick, 16);
+      };
+      tick();
+    });
+  }
+
+  function travelMapCameraFitPlan(state) {
+    const width = Number(state && state.containerWidth);
+    const height = Number(state && state.containerHeight);
+    const zoomStep = clampTravelMapZoomStep(state && state.zoomStep);
+    const desired = shouldApplyRouteCameraFit({ containerWidth: width, containerHeight: height })
+      ? mapViewportKey(width, height, routeCameraPadding(width, height), zoomStep)
+      : '';
+    const last = String((state && state.lastViewportKey) || '');
+    const pendingIn = String((state && state.pendingViewport) || '');
+    const hasImage = !!(state && state.hasImage);
+    if (state && state.inFlight) {
+      const nextPending = desired && desired !== last ? desired : pendingIn;
+      if (nextPending && nextPending !== last) {
+        return { action: 'pend', pendingViewport: nextPending };
+      }
+      return { action: 'skip', pendingViewport: pendingIn };
+    }
+    const target = desired || pendingIn;
+    if (!target) return { action: 'skip', pendingViewport: '' };
+    if (hasImage && target === last) return { action: 'skip', pendingViewport: '' };
+    return { action: 'render', pendingViewport: '' };
+  }
+
+  function readTravelMapCanvasViewport() {
+    const canvas = document.getElementById('biggyTravelMapCanvas');
+    if (!canvas || canvas.hidden) return { width: 0, height: 0 };
+    return { width: Number(canvas.clientWidth || 0), height: Number(canvas.clientHeight || 0) };
+  }
+
+  function applyTravelMapCameraFit() {
+    if (!lastMapViewModel) return;
+    const size = readTravelMapCanvasViewport();
+    const plan = travelMapCameraFitPlan({
+      containerWidth: size.width,
+      containerHeight: size.height,
+      lastViewportKey: lastMapViewportKey,
+      pendingViewport: pendingMapCameraViewport,
+      hasImage: !!staticMapImage,
+      inFlight: !!mapRenderPromise,
+      zoomStep: mapZoomStep,
+    });
+    pendingMapCameraViewport = plan.pendingViewport || '';
+    if (plan.action === 'render') renderMapViewModel(lastMapViewModel);
+  }
+
+  function scheduleTravelMapCameraFit(reason) {
+    window.clearTimeout(mapCameraFitTimer);
+    mapCameraFitTimer = window.setTimeout(applyTravelMapCameraFit, reason === 'resize' ? 120 : 0);
+  }
+
+  function staticMapUrl(mvm, token, viewport) {
+    const routeCoordinates = decodeRouteCoordinates(mvm && mvm.route && mvm.route.geometry);
+    const simplified = simplifyRouteCoordinates(routeCoordinates);
+    const origin = (mvm && mvm.origin) || {};
+    const destination = (mvm && mvm.destination) || {};
     const features = [];
     if (simplified.length >= 2) {
       features.push({
@@ -4384,9 +4754,23 @@
       }
     });
     if (!features.length) return '';
+    const width = Math.max(1, Math.min(1280, Math.round(Number(viewport && viewport.width) || 900)));
+    const height = Math.max(1, Math.min(1280, Math.round(Number(viewport && viewport.height) || 500)));
+    const padding = Number.isFinite(Number(viewport && viewport.padding))
+      ? Math.round(Number(viewport.padding))
+      : routeCameraPadding(width, height);
+    const zoomStep = clampTravelMapZoomStep(viewport && viewport.zoomStep);
     const overlay = encodeURIComponent(JSON.stringify({ type: 'FeatureCollection', features }));
-    return `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/geojson(${overlay})/auto/900x500@2x`
-      + `?padding=48&access_token=${encodeURIComponent(String(token || ''))}`;
+    const bounds = travelMapFitBounds(mvm);
+    const camera = routeCameraCenterZoom(bounds, width, height, padding);
+    if (zoomStep !== 0 && camera) {
+      const zoom = Math.max(0, Math.min(20, camera.zoom + zoomStep));
+      return `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/geojson(${overlay})/`
+        + `${Number(camera.lon).toFixed(5)},${Number(camera.lat).toFixed(5)},${zoom.toFixed(2)}/${width}x${height}@2x`
+        + `?access_token=${encodeURIComponent(String(token || ''))}`;
+    }
+    return `https://api.mapbox.com/styles/v1/mapbox/streets-v12/static/geojson(${overlay})/auto/${width}x${height}@2x`
+      + `?padding=${padding}&access_token=${encodeURIComponent(String(token || ''))}`;
   }
 
   async function renderMapViewModelOnce(mvm) {
@@ -4401,6 +4785,7 @@
       }
       const note = dlg.querySelector('#biggyTravelMapNote');
       if (note) note.textContent = 'Map unavailable: ' + String(mvm.reason || 'no route model');
+      applyTravelMapZoomControls({ failed: true, hasImage: false });
       return false;
     }
     const mapSchema = String(mvm.schema || '');
@@ -4462,12 +4847,36 @@
         actions.appendChild(a);
       }
     }
+    lastMapViewModel = mvm;
     const key = modelKey(mvm);
-    if (key === lastMapModelKey && staticMapImage) {
-      if (note) note.textContent = 'Display only · Agent map_view_model';
-      return true;
+    const zoomState = nextTravelMapZoomState({
+      step: mapZoomStep,
+      routeKey: key,
+      previousRouteKey: mapZoomRouteKey,
+      delta: 0,
+    });
+    if (zoomState.reset) mapZoomStep = 0;
+    mapZoomRouteKey = key;
+    const keepExisting = key === lastMapModelKey && !!staticMapImage;
+    applyTravelMapZoomControls({ loading: !keepExisting, hasImage: keepExisting });
+    const measured = await waitForVisibleMapCanvas(canvas);
+    if (renderEpoch !== travelVisualEpoch) return false;
+    if (!shouldApplyRouteCameraFit({
+      containerWidth: measured.width,
+      containerHeight: measured.height,
+    })) {
+      if (key === lastMapModelKey && staticMapImage) {
+        if (note) note.textContent = 'Display only · Agent map_view_model';
+        return true;
+      }
+    } else {
+      const padding = routeCameraPadding(measured.width, measured.height);
+      const viewport = mapViewportKey(measured.width, measured.height, padding, mapZoomStep);
+      if (key === lastMapModelKey && staticMapImage && lastMapViewportKey === viewport) {
+        if (note) note.textContent = 'Display only · Agent map_view_model';
+        return true;
+      }
     }
-    lastMapModelKey = key;
 
     let cfg;
     try {
@@ -4484,20 +4893,30 @@
           '). Config var: ' +
           String(cfg.token_env || 'BIGGY_MAPBOX_PUBLIC_TOKEN');
       }
+      applyTravelMapZoomControls({ failed: true, hasImage: false });
       return false;
     }
     try {
-      const url = staticMapUrl(mvm, cfg.token);
-      if (!url) throw new Error('route_geometry_missing');
       if (!canvas) throw new Error('map_container_missing');
+      const padding = routeCameraPadding(measured.width, measured.height);
+      const url = staticMapUrl(mvm, cfg.token, {
+        width: measured.width,
+        height: measured.height,
+        padding,
+        zoomStep: mapZoomStep,
+      });
+      if (!url) throw new Error('route_geometry_missing');
       releaseTravelMap();
+      applyTravelMapZoomControls({ loading: true, hasImage: false });
+      lastMapModelKey = key;
+      lastMapViewportKey = mapViewportKey(measured.width, measured.height, padding, mapZoomStep);
+      lastAttemptedViewportKey = lastMapViewportKey;
       canvas.innerHTML = '';
       const image = document.createElement('img');
       image.className = 'biggy-travel-static-map';
       image.alt = `Route from ${String(o.label || 'origin')} to ${String(d.label || 'destination')}`;
       image.decoding = 'async';
       image.loading = 'eager';
-      staticMapImage = image;
       canvas.appendChild(image);
       if (note) note.textContent = 'Loading verified Mapbox route…';
       await new Promise((resolve, reject) => {
@@ -4513,22 +4932,55 @@
         image.src = url;
       });
       if (renderEpoch !== travelVisualEpoch) {
+        if (image.parentNode) image.parentNode.removeChild(image);
         releaseTravelMap();
         return false;
       }
+      staticMapImage = image;
       if (note) note.textContent = 'Display only · Agent map_view_model · not a decision-maker';
+      applyTravelMapZoomControls({ hasImage: true });
       return true;
     } catch (err) {
       releaseTravelMap();
+      applyTravelMapZoomControls({ failed: true, hasImage: false });
       if (note) note.textContent = 'Mapbox render failed: ' + String(err && err.message || err);
       return false;
     }
   }
 
   function renderMapViewModel(mvm) {
-    if (mapRenderPromise) return mapRenderPromise;
+    if (mapRenderPromise) {
+      // Session hydration and the completion reconciler can converge while
+      // the first static image is still loading. Keep the newest route model
+      // so an invalidated in-flight render cannot leave a blank Travel card.
+      pendingMapViewModel = mvm;
+      const size = readTravelMapCanvasViewport();
+      const plan = travelMapCameraFitPlan({
+        containerWidth: size.width,
+        containerHeight: size.height,
+        lastViewportKey: lastMapViewportKey,
+        pendingViewport: pendingMapCameraViewport,
+        hasImage: !!staticMapImage,
+        inFlight: true,
+        zoomStep: mapZoomStep,
+      });
+      pendingMapCameraViewport = plan.pendingViewport || '';
+      return mapRenderPromise;
+    }
     mapRenderPromise = renderMapViewModelOnce(mvm).finally(() => {
       mapRenderPromise = null;
+      const queuedModel = pendingMapViewModel;
+      pendingMapViewModel = null;
+      if (queuedModel) {
+        return renderMapViewModel(queuedModel);
+      }
+      const pending = pendingMapCameraViewport;
+      if (!pending) return;
+      if (pending === lastAttemptedViewportKey || pending === lastMapViewportKey) {
+        pendingMapCameraViewport = '';
+        return;
+      }
+      applyTravelMapCameraFit();
     });
     return mapRenderPromise;
   }

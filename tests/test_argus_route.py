@@ -31,6 +31,10 @@ def test_stt_wake_homophone_is_repaired_only_at_leading_address():
         "Hey Biggy about getting Argus to get me a map routed to Jordan-Hare Stadium."
     )
     assert _normalize_biggy_wake_name("Open my piggy bank note") == "Open my piggy bank note"
+    assert _normalize_biggy_wake_name(
+        "Hey Biggie, have Vargas pull a map to Jordan-Hare Stadium."
+    ) == "Hey Biggy, have Argus pull a map to Jordan-Hare Stadium."
+    assert _normalize_biggy_wake_name("Call Mr. Vargas") == "Call Mr. Vargas"
 
 
 def _jarvis_session_for_followup_tests():
@@ -115,6 +119,12 @@ def test_unrelated_mention_of_jarvis_does_not_match():
     )
 
 
+def test_biggy_story_request_does_not_route_to_argus():
+    assert not is_argus_command(
+        "Hey Biggy, tell me a story about a Marine in a foxhole."
+    )
+
+
 def test_jarvis_manual_location_followup_stays_hard_bound():
     from api.routes import _argus_active_followup_objective
 
@@ -159,7 +169,8 @@ def test_argus_event_venue_clarification_stays_in_active_travel_lane():
     )
 
     assert objective is not None
-    assert "owner-confirmed destination exactly as Jordan-Hare Stadium" in objective
+    assert "Start a fresh A.R.G.U.S. travel resolution" in objective
+    assert "do not carry forward a destination from an earlier map card" in objective
     assert "Owner request: The Auburn and Florida game" in objective
     assert "five-day forecast" in objective
 
@@ -176,8 +187,78 @@ def test_argus_multi_category_travel_retry_uses_prior_verified_destination():
     )
 
     assert objective is not None
-    assert "Do not replace that destination with an event phrase" in objective
+    assert "Start a fresh A.R.G.U.S. travel resolution" in objective
     assert "route, lodging, meal, fuel, and weather" in objective
+
+
+def test_new_explicit_map_destination_never_reuses_prior_card_destination():
+    from api.routes import _argus_active_followup_objective
+
+    objective = _argus_active_followup_objective(
+        _argus_travel_session_for_followup_tests(),
+        "Have Argus pull a map to Bryant-Denny Stadium from Lynn Haven.",
+    )
+
+    assert objective is not None
+    assert "Bryant-Denny Stadium" in objective
+    assert "Jordan-Hare Stadium" not in objective
+    assert "do not carry forward a destination from an earlier map card" in objective
+
+
+def test_argus_pa_core_empty_response_uses_governed_briefing_fallback():
+    from api.routes import _run_argus_with_transport_fallback
+
+    calls = []
+
+    def _core(*_args, **_kwargs):
+        calls.append("core")
+        return {"handled": True, "ok": False, "error": "JSONDecodeError"}
+
+    def _briefing(*_args, **_kwargs):
+        calls.append("briefing")
+        return {"handled": True, "ok": True, "map_view_model": {"available": True}}
+
+    result = _run_argus_with_transport_fallback(
+        "map Jordan-Hare Stadium",
+        pa_core_enabled=True,
+        biggy_ingress_ts=1.0,
+        correlation_id="corr-1",
+        session_id="session-1",
+        try_pa_core=_core,
+        try_briefing=_briefing,
+    )
+
+    assert calls == ["core", "briefing"]
+    assert result["ok"] is True
+    assert result["transport_fallback"] is True
+    assert result["primary_transport_error"] == "JSONDecodeError"
+
+
+def test_argus_verified_negative_does_not_cross_transport_boundary():
+    from api.routes import _run_argus_with_transport_fallback
+
+    calls = []
+
+    def _core(*_args, **_kwargs):
+        calls.append("core")
+        return {"handled": True, "ok": False, "error": "NO_VERIFIED_EVIDENCE"}
+
+    def _briefing(*_args, **_kwargs):
+        calls.append("briefing")
+        return {"handled": True, "ok": True}
+
+    result = _run_argus_with_transport_fallback(
+        "find an unverified place",
+        pa_core_enabled=True,
+        biggy_ingress_ts=1.0,
+        correlation_id="corr-2",
+        session_id="session-2",
+        try_pa_core=_core,
+        try_briefing=_briefing,
+    )
+
+    assert calls == ["core"]
+    assert result["error"] == "NO_VERIFIED_EVIDENCE"
 
 
 def test_argus_travel_recovery_discards_injected_library_matches():
@@ -308,9 +389,10 @@ def test_pa_core_carries_biggy_session_id_for_short_term_memory(monkeypatch):
     assert captured["payload"]["conversation_context"][0]["objective"] == "Prior manual request"
 
 
-def test_pa_core_retries_one_empty_success_response(monkeypatch):
-    """An n8n HTTP 200 with no body must not become a false Argus failure."""
+def test_pa_core_recovers_empty_success_without_replaying_workflow(monkeypatch):
+    """An empty n8n body is recovered by correlation, never re-executed."""
     import api.argus_route as ajr
+    import api.argus_n8n_recovery as n8n_recovery
     import api.jarvis_pa_conversation_memory as conversation_memory
     import api.jarvis_pa_strategy_memory as strategy_memory
 
@@ -331,17 +413,25 @@ def test_pa_core_retries_one_empty_success_response(monkeypatch):
 
     def _urlopen(request, timeout):
         calls.append(request)
-        if len(calls) == 1:
-            return _Response(b"")
-        return _Response(
-            b'{"status":"COMPLETED","spokenText":"Route ready.",'
-            b'"requestedTools":["maps"],"citations":[],"map_view_model":'
-            b'{"schema":"jarvis.map_view_model.v1","available":true}}'
-        )
+        return _Response(b"")
 
     monkeypatch.setenv("GPT_BIGGY_PROPOSE_TOKEN", "test-token")
     monkeypatch.setattr(ajr.urllib.request, "urlopen", _urlopen)
-    monkeypatch.setattr(ajr.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        n8n_recovery,
+        "recover_pa_result",
+        lambda _corr: {
+            "status": "COMPLETED",
+            "spokenText": "Route ready.",
+            "requestedTools": ["maps"],
+            "citations": [],
+            "map_view_model": {
+                "schema": "jarvis.map_view_model.v1",
+                "available": True,
+            },
+            "recovered_from_execution_id": "991",
+        },
+    )
     monkeypatch.setattr(strategy_memory, "record_outcome", lambda **_kwargs: None)
     monkeypatch.setattr(conversation_memory, "record_turn", lambda *_a, **_k: None)
 
@@ -351,7 +441,7 @@ def test_pa_core_retries_one_empty_success_response(monkeypatch):
         session_id="biggy-chat",
     )
 
-    assert len(calls) == 2
+    assert len(calls) == 1
     assert result["ok"] is True
     assert result["map_view_model"]["available"] is True
 

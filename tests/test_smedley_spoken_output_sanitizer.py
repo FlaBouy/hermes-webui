@@ -280,6 +280,24 @@ def test_long_ptt_spoken_text_complete_and_capped():
     assert '"spoken_text": spoken_text or None' in sync_src
 
 
+def test_explicit_story_request_speaks_full_narrative():
+    story = " ".join(
+        f"Sentence {index} carries the story forward with enough detail."
+        for index in range(1, 70)
+    )
+    msgs = [
+        {"role": "user", "content": "Hey Biggy, tell me a story about a Marine."},
+        {"role": "assistant", "content": story},
+    ]
+
+    spoken = docroute.attach_spoken_text_to_last_assistant(msgs)
+
+    assert spoken == story.rstrip(".")
+    assert "Sentence 69 carries the story forward" in spoken
+    assert len(spoken) > docroute.GATEWAY_SPOKEN_MAX_CHARS
+    assert msgs[-1]["spoken_text"] == spoken
+
+
 def test_gateway_chat_writeback_attaches_spoken_text_not_spoken_reply():
     src = (ROOT / "api" / "gateway_chat.py").read_text(encoding="utf-8")
     assert "spoken_text_for_gateway_reply" in src

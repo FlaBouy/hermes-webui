@@ -18,11 +18,14 @@ import logging
 import os
 import re
 import subprocess
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 from typing import Any, Optional
+
+from api.argus_observability import record_event, terminal_event
 
 logger = logging.getLogger(__name__)
 
@@ -1367,10 +1370,28 @@ def attach_spoken_text_to_last_assistant(messages: object) -> str:
     """Attach the derived spoken envelope to the newest assistant turn."""
     if not isinstance(messages, list):
         return ""
-    for message in reversed(messages):
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
         if not isinstance(message, dict) or message.get("role") != "assistant":
             continue
-        spoken = spoken_text_for_gateway_reply(message.get("content"))
+        owner_request = ""
+        for prior in reversed(messages[:index]):
+            if isinstance(prior, dict) and prior.get("role") == "user":
+                owner_request = str(prior.get("content") or "")
+                break
+        full_narrative_requested = bool(
+            re.search(
+                r"(?i)\b(?:tell\s+(?:me|us)\s+(?:a\s+)?story|"
+                r"tell\s+the\s+(?:whole|full)\s+story|expand|elaborate|"
+                r"go\s+longer|full\s+answer|speak\s+it\s+in\s+full)\b",
+                owner_request,
+            )
+        )
+        spoken = (
+            sanitize_for_spoken_output(message.get("content"))
+            if full_narrative_requested
+            else spoken_text_for_gateway_reply(message.get("content"))
+        )
         if spoken:
             message["spoken_text"] = spoken
         return spoken
@@ -1417,6 +1438,14 @@ def try_jarvis_ii_generic_rag_vnext(query: object, *, public_origin: object = ""
         return {"handled": True, "query": msg, "reply": reply, "spoken_reply": reply, "matches": [], "error": "vnext_auth_unavailable", "jarvis_ii_generic_rag_vnext": True}
 
     correlation_id = f"generic-rag-vnext-{os.urandom(8).hex()}"
+    started = time.monotonic()
+    record_event(
+        correlation_id,
+        component="smedley",
+        stage="engineering_retrieve",
+        status="started",
+        query_length=len(msg),
+    )
     request = urllib.request.Request(
         _jarvis_ii_generic_rag_vnext_url(),
         data=json.dumps({"query": msg, "correlation_id": correlation_id, "caller": "smedley-document-route"}).encode("utf-8"),
@@ -1430,6 +1459,13 @@ def try_jarvis_ii_generic_rag_vnext(query: object, *, public_origin: object = ""
         payload = json.loads(raw.decode("utf-8"))
     except Exception as exc:  # noqa: BLE001
         logger.warning("Jarvis II Generic RAG VNext call failed: %s", type(exc).__name__)
+        terminal_event(
+            correlation_id,
+            component="smedley",
+            ok=False,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            error=type(exc).__name__,
+        )
         reply = "I could not reach the verified engineering-evidence service, so I will not guess."
         return {"handled": True, "query": msg, "reply": reply, "spoken_reply": reply, "matches": [], "error": f"vnext_{type(exc).__name__}", "jarvis_ii_generic_rag_vnext": True}
 
@@ -1478,6 +1514,14 @@ def try_jarvis_ii_generic_rag_vnext(query: object, *, public_origin: object = ""
         "title": source.rsplit("/", 1)[-1],
         "document_kind": "manual",
     }
+    terminal_event(
+        correlation_id,
+        component="smedley",
+        ok=True,
+        duration_ms=int((time.monotonic() - started) * 1000),
+        citation_count=1,
+        source=source,
+    )
     return {"handled": True, "query": msg, "reply": reply, "spoken_reply": answer, "matches": [{"source": source, "url": citation_url, "page": page}], "active_document": active_document, "error": None, "jarvis_ii_generic_rag_vnext": True, "correlation_id": payload.get("correlation_id") or correlation_id, "rag_evidence": payload.get("rag_evidence")}
 
 
@@ -1490,12 +1534,23 @@ def retrieve_documents(
 ) -> dict[str, Any]:
     """POST to Smedley RAG retrieve; return neutralized matches payload."""
     origin = normalize_public_origin(public_origin)
+    correlation_id = f"smedley-retrieve-{os.urandom(8).hex()}"
+    started = time.monotonic()
     body = {
         "query": str(query or "").strip(),
         "topk": max(1, min(int(topk), 20)),
         "snippet_chars": 900,
         "filter": {"library_only": True},
+        "correlation_id": correlation_id,
     }
+    record_event(
+        correlation_id,
+        component="smedley",
+        stage="document_retrieve",
+        status="started",
+        query_length=len(body["query"]),
+        topk=body["topk"],
+    )
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(
         rag_retrieve_url(),
@@ -1513,12 +1568,35 @@ def retrieve_documents(
             detail = exc.read().decode("utf-8", errors="replace")[:300]
         except Exception:
             pass
+        terminal_event(
+            correlation_id,
+            component="smedley",
+            ok=False,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            error=f"HTTP_{exc.code}",
+        )
         raise RuntimeError(f"RAG retrieve HTTP {exc.code}: {detail}") from exc
     except Exception as exc:  # noqa: BLE001
+        terminal_event(
+            correlation_id,
+            component="smedley",
+            ok=False,
+            duration_ms=int((time.monotonic() - started) * 1000),
+            error=type(exc).__name__,
+        )
         raise RuntimeError(f"RAG retrieve failed: {type(exc).__name__}") from exc
     if not isinstance(payload, dict):
         raise RuntimeError("RAG retrieve returned non-object JSON")
-    return neutralize_retrieve_payload(payload, public_origin=origin)
+    result = neutralize_retrieve_payload(payload, public_origin=origin)
+    terminal_event(
+        correlation_id,
+        component="smedley",
+        ok=True,
+        duration_ms=int((time.monotonic() - started) * 1000),
+        match_count=len(result.get("matches") or []),
+    )
+    result.setdefault("correlation_id", correlation_id)
+    return result
 
 
 def active_document_from_matches(

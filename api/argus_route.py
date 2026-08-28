@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from api.argus_observability import record_event, terminal_event
+
 logger = logging.getLogger(__name__)
 
 _ASSISTANT_NAME = r"(?:argus)"
@@ -156,8 +158,18 @@ def try_argus_pa_core(
     existing single-final-response/TTS contract.
     """
     corr = str(correlation_id or "").strip() or mint_correlation_id()
+    request_started = time.monotonic()
+    record_event(
+        corr,
+        component="biggy",
+        stage="argus_handoff_ingress",
+        status="accepted",
+        session_present=bool(session_id),
+        objective_length=len(str(objective or "")),
+    )
     token = _pa_core_token()
     if not token:
+        terminal_event(corr, component="biggy", ok=False, error="pa_core_auth_unavailable")
         return {
             "handled": True, "ok": False, "reply": "A.R.G.U.S. authentication is unavailable.",
             "spoken_text": "Argus authentication is unavailable.",
@@ -182,38 +194,70 @@ def try_argus_pa_core(
         payload["conversation_context"] = recent_context(session)
     result: Any = None
     last_error: Exception | None = None
-    # n8n occasionally closes an otherwise-successful webhook response with an
-    # empty body while its execution has completed normally.  A single replay
-    # with the same correlation id is idempotent at the PA boundary and avoids
-    # converting that transport race into a false Argus failure on glass.
-    for attempt in range(2):
-        try:
-            request = urllib.request.Request(
-                _PA_CORE_WEBHOOK_URL,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json", "Accept": "application/json", "Authorization": f"Bearer {token}"},
-                method="POST",
+    try:
+        request = urllib.request.Request(
+            _PA_CORE_WEBHOOK_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Accept": "application/json", "Authorization": f"Bearer {token}"},
+            method="POST",
+        )
+        transport_started = time.monotonic()
+        record_event(corr, component="n8n", stage="pa_webhook", status="started")
+        with urllib.request.urlopen(request, timeout=180) as response:
+            raw = response.read()
+        transport_ms = int((time.monotonic() - transport_started) * 1000)
+        if not raw.strip():
+            record_event(
+                corr,
+                component="n8n",
+                stage="pa_webhook",
+                status="empty_response",
+                duration_ms=transport_ms,
             )
-            with urllib.request.urlopen(request, timeout=180) as response:
-                raw = response.read()
-            if not raw.strip():
+            # Never replay an execution whose webhook body was lost.  Recover
+            # the already-completed terminal node by correlation id instead.
+            from api.argus_n8n_recovery import recover_pa_result
+
+            result = recover_pa_result(corr)
+            if result is None:
                 raise json.JSONDecodeError("empty PA Core response", "", 0)
+            record_event(
+                corr,
+                component="n8n",
+                stage="execution_recovery",
+                status="recovered",
+                execution_id=result.get("recovered_from_execution_id"),
+            )
+        else:
             result = json.loads(raw.decode("utf-8"))
-            last_error = None
-            break
-        except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
-            last_error = exc
-            if attempt == 0:
-                logger.warning(
-                    "Jarvis II PA Core returned no usable response; retrying correlation %s",
-                    corr,
-                )
-                time.sleep(0.2)
-                continue
+            record_event(
+                corr,
+                component="n8n",
+                stage="pa_webhook",
+                status="response_received",
+                duration_ms=transport_ms,
+                response_status=(result or {}).get("status") if isinstance(result, dict) else None,
+            )
+    except (OSError, urllib.error.URLError, json.JSONDecodeError) as exc:
+        last_error = exc
+        record_event(
+            corr,
+            component="n8n",
+            stage="pa_webhook",
+            status="failed",
+            error=type(exc).__name__,
+        )
     if last_error is not None:
         logger.exception(
-            "Jarvis II PA Core request failed after retry",
+            "A.R.G.U.S. PA Core request failed",
             exc_info=(type(last_error), last_error, last_error.__traceback__),
+        )
+        terminal_event(
+            corr,
+            component="biggy",
+            ok=False,
+            duration_ms=int((time.monotonic() - request_started) * 1000),
+            error=type(last_error).__name__,
         )
         return {
             "handled": True, "ok": False, "reply": "A.R.G.U.S. could not complete that request.",
@@ -281,7 +325,7 @@ def try_argus_pa_core(
         url = str(citations[0].get("url") or "").strip()
         if url:
             reply += f"\n\n[Open verified source]({url})"
-    return {
+    response_payload = {
         "handled": True, "ok": completed, "reply": reply, "spoken_text": spoken,
         "spoken_reply": spoken, "citations": citations, "rag_evidence": (result.get("answer") or {}).get("evidence"),
         "tools_selected": result.get("requestedTools") or [], "correlation_id": str(result.get("correlationId") or corr),
@@ -302,6 +346,17 @@ def try_argus_pa_core(
         else None,
         "error": None if completed else str(result.get("status") or "pa_core_unverified"),
     }
+    terminal_event(
+        corr,
+        component="biggy",
+        ok=completed,
+        duration_ms=int((time.monotonic() - request_started) * 1000),
+        response_status=result.get("status"),
+        tool_count=len(response_payload["tools_selected"]),
+        citation_count=len(citations),
+        has_map=bool(response_payload.get("map_view_model")),
+    )
+    return response_payload
 
 
 def ack_spoken_text() -> str:

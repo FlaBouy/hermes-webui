@@ -584,10 +584,15 @@ def test_owner_prompt_renderer_never_exposes_private_voice_context():
 
 def test_map_handoff_is_single_flight_and_uses_static_map_not_second_webgl_scene():
     assert "let mapRenderPromise = null" in BIGGY_JS
-    assert "if (mapRenderPromise) return mapRenderPromise" in BIGGY_JS
+    render_fn = BIGGY_JS[BIGGY_JS.index("function renderMapViewModel(mvm)"):BIGGY_JS.index("window.__biggyRenderMapViewModel")]
+    assert "if (mapRenderPromise)" in render_fn
+    assert "return mapRenderPromise" in render_fn
+    assert "pendingMapCameraViewport" in render_fn
     assert "mapbox_static_timeout" in BIGGY_JS
     assert "styles/v1/mapbox/streets-v12/static/geojson" in BIGGY_JS
-    assert "Math.ceil(coordinates.length / 80)" in BIGGY_JS
+    assert "Math.ceil(valid.length / 80)" in BIGGY_JS
+    assert "waitForVisibleMapCanvas(canvas)" in BIGGY_JS
+    assert "routeCameraPadding(measured.width, measured.height)" in BIGGY_JS
     render_start = BIGGY_JS.index("async function renderMapViewModelOnce")
     render_end = BIGGY_JS.index("function renderMapViewModel(mvm)", render_start)
     assert "new mapboxgl.Map" not in BIGGY_JS[render_start:render_end]

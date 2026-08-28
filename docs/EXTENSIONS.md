@@ -151,6 +151,21 @@ manifest such as `extensions.json` keeps the existing
 `desktop-companion/manifest.json` resolves relative assets under
 `/extensions/desktop-companion/`.
 
+Local `/static/` and `/extensions/` manifest entries may use `v=auto` instead
+of a hand-maintained cache-busting value. WebUI replaces `auto` with the first
+16 hexadecimal characters of the file's SHA-256 digest each time it renders
+the app shell. The URL therefore changes whenever the file content changes,
+while missing, unreadable, or out-of-root files remain unresolved and continue
+through the existing fail-closed validation path. Other query parameters are
+preserved. For example:
+
+```json
+{
+  "scripts": ["workspace.js?v=auto"],
+  "stylesheets": ["workspace.css?v=auto"]
+}
+```
+
 Extension entries may also declare a loopback sidecar for diagnostics and the
 opt-in proxy:
 

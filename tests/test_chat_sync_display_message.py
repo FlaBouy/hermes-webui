@@ -262,6 +262,47 @@ def test_sync_explicit_new_argus_map_beats_stale_travel_destination(
     assert "Grand Canyon" not in captured["objective"]
 
 
+def test_sync_stt_vargas_map_is_repaired_and_hard_bound_fresh(
+    sync_chat_env, monkeypatch
+):
+    tmp_path = sync_chat_env
+    session = _make_session(tmp_path)
+    session.messages = [
+        {
+            "role": "assistant",
+            "ask_jarvis_hard_bind": True,
+            "map_view_model": {
+                "destination": {"label": "Grand Canyon National Park, Arizona"}
+            },
+        }
+    ]
+    session.save(touch_updated_at=False)
+    captured = {}
+
+    def _hard_bind(handler, _session, objective):
+        captured["objective"] = objective
+        return routes.j(handler, {"ok": True, "objective": objective})
+
+    monkeypatch.setattr(routes, "_handle_argus_sync_hard_bind", _hard_bind)
+    owner = "Hey Biggie, have Vargas pull a map to Jordan-Hare Stadium."
+    handler = _FakePostHandler()
+    routes._handle_chat_sync(
+        handler,
+        {
+            "session_id": session.session_id,
+            "message": owner + "\n\n[Voice PTT turn]",
+            "display_message": owner,
+            "workspace": str(tmp_path),
+        },
+    )
+
+    assert handler.status == 200
+    assert captured["objective"] == (
+        "Hey Biggy, have Argus pull a map to Jordan-Hare Stadium."
+    )
+    assert "Grand Canyon" not in captured["objective"]
+
+
 @pytest.mark.parametrize(
     "display_message",
     ["", "   ", None, 123, ["not", "a", "string"]],
@@ -333,6 +374,33 @@ def test_sync_chat_ptt_owned_tts_stamps_assistant(sync_chat_env, monkeypatch):
     asst = [m for m in saved.messages if m.get("role") == "assistant"][-1]
     assert asst.get("ptt_owned_tts") is True
     assert asst.get("tts_owner") == "pedal_austin"
+
+
+def test_sync_chat_without_voice_owner_queues_server_austin(sync_chat_env, monkeypatch):
+    tmp_path = sync_chat_env
+    session = _make_session(tmp_path)
+    _install_fake_agent(monkeypatch, capture={})
+    spoken = []
+    monkeypatch.setattr(routes, "_server_speak_smedley", spoken.append)
+
+    handler = _FakePostHandler()
+    routes._handle_chat_sync(
+        handler,
+        {
+            "session_id": session.session_id,
+            "message": "Tell me something useful.",
+            "display_message": "Tell me something useful.",
+            "workspace": str(tmp_path),
+        },
+    )
+
+    assert handler.status == 200
+    assert spoken == ["ok"]
+    assert handler.json_body()["ptt_owned_tts"] is True
+    saved = models.get_session(session.session_id)
+    assistant = [m for m in saved.messages if m.get("role") == "assistant"][-1]
+    assert assistant["tts_owner"] == "server_austin"
+    assert assistant["ptt_owned_tts"] is True
 
 
 def test_sync_argus_document_result_is_server_owned_alistar(sync_chat_env, monkeypatch):

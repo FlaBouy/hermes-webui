@@ -1,0 +1,41 @@
+description: Argus V1 black-box RAG and PA release gate
+
+providers:
+  - id: http://127.0.0.1:5680/webhook/jarvis-ii-pa
+    label: argus-pa-live
+    config:
+      method: POST
+      headers:
+        Content-Type: application/json
+        Accept: application/json
+        Authorization: Bearer {{env.GPT_BIGGY_PROPOSE_TOKEN}}
+      body:
+        objective: "{{prompt}}"
+        authority: owner_local_biggy_chat
+        source: argus-evaluator
+        requester: argus-evaluator
+        correlation_id: "{{correlation_id}}"
+      transformResponse: json
+
+prompts:
+  - "{{objective}}"
+
+tests:
+  - vars:
+      correlation_id: eval-map-grand-canyon
+      objective: Map a route from Lynn Haven, Florida to Grand Canyon National Park.
+    assert:
+      - type: javascript
+        value: "(() => { const data = typeof output === 'string' ? JSON.parse(output) : output; return data && data.status === 'COMPLETED'; })()"
+      - type: javascript
+        value: "(() => { const data = typeof output === 'string' ? JSON.parse(output) : output; return Boolean(data && data.map_view_model && data.map_view_model.route); })()"
+      - type: javascript
+        value: "(() => { const data = typeof output === 'string' ? JSON.parse(output) : output; return Array.isArray(data.auditChain) && data.auditChain.some((item) => item.path === 'deterministic_fast_lane'); })()"
+  - vars:
+      correlation_id: eval-manual-1756-ib32
+      objective: Find the verified 1756-IB32 manual.
+    assert:
+      - type: javascript
+        value: "(() => { const data = typeof output === 'string' ? JSON.parse(output) : output; return data && ['COMPLETED', 'NO_VERIFIED_EVIDENCE'].includes(data.status); })()"
+      - type: javascript
+        value: "(() => { const data = typeof output === 'string' ? JSON.parse(output) : output; return data && typeof data.spokenText === 'string' && data.spokenText.length > 0; })()"

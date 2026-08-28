@@ -1,0 +1,15 @@
+services:
+  phoenix:
+    image: arizephoenix/phoenix:latest
+    container_name: argus-phoenix
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6006:6006"
+      - "127.0.0.1:4317:4317"
+    volumes:
+      - argus_phoenix_data:/root/.phoenix
+    environment:
+      PHOENIX_WORKING_DIR: /root/.phoenix
+
+volumes:
+  argus_phoenix_data:

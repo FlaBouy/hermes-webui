@@ -22905,11 +22905,19 @@ def _normalize_biggy_wake_name(message: str) -> str:
         count=1,
         flags=re.IGNORECASE,
     )
-    return re.sub(
+    msg = re.sub(
         r"\bJordan\s+Harris\s+Stadium\b",
         "Jordan-Hare Stadium",
         msg,
         flags=re.IGNORECASE,
+    )
+    # Local STT commonly hears "Argus" as "Vargas" or "Argos" after an
+    # operator verb ("have Vargas pull a map").  Keep the repair narrow so a
+    # real person named Vargas is not globally renamed.
+    return re.sub(
+        r"(?i)(\b(?:have|ask|get|getting|need)\s+)(?:vargas|argos)\b",
+        lambda match: match.group(1) + "Argus",
+        msg,
     )
 
 
@@ -23346,18 +23354,15 @@ def _handle_chat_start(handler, body, diag=None):
                                         "tts_voice_profile": "argus_alistar",
                                         "transport": "jarvis_ii_generic_rag_vnext",
                                     }
-                                elif pa_core_enabled:
-                                    ask_jarvis = try_argus_pa_core(
+                                else:
+                                    ask_jarvis = _run_argus_with_transport_fallback(
                                         objective,
+                                        pa_core_enabled=pa_core_enabled,
                                         biggy_ingress_ts=ingress_ts,
                                         correlation_id=correlation_id,
                                         session_id=session_id,
-                                    )
-                                else:
-                                    ask_jarvis = try_argus(
-                                        objective,
-                                        biggy_ingress_ts=ingress_ts,
-                                        correlation_id=correlation_id,
+                                        try_pa_core=try_argus_pa_core,
+                                        try_briefing=try_argus,
                                     )
                                 if not isinstance(ask_jarvis, dict) or not ask_jarvis.get("handled"):
                                     ask_jarvis = {
@@ -24386,6 +24391,35 @@ def _argus_travel_followup_objective(session, message: str) -> str | None:
             break
     if not prior:
         return None
+    # A fresh, explicitly named destination is not a continuation of the
+    # previous map.  The former behavior pinned the prior card destination
+    # ahead of the owner's new request, producing contradictory objectives
+    # such as "use Grand Canyon exactly" plus "map Jordan-Hare Stadium".
+    # Preserve the active A.R.G.U.S. lane, but make destination resolution
+    # start from the current owner utterance only.
+    explicit_destination = bool(
+        re.search(
+            r"(?i)\b(?:"
+            r"(?:map|route|drive|trip|travel(?:ing)?)\b.{0,80}\bto\s+(?!it\b|there\b|that\b)"
+            r"|(?:game|match|event|venue|destination)\b.{0,80}\b(?:is|played|located|held)\s+(?:at|in)\s+"
+            r"|\b(?:played|located|held)\b.{0,80}\b(?:at|in)\s+"
+            r")",
+            text,
+        )
+    )
+    if explicit_destination:
+        return (
+            "Ask Argus: Start a fresh A.R.G.U.S. travel resolution using only "
+            "the destination stated in this owner request; do not carry forward "
+            "a destination from an earlier map card. Owner request: "
+            + text
+            + ". Complete each requested route, lodging, meal, fuel, and weather "
+            "category independently; one unavailable category must not cancel the "
+            "others. Weather must use the authorized five-day forecast only when "
+            "the requested date is within that horizon; otherwise state that the "
+            "forecast is not available yet. Return only verified recommendations "
+            "as structured cards; do not invent names, rates, distances, or availability."
+        )
     # Retain the owner's earlier date expression when it is present in the
     # same conversation; it is context, not an invented reservation date.
     date_context = ""
@@ -24410,6 +24444,54 @@ def _argus_travel_followup_objective(session, message: str) -> str | None:
         "forecast is not available yet. Return only verified recommendations "
         "as structured cards; do not invent names, rates, distances, or availability."
     )
+
+
+def _run_argus_with_transport_fallback(
+    objective: str,
+    *,
+    pa_core_enabled: bool,
+    biggy_ingress_ts: float,
+    correlation_id: str,
+    session_id: str,
+    try_pa_core,
+    try_briefing,
+):
+    """Fall back only when PA Core failed to return a governed decision."""
+    if not pa_core_enabled:
+        return try_briefing(
+            objective,
+            biggy_ingress_ts=biggy_ingress_ts,
+            correlation_id=correlation_id,
+        )
+    primary = try_pa_core(
+        objective,
+        biggy_ingress_ts=biggy_ingress_ts,
+        correlation_id=correlation_id,
+        session_id=session_id,
+    )
+    if isinstance(primary, dict) and primary.get("ok"):
+        return primary
+    error = str((primary or {}).get("error") or "") if isinstance(primary, dict) else "empty_result"
+    if error not in {
+        "JSONDecodeError", "URLError", "HTTPError", "TimeoutError", "OSError",
+        "empty_result", "pa_core_auth_unavailable",
+    }:
+        return primary
+    logger.warning(
+        "A.R.G.U.S. PA Core transport failed (%s); using governed briefing fallback corr=%s",
+        error,
+        correlation_id,
+    )
+    fallback = try_briefing(
+        objective,
+        biggy_ingress_ts=biggy_ingress_ts,
+        correlation_id=correlation_id,
+    )
+    if isinstance(fallback, dict):
+        fallback = dict(fallback)
+        fallback["primary_transport_error"] = error
+        fallback["transport_fallback"] = True
+    return fallback
 
 
 def _handle_argus_sync_hard_bind(handler, s, objective: str):
@@ -24536,15 +24618,14 @@ def _handle_argus_sync_hard_bind(handler, s, objective: str):
     except Exception:
         pass
 
-    ask_jarvis = (
-        try_argus_pa_core(
-            objective,
-            biggy_ingress_ts=ingress_ts,
-            correlation_id=corr,
-            session_id=str(getattr(s, "session_id", "") or ""),
-        )
-        if argus_pa_core_enabled()
-        else try_argus(objective, biggy_ingress_ts=ingress_ts, correlation_id=corr)
+    ask_jarvis = _run_argus_with_transport_fallback(
+        objective,
+        pa_core_enabled=argus_pa_core_enabled(),
+        biggy_ingress_ts=ingress_ts,
+        correlation_id=corr,
+        session_id=str(getattr(s, "session_id", "") or ""),
+        try_pa_core=try_argus_pa_core,
+        try_briefing=try_argus,
     )
     if not isinstance(ask_jarvis, dict) or not ask_jarvis.get("handled"):
         ask_jarvis = {
@@ -25437,7 +25518,21 @@ def _handle_chat_sync(handler, body):
             spoken_text = attach_spoken_text_to_last_assistant(s.messages)
         except Exception:
             logger.debug("Failed to attach sync-chat spoken_text", exc_info=True)
-        _stamp_ptt_owned_tts(s.messages, ptt_owned)
+        server_spoke = False
+        if spoken_text and not ptt_owned:
+            # Desktop synchronous/PTT replies do not pass through the normal
+            # SSE completion hook.  If neither the pedal nor browser claimed
+            # playback, queue Austin here and mark the row so the client does
+            # not duplicate it.
+            _server_speak_smedley(spoken_text)
+            _stamp_ptt_owned_tts(s.messages, True)
+            for row in reversed(s.messages):
+                if isinstance(row, dict) and row.get("role") == "assistant":
+                    row["tts_owner"] = "server_austin"
+                    break
+            server_spoke = True
+        else:
+            _stamp_ptt_owned_tts(s.messages, ptt_owned)
         # Only auto-generate title when still default; preserves user renames
         if s.title == "Untitled":
             s.title = title_from(s.messages, s.title)
@@ -25471,7 +25566,7 @@ def _handle_chat_sync(handler, body):
         {
             "answer": result.get("final_response") or "",
             "spoken_text": spoken_text or None,
-            "ptt_owned_tts": bool(ptt_owned),
+            "ptt_owned_tts": bool(ptt_owned or server_spoke),
             "status": "done" if result.get("completed", True) else "partial",
             "session": s.compact() | {"messages": s.messages},
             "result": {k: v for k, v in result.items() if k != "messages"},

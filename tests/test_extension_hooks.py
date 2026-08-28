@@ -122,6 +122,38 @@ def test_manifest_static_auto_version_tracks_asset_content(tmp_path, monkeypatch
     assert first != second
 
 
+def test_manifest_extension_auto_version_tracks_asset_content(tmp_path, monkeypatch):
+    from api.extensions import _manifest_asset_url
+
+    root = tmp_path / "extensions"
+    package = root / "smedley-engineering"
+    package.mkdir(parents=True)
+    asset = package / "workspace.js"
+    monkeypatch.setenv("HERMES_WEBUI_EXTENSION_DIR", str(root))
+
+    asset.write_text("first", encoding="utf-8")
+    first = _manifest_asset_url("workspace.js?v=auto&mode=glass", "smedley-engineering")
+    asset.write_text("second", encoding="utf-8")
+    second = _manifest_asset_url("workspace.js?v=auto&mode=glass", "smedley-engineering")
+
+    assert first.startswith("/extensions/smedley-engineering/workspace.js?v=")
+    assert "auto" not in first
+    assert "mode=glass" in first
+    assert first != second
+
+
+def test_manifest_extension_auto_version_fails_closed_for_missing_asset(tmp_path, monkeypatch):
+    from api.extensions import _manifest_asset_url
+
+    root = tmp_path / "extensions"
+    root.mkdir()
+    monkeypatch.setenv("HERMES_WEBUI_EXTENSION_DIR", str(root))
+
+    unresolved = _manifest_asset_url("missing.js?v=auto")
+
+    assert unresolved == "/extensions/missing.js?v=auto"
+
+
 def test_index_html_injection_escapes_urls_and_preserves_disabled_default(tmp_path, monkeypatch):
     monkeypatch.delenv("HERMES_WEBUI_EXTENSION_DIR", raising=False)
     monkeypatch.setenv("HERMES_WEBUI_EXTENSION_SCRIPT_URLS", "/extensions/app.js")
