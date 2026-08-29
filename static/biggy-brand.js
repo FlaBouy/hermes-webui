@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260829-rag-reveal-36';
+  const BUILD_ID = '20260829-pa-deck-37';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -563,21 +563,22 @@
     }
   }
 
-  function installPromptControlRail() {
-    const wrap = document.getElementById('composerWrap');
+  function installPromptInlineControls() {
     const box = document.getElementById('composerBox');
-    const footer = box && box.querySelector(':scope > .composer-footer');
-    if (!wrap || !box) return null;
-    let rail = document.getElementById('biggyPromptControlRail');
-    if (!rail) {
-      rail = el('nav', 'biggy-prompt-control-rail');
-      rail.id = 'biggyPromptControlRail';
-      rail.setAttribute('aria-label', 'Prompt controls');
-      rail.setAttribute('data-testid', 'biggy-prompt-control-rail');
-      wrap.insertBefore(rail, box);
+    const voice = document.getElementById('btnGptVoice');
+    const send = document.getElementById('btnSend');
+    if (!box) return null;
+    let controls = document.getElementById('biggyPromptInlineControls');
+    if (!controls) {
+      controls = el('div', 'biggy-prompt-inline-controls');
+      controls.id = 'biggyPromptInlineControls';
+      controls.setAttribute('aria-label', 'Prompt voice and send controls');
+      controls.setAttribute('data-testid', 'biggy-prompt-inline-controls');
+      box.appendChild(controls);
     }
-    if (footer && footer.parentElement !== rail) rail.appendChild(footer);
-    return rail;
+    if (voice && voice.parentElement !== controls) controls.appendChild(voice);
+    if (send && send.parentElement !== controls) controls.appendChild(send);
+    return controls;
   }
 
   const FLEET_STATUS_PATH = '/api/biggy/fleet/status';
@@ -748,10 +749,11 @@
   function syncBiggySharedCenterline() {
     sharedCenterlineTimer = null;
     const prompt = document.getElementById('composerBox');
+    const deck = document.getElementById('biggyPromptDeck');
     const mainChat = document.getElementById('mainChat');
     if (!prompt || !mainChat) return;
-    const promptRect = prompt.getBoundingClientRect();
-    const masterX = promptRect.left + (promptRect.width / 2);
+    const axisRect = (deck || prompt).getBoundingClientRect();
+    const masterX = axisRect.left + (axisRect.width / 2);
     const placeOnMaster = (node) => {
       if (!node || !node.offsetParent) return;
       const parentRect = node.offsetParent.getBoundingClientRect();
@@ -847,8 +849,13 @@
 
   function installHermesStrip(mainChat) {
     const composer = document.getElementById('composerWrap');
+    const box = document.getElementById('composerBox');
     const layout = document.querySelector('.layout');
     if (!composer || !layout) return null;
+    const footer = document.querySelector('.composer-footer');
+    // applyShell can safely run more than once. Preserve the native footer
+    // before replacing its prior Hermes host so no stock control is lost.
+    if (footer && footer.closest('.biggy-hermes-strip') && box) box.appendChild(footer);
     document.querySelectorAll('.biggy-hermes-strip').forEach((node) => node.remove());
     const strip = el('nav', 'biggy-hermes-strip');
     strip.id = 'biggyHermesStrip';
@@ -869,8 +876,46 @@
       });
       strip.appendChild(button);
     });
+    if (footer) strip.appendChild(footer);
     layout.appendChild(strip);
     return strip;
+  }
+
+  function installPaRailToggle(mainChat) {
+    const composer = document.getElementById('composerWrap');
+    const box = document.getElementById('composerBox');
+    if (!composer || !box || !mainChat) return null;
+    let deck = document.getElementById('biggyPromptDeck');
+    if (!deck) {
+      deck = el('div', 'biggy-prompt-deck');
+      deck.id = 'biggyPromptDeck';
+      deck.setAttribute('data-testid', 'biggy-prompt-deck');
+      box.insertAdjacentElement('beforebegin', deck);
+    }
+    if (box.parentElement !== deck) deck.appendChild(box);
+    document.querySelectorAll('.biggy-pa-toggle').forEach((node) => node.remove());
+    const button = el('button', 'biggy-pa-toggle');
+    button.id = 'biggyPaToggle';
+    button.type = 'button';
+    button.textContent = 'PA';
+    button.title = 'Open personal assistant controls';
+    button.setAttribute('aria-label', button.title);
+    const setOpen = (open) => {
+      const next = open === true;
+      mainChat.classList.toggle('biggy-pa-rail-open', next);
+      document.body.classList.toggle('biggy-pa-rail-open', next);
+      button.setAttribute('aria-expanded', next ? 'true' : 'false');
+      button.classList.toggle('is-open', next);
+      button.title = next ? 'Close personal assistant controls' : 'Open personal assistant controls';
+      button.setAttribute('aria-label', button.title);
+    };
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      setOpen(!mainChat.classList.contains('biggy-pa-rail-open'));
+    });
+    deck.insertBefore(button, box);
+    setOpen(false);
+    return button;
   }
 
   function forceChromeLabels() {
@@ -2280,10 +2325,17 @@
     }
     const frame = document.getElementById('biggyV6World');
     if (frame) {
+      const wasVisible = frame.dataset.ragVisible === '1';
       frame.dataset.ragVisible = next ? '1' : '0';
       try {
         if (frame.contentWindow) frame.contentWindow.postMessage(
           { type: 'biggy-rag-visibility', visible: next },
+          window.location.origin,
+        );
+        // A deliberate RAG reveal always begins from the complete HOME view.
+        // Filters and evidence traces may move the camera after this baseline.
+        if (next && !wasVisible) frame.contentWindow.postMessage(
+          { type: 'biggy-rag-home' },
           window.location.origin,
         );
       } catch (_) {}
@@ -5595,7 +5647,7 @@
     ].join('|');
   }
 
-  async function reconcileActiveBiggySessionCompletion({ force = false } = {}) {
+  async function reconcileActiveBiggySessionCompletion({ force = false, primeOnly = false } = {}) {
     const sid = currentHermesSessionId();
     if (!isValidSessionId(sid) || activeSessionReconcileInFlight) return false;
     activeSessionReconcileInFlight = true;
@@ -5612,6 +5664,9 @@
       const signature = activeSessionCompletionSignature(sid, session, messages);
       if (!signature || (!force && signature === activeSessionReconcileSignature)) return false;
       activeSessionReconcileSignature = signature;
+      // Persisted conversation history is not a startup command. Prime the
+      // completion watermark without resurrecting its old visual cards.
+      if (primeOnly) return false;
       completionMessages = messages;
       completionMessagesSessionId = sid;
       persistGuiSessionId(sid);
@@ -5659,7 +5714,7 @@
   function installActiveSessionCompletionReconciler() {
     if (activeSessionReconcileTimer) clearInterval(activeSessionReconcileTimer);
     setTimeout(() => {
-      reconcileActiveBiggySessionCompletion({ force: true }).catch(() => {});
+      reconcileActiveBiggySessionCompletion({ force: true, primeOnly: true }).catch(() => {});
     }, 600);
     // This local, low-frequency safety path closes the gap left by a dropped
     // normal-chat SSE completion. PTT and direct-response hooks remain the
@@ -5699,7 +5754,7 @@
     document.querySelectorAll('.biggy-fleet-strip').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-cockpit-strip').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-top-rail-group').forEach((node) => node.remove());
-    document.querySelectorAll('.biggy-hermes-strip').forEach((node) => node.remove());
+    document.querySelectorAll('.biggy-pa-toggle').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-right-cockpit-controls').forEach((node) => node.remove());
     mainChat.querySelectorAll('.biggy-argus-rag-overview').forEach((node) => node.remove());
     mainChat.querySelectorAll('.biggy-argus-conversation-lane').forEach((node) => node.remove());
@@ -5717,7 +5772,7 @@
     const modelStatus = header.querySelector('.biggy-brand-status');
     if (modelStatus) reactorDock.appendChild(modelStatus);
     const composer = document.getElementById('composerWrap');
-    installPromptControlRail();
+    installPromptInlineControls();
     if (composer) composer.appendChild(reactorDock);
     else header.insertAdjacentElement('afterend', reactorDock);
     buildReactorHud();
@@ -5740,6 +5795,8 @@
     removeCaduceus();
     updateIdentityChip();
     ensureTravelMapDialog();
+    installPaRailToggle(mainChat);
+    if (typeof window.closeWorkspacePanel === 'function') window.closeWorkspacePanel();
     installActiveSessionCompletionReconciler();
     return true;
   }

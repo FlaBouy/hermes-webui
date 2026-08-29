@@ -6,6 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BRAND = (ROOT / "static" / "biggy-brand.js").read_text(encoding="utf-8")
 BRAND_CSS = (ROOT / "static" / "biggy-brand.css").read_text(encoding="utf-8")
+ARGUS_WORLD = (ROOT / "api" / "argus_world.py").read_text(encoding="utf-8")
 
 
 def test_cockpit_owns_home_sync_filter_rag_ptt_and_room_in_order():
@@ -64,23 +65,45 @@ def test_rag_button_toggles_panel_without_reinstalling_conversation_stack():
     assert ".biggy-argus-conversation-lane" not in BRAND_CSS
 
 
-def test_half_width_prompt_is_centered_on_the_shared_cockpit_axis():
-    assert "padding:10px 84px 52px" in BRAND_CSS
-    assert "#mainChat.biggy-brand-iwo #composerBox{width:50%;max-width:900px;margin:5px auto 0}" in BRAND_CSS
+def test_prompt_and_pa_deck_match_bottom_rail_without_overlap():
+    assert "--biggy-bottom-deck-width:min(856px,calc(100% - 48px))" in BRAND_CSS
+    assert "padding:10px 84px 66px" in BRAND_CSS
+    assert "width:var(--biggy-bottom-deck-width);margin:0 auto" in BRAND_CSS
+    assert "width:var(--biggy-bottom-deck-width);max-width:calc(100% - 48px)" in BRAND_CSS
     assert "function syncBiggySharedCenterline()" in BRAND
-    assert "const masterX = promptRect.left + (promptRect.width / 2)" in BRAND
+    assert "const masterX = axisRect.left + (axisRect.width / 2)" in BRAND
     assert "placeOnMaster(document.getElementById('biggyTopRailGroup'))" in BRAND
     assert "placeOnMaster(document.getElementById('biggyArgusReactor'))" in BRAND
     assert "biggy-home-centerline-sync" in BRAND
 
 
-def test_prompt_controls_are_moved_to_a_dedicated_rail_above_half_height_entry():
-    assert "function installPromptControlRail()" in BRAND
-    assert "wrap.insertBefore(rail, box)" in BRAND
-    assert "rail.appendChild(footer)" in BRAND
-    assert "installPromptControlRail();" in BRAND
-    assert ".biggy-prompt-control-rail{" in BRAND_CSS
-    assert "min-height:30px;height:34px;max-height:92px" in BRAND_CSS
+def test_send_and_biggy_voice_return_to_half_height_prompt():
+    assert "function installPromptInlineControls()" in BRAND
+    assert "controls.appendChild(voice)" in BRAND
+    assert "controls.appendChild(send)" in BRAND
+    assert "installPromptInlineControls();" in BRAND
+    assert ".biggy-prompt-inline-controls{" in BRAND_CSS
+    assert "flex-direction:row;flex-wrap:nowrap" in BRAND_CSS
+    assert "min-height:34px;height:36px;max-height:92px" in BRAND_CSS
+    assert "width:28px;height:28px" in BRAND_CSS
+
+
+def test_remaining_native_prompt_controls_join_the_hermes_rail():
+    hermes = BRAND[BRAND.index("function installHermesStrip"):BRAND.index("function installPaRailToggle")]
+    assert "const footer = document.querySelector('.composer-footer')" in hermes
+    assert "strip.appendChild(footer)" in hermes
+    assert ".biggy-hermes-strip>.composer-footer{" in BRAND_CSS
+
+
+def test_pa_button_owns_closed_by_default_right_rail():
+    assert "function installPaRailToggle(mainChat)" in BRAND
+    assert "setOpen(false)" in BRAND
+    assert "installPaRailToggle(mainChat)" in BRAND
+    assert "window.closeWorkspacePanel()" in BRAND
+    assert "deck.insertBefore(button, box)" in BRAND
+    assert ".biggy-pa-toggle{" in BRAND_CSS
+    assert ".biggy-pa-rail-open > .biggy-category-rail" in BRAND_CSS
+    assert "body.biggy-brand #btnWorkspacePanelEdgeToggle{display:none!important}" in BRAND_CSS
 
 
 def test_rag_overview_clears_top_rails_on_desktop_and_tablet():
@@ -120,6 +143,15 @@ def test_galaxy_canvas_remains_full_screen_while_home_camera_controls_framing():
     assert "iframe.style.top = `${profileTop}px`" not in BRAND
     assert ".biggy-v6-world{\n  position:absolute;inset:0;width:100%;height:100%" in BRAND_CSS
     assert "window.addEventListener('resize', scheduleGalaxyCanvasSize)" in BRAND
+    assert "starField.scale.set(1.55, 1.35, 1.2)" in ARGUS_WORLD
+
+
+def test_rag_reveal_restores_home_camera_and_boot_does_not_restore_stale_cards():
+    assert "{ type: 'biggy-rag-home' }" in BRAND
+    assert "data.type === 'biggy-rag-home'" in ARGUS_WORLD
+    assert "primeOnly = false" in BRAND
+    assert "if (primeOnly) return false" in BRAND
+    assert "force: true, primeOnly: true" in BRAND
 
 
 def test_argus_response_label_observer_is_idempotent():
