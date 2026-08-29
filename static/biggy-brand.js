@@ -10,10 +10,11 @@
   const IWO_CLASS = 'biggy-brand-iwo';
   const BODY_CLASS = 'biggy-brand';
   const PTT_PROXY = '/api/extensions/biggy-brand/sidecar';
+  const ARGUS_RAG_INGEST_PROXY = '/api/biggy/rag';
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260829-pa-deck-37';
+  const BUILD_ID = '20260829-rag-ingest-38';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -72,6 +73,8 @@
   let identityTimer = null;
   let diagTimer = null;
   let ragWorldTimer = null;
+  let ragIngestPollTimer = null;
+  let ragIngestStatusInFlight = false;
   let conversationLaneTimer = null;
   let conversationLaneRenderQueued = false;
   let activeSessionReconcileTimer = null;
@@ -86,6 +89,7 @@
   let started = false;
   let pttInstalled = false;
   let sessionEnsurePromise = null;
+  let sharedCenterlineLayoutObserver = null;
 
   function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, (c) => ({
@@ -752,6 +756,18 @@
     const deck = document.getElementById('biggyPromptDeck');
     const mainChat = document.getElementById('mainChat');
     if (!prompt || !mainChat) return;
+    // mainChat is the common visual viewport on both Smedley and TD. Resolve
+    // one pixel width from it, then give that exact width to both bottom
+    // surfaces; percentage custom properties resolve against different
+    // containing blocks and drift on TD's aspect ratio.
+    const mainRect = mainChat.getBoundingClientRect();
+    const horizontalInset = window.matchMedia('(max-width: 900px)').matches ? 24 : 168;
+    const deckWidth = Math.max(0, Math.min(856, mainRect.width - horizontalInset));
+    const hermesStrip = document.getElementById('biggyHermesStrip');
+    if (deckWidth) {
+      if (deck) deck.style.width = `${deckWidth}px`;
+      if (hermesStrip) hermesStrip.style.width = `${deckWidth}px`;
+    }
     const axisRect = (deck || prompt).getBoundingClientRect();
     const masterX = axisRect.left + (axisRect.width / 2);
     const placeOnMaster = (node) => {
@@ -772,6 +788,15 @@
   function scheduleBiggySharedCenterline() {
     if (sharedCenterlineTimer !== null) clearTimeout(sharedCenterlineTimer);
     sharedCenterlineTimer = setTimeout(syncBiggySharedCenterline, 80);
+  }
+
+  function installBiggyDeckLayoutObserver(mainChat) {
+    if (sharedCenterlineLayoutObserver) sharedCenterlineLayoutObserver.disconnect();
+    sharedCenterlineLayoutObserver = null;
+    if (!mainChat || typeof MutationObserver !== 'function') return;
+    sharedCenterlineLayoutObserver = new MutationObserver(scheduleBiggySharedCenterline);
+    sharedCenterlineLayoutObserver.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
+    sharedCenterlineLayoutObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-workspace-panel'] });
   }
 
   function installCockpitStrip(header) {
@@ -2284,17 +2309,22 @@
     const host = mainChat || document.getElementById('mainChat');
     if (!host) return null;
     let hud = host.querySelector('#biggyArgusRagOverview');
-    if (hud) return hud;
-    hud = el('section', 'biggy-argus-rag-overview');
-    hud.id = 'biggyArgusRagOverview';
-    hud.dataset.biggyLayer = 'workspace';
-    hud.setAttribute('data-testid', 'biggy-argus-rag-overview');
-    hud.setAttribute('aria-label', 'ARGUS RAG overview');
-    hud.innerHTML = '<div class="biggy-argus-rag-title">A.R.G.U.S.</div>'
-      + '<div class="biggy-argus-rag-subtitle">AUGMENTED RETRIEVAL &amp; GROUNDED UNDERSTANDING SYSTEM</div>'
-      + '<div class="biggy-argus-rag-section">SYSTEM STATUS</div>'
-      + '<div class="biggy-argus-rag-state is-offline">● AWAITING INGEST STATUS</div>';
-    host.appendChild(hud);
+    if (!hud) {
+      hud = el('section', 'biggy-argus-rag-overview');
+      hud.id = 'biggyArgusRagOverview';
+      hud.dataset.biggyLayer = 'workspace';
+      hud.setAttribute('data-testid', 'biggy-argus-rag-overview');
+      hud.setAttribute('aria-label', 'ARGUS RAG overview');
+      host.appendChild(hud);
+    }
+    if (!hud.querySelector('#biggyArgusRagSummary')) {
+      hud.innerHTML = '<div id="biggyArgusRagSummary" class="biggy-argus-rag-summary">'
+        + '<div class="biggy-argus-rag-title">A.R.G.U.S.</div>'
+        + '<div class="biggy-argus-rag-subtitle">AUGMENTED RETRIEVAL &amp; GROUNDED UNDERSTANDING SYSTEM</div>'
+        + '<div class="biggy-argus-rag-section">SYSTEM STATUS</div>'
+        + '<div class="biggy-argus-rag-state is-offline">● AWAITING INGEST STATUS</div></div>';
+    }
+    ensureArgusRagIngestTools(hud);
     return hud;
   }
 
@@ -2323,6 +2353,8 @@
     if (persist) {
       try { localStorage.setItem(ARGUS_RAG_PANEL_STORAGE_KEY, next ? '1' : '0'); } catch (_) {}
     }
+    if (next) startArgusRagIngestPolling();
+    else stopArgusRagIngestPolling();
     const frame = document.getElementById('biggyV6World');
     if (frame) {
       const wasVisible = frame.dataset.ragVisible === '1';
@@ -2575,9 +2607,330 @@
     });
   }
 
+  async function argusRagIngestJson(path, options = {}) {
+    const url = `${ARGUS_RAG_INGEST_PROXY}${path}`;
+    if (typeof window.api === 'function') return window.api(url, options);
+    const response = await fetch(url, { ...options, cache: 'no-store' });
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 240)}`);
+    return response.json();
+  }
+
+  function selectedArgusLibraryFolder(panel) {
+    if (!panel) return '';
+    return [
+      panel.querySelector('#biggyArgusLibraryFolder'),
+      panel.querySelector('#biggyArgusLibrarySubfolder'),
+      panel.querySelector('#biggyArgusLibraryLevel3'),
+      panel.querySelector('#biggyArgusLibraryLevel4'),
+    ].map((select) => String(select && select.value || '').trim()).filter(Boolean).join('/');
+  }
+
+  function heartbeatAgeSeconds(value) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric > 0) return (Date.now() / 1000) - numeric;
+    const parsed = Date.parse(String(value || ''));
+    return Number.isFinite(parsed) ? (Date.now() - parsed) / 1000 : Infinity;
+  }
+
+  function ensureArgusRagIngestTools(hud) {
+    if (!hud) return null;
+    let panel = hud.querySelector('#biggyArgusIngestTools');
+    if (panel) return panel;
+    panel = el('section', 'biggy-argus-ingest-tools');
+    panel.id = 'biggyArgusIngestTools';
+    panel.setAttribute('aria-label', 'ARGUS RAG ingestion tools');
+    panel.innerHTML = '<div class="biggy-argus-ingest-heading"><span>RAG INGEST TOOLS</span>'
+      + '<button id="biggyArgusRefreshFolders" type="button" title="Refresh library folders" aria-label="Refresh library folders">↺</button></div>'
+      + '<div class="biggy-argus-ingest-kicker">DROP TO LIBRARY FOLDER // WATCHER INDEXES</div>'
+      + '<div class="biggy-argus-ingest-folder-grid">'
+      + '<label>FOLDER<select id="biggyArgusLibraryFolder"><option value="">LOADING…</option></select></label>'
+      + '<label>SUBFOLDER<select id="biggyArgusLibrarySubfolder" disabled><option value="">SELECT FOLDER FIRST</option></select></label>'
+      + '<label>LEVEL 3<select id="biggyArgusLibraryLevel3" disabled><option value="">SELECT SUBFOLDER FIRST</option></select></label>'
+      + '<label>LEVEL 4<select id="biggyArgusLibraryLevel4" disabled><option value="">SELECT LEVEL 3 FIRST</option></select></label></div>'
+      + '<label class="biggy-argus-ingest-drop" tabindex="0">DROP FILE TO INGEST<input id="biggyArgusIngestFile" type="file" hidden></label>'
+      + '<div id="biggyArgusIngestUploadStatus" class="biggy-argus-ingest-note" aria-live="polite"></div>'
+      + '<div class="biggy-argus-ingest-block"><div class="biggy-argus-ingest-label">INGEST STATUS <span id="biggyArgusWatcherDot">●</span></div>'
+      + '<div id="biggyArgusIngestJobs" class="biggy-argus-ingest-job">● <span>WAITING FOR WATCHER EVENT</span></div>'
+      + '<div id="biggyArgusIngestIdentity" class="biggy-argus-ingest-note"></div><div class="biggy-argus-ingest-heartbeat"><i></i></div>'
+      + '<div id="biggyArgusIngestQueue" class="biggy-argus-ingest-queue"><div class="biggy-argus-ingest-empty">NO INGEST EVENTS YET</div></div>'
+      + '<div id="biggyArgusQuarantine" class="biggy-argus-ingest-note"></div></div>'
+      + '<div class="biggy-argus-ingest-block"><div class="biggy-argus-ingest-label">NEW LIBRARY FOLDER</div>'
+      + '<div id="biggyArgusNewFolderParent" class="biggy-argus-ingest-kicker">CREATE A TOP-LEVEL LIBRARY FOLDER</div>'
+      + '<div class="biggy-argus-new-folder"><input id="biggyArgusNewFolderName" type="text" placeholder="FOLDER NAME" autocomplete="off">'
+      + '<button id="biggyArgusCreateFolder" type="button" aria-label="Create library folder">+</button></div>'
+      + '<div id="biggyArgusFolderStatus" class="biggy-argus-ingest-note" aria-live="polite"></div></div>'
+      + '<div class="biggy-argus-ingest-footer-grid"><div><span>CORPUS STATUS</span><b id="biggyArgusCorpusVectors">—</b><small id="biggyArgusCorpusCollection"></small></div>'
+      + '<div><span>LOW-LATENCY PATH</span><b class="biggy-argus-ingest-flow">EMBED → QDRANT → ARGUS</b><small>ONE VERIFIED PATH WITH MEMORY AND CONTINUITY</small></div></div>';
+    hud.appendChild(panel);
+
+    const folder = panel.querySelector('#biggyArgusLibraryFolder');
+    const subfolder = panel.querySelector('#biggyArgusLibrarySubfolder');
+    const level3 = panel.querySelector('#biggyArgusLibraryLevel3');
+    const level4 = panel.querySelector('#biggyArgusLibraryLevel4');
+    const upload = panel.querySelector('#biggyArgusIngestFile');
+    const drop = panel.querySelector('.biggy-argus-ingest-drop');
+    const uploadStatus = panel.querySelector('#biggyArgusIngestUploadStatus');
+
+    const setOptions = (select, names, rootLabel) => {
+      select.innerHTML = '';
+      if (rootLabel) {
+        const root = el('option');
+        root.value = '';
+        root.textContent = `${rootLabel.toUpperCase()} (ROOT)`;
+        select.appendChild(root);
+      }
+      names.forEach((name) => {
+        const option = el('option');
+        option.value = String(name);
+        option.textContent = String(name).toUpperCase();
+        select.appendChild(option);
+      });
+    };
+    const setUnavailable = (select, text) => {
+      select.innerHTML = '';
+      const option = el('option');
+      option.value = '';
+      option.textContent = text;
+      select.appendChild(option);
+      select.disabled = true;
+    };
+    const refreshNewFolderParent = () => {
+      const parent = selectedArgusLibraryFolder(panel);
+      panel.querySelector('#biggyArgusNewFolderParent').textContent = parent
+        ? `CREATE IN ${parent.toUpperCase()}` : 'CREATE A TOP-LEVEL LIBRARY FOLDER';
+    };
+    const fillArgusChildFolders = async (select, parent, emptyLabel, priorValue = '') => {
+      if (!parent) {
+        setUnavailable(select, emptyLabel);
+        return;
+      }
+      setUnavailable(select, 'LOADING…');
+      try {
+        const data = await argusRagIngestJson(`/library-folders?parent=${encodeURIComponent(parent)}`);
+        setOptions(select, Array.isArray(data.folders) ? data.folders : [], parent);
+        select.disabled = false;
+        if (priorValue && Array.from(select.options).some((option) => option.value === priorValue)) select.value = priorValue;
+      } catch (_) {
+        setUnavailable(select, 'FOLDER API OFFLINE');
+      }
+    };
+    const refreshArgusLibraryLevel4 = async (priorValue = '') => {
+      const parent = folder.value && subfolder.value && level3.value
+        ? `${folder.value}/${subfolder.value}/${level3.value}` : '';
+      await fillArgusChildFolders(level4, parent, 'SELECT LEVEL 3 FIRST', priorValue);
+      refreshNewFolderParent();
+    };
+    const refreshArgusLibraryLevel3 = async (priorLevel3 = '', priorLevel4 = '') => {
+      const parent = folder.value && subfolder.value ? `${folder.value}/${subfolder.value}` : '';
+      await fillArgusChildFolders(level3, parent, 'SELECT SUBFOLDER FIRST', priorLevel3);
+      await refreshArgusLibraryLevel4(priorLevel4);
+    };
+    const refreshArgusLibrarySubfolders = async (priorSubfolder = '', priorLevel3 = '', priorLevel4 = '') => {
+      await fillArgusChildFolders(subfolder, folder.value, 'SELECT FOLDER FIRST', priorSubfolder);
+      await refreshArgusLibraryLevel3(priorLevel3, priorLevel4);
+    };
+    const refreshArgusLibraryFolders = async () => {
+      const previous = [folder.value, subfolder.value, level3.value, level4.value];
+      setUnavailable(folder, 'LOADING…');
+      try {
+        const data = await argusRagIngestJson('/library-folders');
+        const names = Array.isArray(data.folders) ? data.folders : [];
+        setOptions(folder, names, '');
+        folder.disabled = false;
+        if (!names.length) setUnavailable(folder, 'NO FOLDERS FOUND');
+        else if (previous[0] && names.includes(previous[0])) folder.value = previous[0];
+        await refreshArgusLibrarySubfolders(previous[1], previous[2], previous[3]);
+        panel.dataset.foldersLoaded = '1';
+      } catch (_) {
+        setUnavailable(folder, 'FOLDER API OFFLINE');
+        setUnavailable(subfolder, 'SUBFOLDER API OFFLINE');
+        setUnavailable(level3, 'SELECT SUBFOLDER FIRST');
+        setUnavailable(level4, 'SELECT LEVEL 3 FIRST');
+      }
+      refreshNewFolderParent();
+    };
+
+    const renderQueue = (status) => {
+      const box = panel.querySelector('#biggyArgusIngestQueue');
+      const rows = (status && Array.isArray(status.queue) ? status.queue : [])
+        .filter((row) => ['failed', 'quarantined'].includes(String(row && row.phase || '').toLowerCase()));
+      if (!rows.length) {
+        box.innerHTML = '<div class="biggy-argus-ingest-empty">NO INGEST EVENTS YET</div>';
+        return;
+      }
+      box.innerHTML = rows.slice(0, 8).map((row) => {
+        const phaseName = String(row && row.phase || 'issue').toLowerCase();
+        const path = encodeURIComponent(String(row && row.path || ''));
+        const reason = row && row.reason ? `<small>${esc(row.reason)}</small>` : '';
+        return `<div class="biggy-argus-ingest-queue-row is-${esc(phaseName)}"><b>${esc(row && (row.pub_id || row.basename) || 'UNKNOWN FILE')}</b>`
+          + `<span>${esc(phaseName.toUpperCase())} · ${esc(row && (row.folder || row.source) || '')}</span>${reason}`
+          + `<button type="button" data-argus-ingest-retry="${path}">RETRY</button></div>`;
+      }).join('');
+      box.querySelectorAll('[data-argus-ingest-retry]').forEach((button) => button.addEventListener('click', async () => {
+        const path = decodeURIComponent(button.dataset.argusIngestRetry || '');
+        if (!path) return;
+        button.disabled = true;
+        button.textContent = 'QUEUED';
+        try {
+          await argusRagIngestJson('/ingest-retry', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }),
+          });
+        } catch (_) {
+          button.textContent = 'FAILED';
+        }
+        refreshArgusRagIngestStatus().catch(() => {});
+      }));
+    };
+
+    panel.__renderStatus = (health, status) => {
+      const count = health && (health.vector_count ?? health.vectors ?? health.qdrant_vectors);
+      panel.querySelector('#biggyArgusCorpusVectors').textContent = `${count ?? '—'} VECTORS`;
+      panel.querySelector('#biggyArgusCorpusCollection').textContent = String(health && (health.collection || health.qdrant_collection) || 'argus_kb');
+      const stale = !status || heartbeatAgeSeconds(status.heartbeat) > 90;
+      const active = !!(status && (status.indicator === 'red' || status.status === 'active' || status.indicator_state === 'ACTIVE' || status.indicator_state === 'ALARM'));
+      const alarm = stale || active;
+      const phaseName = String(status && (status.current_phase || status.indicator_state || status.status) || (stale ? 'WATCHER UNREACHABLE' : 'RUNNING'));
+      const file = String(status && status.last_file || '');
+      const reason = String(status && status.last_error || '');
+      const job = panel.querySelector('#biggyArgusIngestJobs');
+      job.className = `biggy-argus-ingest-job ${alarm ? 'is-active' : 'is-ready'}`;
+      job.innerHTML = `● <span>${esc(phaseName.toUpperCase())}${file ? ` · ${esc(file)}` : ''}</span>`;
+      panel.querySelector('#biggyArgusWatcherDot').className = alarm ? 'is-active' : 'is-ready';
+      panel.querySelector('#biggyArgusIngestIdentity').textContent = reason || '';
+      const quarantined = status && (status.quarantine_count ?? status.quarantined);
+      panel.querySelector('#biggyArgusQuarantine').textContent = quarantined ? `${quarantined} QUARANTINED FILE(S) // LISTED ABOVE` : '';
+      renderQueue(status);
+      return active ? 1000 : 4000;
+    };
+    panel.__setStatusError = (error) => {
+      panel.querySelector('#biggyArgusCorpusVectors').textContent = 'CORPUS OFFLINE';
+      const job = panel.querySelector('#biggyArgusIngestJobs');
+      job.className = 'biggy-argus-ingest-job is-active';
+      job.innerHTML = '<span>● STATUS PATH UNAVAILABLE</span>';
+      panel.querySelector('#biggyArgusIngestIdentity').textContent = String(error && error.message || error || '');
+    };
+    panel.__refreshFolders = refreshArgusLibraryFolders;
+
+    folder.addEventListener('change', async () => { await refreshArgusLibrarySubfolders(); refreshNewFolderParent(); });
+    subfolder.addEventListener('change', async () => { await refreshArgusLibraryLevel3(); refreshNewFolderParent(); });
+    level3.addEventListener('change', async () => { await refreshArgusLibraryLevel4(); refreshNewFolderParent(); });
+    level4.addEventListener('change', refreshNewFolderParent);
+    panel.querySelector('#biggyArgusRefreshFolders').addEventListener('click', () => refreshArgusLibraryFolders());
+
+    const queueUpload = async (file) => {
+      if (!file) return;
+      const destination = selectedArgusLibraryFolder(panel);
+      if (!destination) {
+        uploadStatus.textContent = 'SELECT A RAG LIBRARY FOLDER FIRST';
+        return;
+      }
+      const body = new FormData();
+      body.append('file', file);
+      uploadStatus.textContent = `UPLOADING ${file.name} → ${destination}…`;
+      try {
+        const response = await fetch(`${ARGUS_RAG_INGEST_PROXY}/ingest-upload?folder=${encodeURIComponent(destination)}`, { method: 'POST', body });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const payload = await response.json().catch(() => ({}));
+        uploadStatus.textContent = `QUEUED ${payload.filename || file.name} IN ${payload.destination || `LIBRARY/${destination}`}`;
+      } catch (error) {
+        uploadStatus.textContent = `INGEST UPLOAD FAILED // ${String(error.message || error)}`;
+      }
+      upload.value = '';
+      refreshArgusRagIngestStatus().catch(() => {});
+    };
+    upload.addEventListener('change', () => queueUpload(upload.files && upload.files[0]));
+    drop.addEventListener('dragover', (event) => { event.preventDefault(); drop.classList.add('is-dragging'); });
+    drop.addEventListener('dragleave', () => drop.classList.remove('is-dragging'));
+    drop.addEventListener('drop', (event) => {
+      event.preventDefault();
+      drop.classList.remove('is-dragging');
+      queueUpload(event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0]);
+    });
+    drop.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); upload.click(); }
+    });
+
+    const createFolder = async () => {
+      const input = panel.querySelector('#biggyArgusNewFolderName');
+      const status = panel.querySelector('#biggyArgusFolderStatus');
+      const leaf = input.value.trim();
+      if (!leaf) return;
+      if (leaf === '.' || leaf === '..' || /[/\\]/.test(leaf)) {
+        status.textContent = 'USE A SINGLE FOLDER NAME WITHOUT SLASHES';
+        return;
+      }
+      const parent = selectedArgusLibraryFolder(panel);
+      const name = [parent, leaf].filter(Boolean).join('/');
+      try {
+        await argusRagIngestJson('/library-folders', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
+        });
+        status.textContent = `CREATED ${name}`;
+        input.value = '';
+        await refreshArgusLibraryFolders();
+      } catch (error) {
+        status.textContent = `CREATE FAILED // ${String(error.message || error)}`;
+      }
+    };
+    panel.querySelector('#biggyArgusCreateFolder').addEventListener('click', createFolder);
+    panel.querySelector('#biggyArgusNewFolderName').addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') { event.preventDefault(); createFolder(); }
+    });
+    refreshNewFolderParent();
+    return panel;
+  }
+
+  function scheduleArgusRagIngestStatus(delay = 4000) {
+    stopArgusRagIngestPolling();
+    const hud = document.getElementById('biggyArgusRagOverview');
+    if (!hud || hud.hidden) return;
+    ragIngestPollTimer = setTimeout(() => refreshArgusRagIngestStatus().catch(() => {}), delay);
+  }
+
+  async function refreshArgusRagIngestStatus() {
+    if (ragIngestStatusInFlight) return;
+    const hud = document.getElementById('biggyArgusRagOverview');
+    if (!hud || hud.hidden) return;
+    const panel = ensureArgusRagIngestTools(hud);
+    ragIngestStatusInFlight = true;
+    let nextDelay = 5000;
+    try {
+      const [health, status] = await Promise.all([
+        argusRagIngestJson('/health'),
+        argusRagIngestJson('/ingest-status').catch(() => null),
+      ]);
+      nextDelay = panel.__renderStatus(health, status);
+    } catch (error) {
+      panel.__setStatusError(error);
+    } finally {
+      ragIngestStatusInFlight = false;
+      scheduleArgusRagIngestStatus(nextDelay);
+    }
+  }
+
+  function refreshArgusRagIngestTools(options = {}) {
+    const hud = document.getElementById('biggyArgusRagOverview');
+    if (!hud) return;
+    const panel = ensureArgusRagIngestTools(hud);
+    if (options.folders || panel.dataset.foldersLoaded !== '1') panel.__refreshFolders().catch(() => {});
+    refreshArgusRagIngestStatus().catch(() => {});
+  }
+
+  function startArgusRagIngestPolling() {
+    stopArgusRagIngestPolling();
+    refreshArgusRagIngestTools();
+  }
+
+  function stopArgusRagIngestPolling() {
+    if (ragIngestPollTimer !== null) clearTimeout(ragIngestPollTimer);
+    ragIngestPollTimer = null;
+  }
+
   function renderArgusRagOverview(status) {
     const hud = ensureArgusRagOverview();
     if (!hud) return;
+    const summary = hud.querySelector('#biggyArgusRagSummary');
+    if (!summary) return;
     const data = status && typeof status === 'object' ? status : {};
     const state = String(data.state || 'offline').toLowerCase();
     const phase = String(data.phase || '').trim();
@@ -2623,7 +2976,7 @@
       }
       return `<li class="is-${esc(rowState)}"><i>◆</i><b>${esc(file)}</b><small>${esc(detail)}</small></li>`;
     }).join('') : '<li class="is-empty"><small>NO RECENT LEDGER EVENTS</small></li>';
-    hud.innerHTML = '<div class="biggy-argus-rag-title">A.R.G.U.S.</div>'
+    summary.innerHTML = '<div class="biggy-argus-rag-title">A.R.G.U.S.</div>'
       + '<div class="biggy-argus-rag-subtitle">AUGMENTED RETRIEVAL &amp; GROUNDED UNDERSTANDING SYSTEM</div>'
       + '<div class="biggy-argus-rag-section">SYSTEM STATUS</div>'
       + `<div class="biggy-argus-rag-state ${stateClass}">● ${esc(stateText)}</div>`
@@ -2635,7 +2988,7 @@
       + '</dl>'
       + '<div class="biggy-argus-rag-radar-label">INGEST RADAR // LAST 5</div>'
       + `<ol class="biggy-argus-rag-radar">${radar}</ol>`;
-    hud.querySelectorAll('[data-argus-ingest-action]').forEach((button) => {
+    summary.querySelectorAll('[data-argus-ingest-action]').forEach((button) => {
       button.addEventListener('pointerdown', (event) => event.stopPropagation());
       button.addEventListener('dblclick', (event) => {
         event.preventDefault();
@@ -5788,6 +6141,7 @@
     installComposerBranding();
     installFleetStrip();
     installHermesStrip(mainChat);
+    installBiggyDeckLayoutObserver(mainChat);
     scheduleBiggySharedCenterline();
     setTimeout(scheduleBiggySharedCenterline, 350);
     forceChromeLabels();

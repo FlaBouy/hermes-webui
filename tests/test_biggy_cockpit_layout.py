@@ -77,6 +77,16 @@ def test_prompt_and_pa_deck_match_bottom_rail_without_overlap():
     assert "biggy-home-centerline-sync" in BRAND
 
 
+def test_prompt_and_pa_deck_use_the_rendered_main_chat_width_on_every_monitor():
+    sync = BRAND[BRAND.index("function syncBiggySharedCenterline"):BRAND.index("function scheduleBiggySharedCenterline")]
+    assert "const mainRect = mainChat.getBoundingClientRect()" in sync
+    assert "const horizontalInset = window.matchMedia('(max-width: 900px)').matches ? 24 : 168" in sync
+    assert "const deckWidth = Math.max(0, Math.min(856, mainRect.width - horizontalInset))" in sync
+    assert "deck.style.width = `${deckWidth}px`" in sync
+    assert "hermesStrip.style.width = `${deckWidth}px`" in sync
+    assert "new MutationObserver(scheduleBiggySharedCenterline)" in BRAND
+
+
 def test_send_and_biggy_voice_return_to_half_height_prompt():
     assert "function installPromptInlineControls()" in BRAND
     assert "controls.appendChild(voice)" in BRAND
@@ -86,6 +96,13 @@ def test_send_and_biggy_voice_return_to_half_height_prompt():
     assert "flex-direction:row;flex-wrap:nowrap" in BRAND_CSS
     assert "min-height:34px;height:36px;max-height:92px" in BRAND_CSS
     assert "width:28px;height:28px" in BRAND_CSS
+
+
+def test_expanded_biggy_voice_keeps_inline_actions_in_the_prompt_row():
+    controls = BRAND_CSS[BRAND_CSS.index(".biggy-prompt-inline-controls{"):BRAND_CSS.index(".biggy-prompt-inline-controls #btnGptVoice")]
+    assert "top:auto;bottom:4px" in controls
+    assert "transform:none" in controls
+    assert "top:50%" not in controls
 
 
 def test_remaining_native_prompt_controls_join_the_hermes_rail():
@@ -109,6 +126,34 @@ def test_pa_button_owns_closed_by_default_right_rail():
 def test_rag_overview_clears_top_rails_on_desktop_and_tablet():
     assert "left:24px;top:76px" in BRAND_CSS
     assert ".biggy-argus-rag-overview{left:12px;top:64px" in BRAND_CSS
+
+
+def test_rag_overview_preserves_radar_and_adds_four_level_ingest_controls():
+    tools = BRAND[BRAND.index("function ensureArgusRagIngestTools"):BRAND.index("function renderArgusRagOverview")]
+    assert 'id="biggyArgusRagSummary"' in BRAND
+    assert "panel.id = 'biggyArgusIngestTools'" in tools
+    assert 'id="biggyArgusLibraryFolder"' in tools
+    assert 'id="biggyArgusLibrarySubfolder"' in tools
+    assert 'id="biggyArgusLibraryLevel3"' in tools
+    assert 'id="biggyArgusLibraryLevel4"' in tools
+    assert "selectedArgusLibraryFolder" in tools
+    assert "refreshArgusLibrarySubfolders" in tools
+    assert "refreshArgusLibraryLevel3" in tools
+    assert "refreshArgusLibraryLevel4" in tools
+    assert "ARGUS_RAG_INGEST_PROXY" in tools
+    assert "const ARGUS_RAG_INGEST_PROXY = '/api/biggy/rag'" in BRAND
+    assert "/ingest-upload?folder=" in tools
+    assert "NEW LIBRARY FOLDER" in tools
+    assert "CORPUS STATUS" in tools
+    assert "EMBED → QDRANT → ARGUS" in tools
+    assert ".biggy-argus-ingest-tools{" in BRAND_CSS
+    assert ".biggy-argus-ingest-drop{" in BRAND_CSS
+
+
+def test_rag_ingest_polling_follows_rag_panel_visibility():
+    visibility = BRAND[BRAND.index("function setArgusRagPanelVisible"):BRAND.index("function installArgusConversationLane")]
+    assert "startArgusRagIngestPolling" in visibility
+    assert "stopArgusRagIngestPolling" in visibility
 
 
 def test_legacy_conversation_stack_is_removed_from_the_active_shell():
