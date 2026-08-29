@@ -7,6 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BRAND = (ROOT / "static" / "biggy-brand.js").read_text(encoding="utf-8")
 BRAND_CSS = (ROOT / "static" / "biggy-brand.css").read_text(encoding="utf-8")
 ARGUS_WORLD = (ROOT / "api" / "argus_world.py").read_text(encoding="utf-8")
+BIGGY_ELECTRICAL = (ROOT / "static" / "biggy-electrical-tools.js").read_text(encoding="utf-8")
 
 
 def test_cockpit_owns_home_sync_filter_rag_ptt_and_room_in_order():
@@ -238,6 +239,53 @@ def test_hermes_secondary_overlay_tracks_the_rendered_lower_rail_width():
     assert "hermesSecondaryHost.style.width = `${deckWidth}px`" in sync
     assert "const reactorRect = reactor.getBoundingClientRect()" in sync
     assert "hermesSecondaryHost.style.bottom = `${overlayBottom}px`" in sync
+
+
+def test_tools_launcher_is_last_on_hermes_rail_and_toggles_hidden_top_rail():
+    strip = BRAND[BRAND.index("function installHermesStrip"):BRAND.index("function installPaRailToggle")]
+    assert "button.dataset.panel = 'tools'" in strip
+    assert "<span>TOOLS</span>" in strip
+    assert strip.index("if (footer) strip.appendChild(footer)") < strip.index("button.dataset.panel = 'tools'")
+    assert "function ensureBiggyToolsRail(mainChat)" in BRAND
+    assert "rail.id = 'biggyToolsRail'" in BRAND
+    assert "rail.hidden = true" in BRAND
+    assert "toggleBiggyToolsRail(mainChat, button)" in strip
+    assert ".biggy-tools-rail{" in BRAND_CSS
+    assert ".biggy-tools-rail[hidden]{display:none!important}" in BRAND_CSS
+
+
+def test_tools_rail_carries_every_smedley_electrical_tool_in_two_groups():
+    rail = BRAND[BRAND.index("const BIGGY_ELECTRICAL_TOOLS"):BRAND.index("function loadBiggyElectricalAsset")]
+    for tool_id in (
+        "voltage-drop", "feeder-size", "conductor-sets", "ocpd-size",
+        "conduit-fill", "grounding", "cable-tray-fill", "motor-circuit",
+        "motor-starter", "mcc-bucket", "vfd-circuit",
+    ):
+        assert f"['{tool_id}'," in rail
+    assert "GENERIC CIRCUIT TOOLS" in BRAND
+    assert "MOTOR & STARTER TOOLS" in BRAND
+
+
+def test_biggy_tools_use_shared_smedley_calculation_assets_and_center_overlay():
+    assert "'/extensions/smedley-engineering/voltage-drop-sizing.js'" in BRAND
+    assert "'/extensions/smedley-engineering/smedley-electrical-results.js'" in BRAND
+    assert "'/extensions/smedley-engineering/smedley-live-tools.v0.2.5.js'" in BRAND
+    assert "'/static/biggy-electrical-tools.js'" in BRAND
+    assert "window.BiggyElectricalTools.open" in BRAND
+    assert "page.dataset.hermesPanel = 'tools'" in BRAND
+    assert "host.dataset.activePanel = 'tools'" in BRAND
+    assert "main.classList.add('biggy-hermes-overlay-open')" in BRAND
+    assert "main.classList.add('biggy-tools-open')" in BRAND
+    assert '.biggy-hermes-secondary-page[data-hermes-panel="tools"]' in BRAND_CSS
+
+
+def test_electrical_runtime_disposes_the_previous_tool_before_opening_another():
+    assert "let activeClose = null" in BIGGY_ELECTRICAL
+    assert "if(activeClose)activeClose()" in BIGGY_ELECTRICAL
+    assert "if(activeClose===close)activeClose=null" in BIGGY_ELECTRICAL
+    assert "SmedleyVoltageDropSizing" in BIGGY_ELECTRICAL
+    assert "SmedleyElectricalResults" in BIGGY_ELECTRICAL
+    assert "SmedleyLiveTools" in BIGGY_ELECTRICAL
 
 
 def test_server_owned_speech_cannot_start_a_second_browser_reader():

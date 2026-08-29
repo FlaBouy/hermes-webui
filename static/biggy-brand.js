@@ -14,7 +14,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260829-settings-overlay-40';
+  const BUILD_ID = '20260829-electrical-tools-41';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -49,6 +49,25 @@
     logs: 'mainLogs',
     settings: 'mainSettings',
   });
+  const BIGGY_ELECTRICAL_TOOLS = Object.freeze([
+    ['voltage-drop', 'VOLTAGE DROP', 'standard'],
+    ['feeder-size', 'FEEDER SIZE', 'standard'],
+    ['conductor-sets', 'CONDUCTOR SETS', 'standard'],
+    ['ocpd-size', 'OCPD SIZE', 'standard'],
+    ['conduit-fill', 'CONDUIT FILL', 'standard'],
+    ['grounding', 'GROUNDING', 'standard'],
+    ['cable-tray-fill', 'CABLE TRAY FILL', 'standard'],
+    ['motor-circuit', 'MOTOR CIRCUIT', 'motor'],
+    ['motor-starter', 'MOTOR STARTER', 'motor'],
+    ['mcc-bucket', 'MCC BUCKET', 'motor'],
+    ['vfd-circuit', 'VFD CIRCUIT', 'motor'],
+  ]);
+  const BIGGY_ELECTRICAL_ASSETS = Object.freeze([
+    '/extensions/smedley-engineering/voltage-drop-sizing.js',
+    '/extensions/smedley-engineering/smedley-electrical-results.js',
+    '/extensions/smedley-engineering/smedley-live-tools.v0.2.5.js',
+    '/static/biggy-electrical-tools.js',
+  ]);
   const ORB_STATES = Object.freeze([
     'offline', 'online', 'thinking', 'speaking', 'tool-running', 'error',
   ]);
@@ -785,10 +804,12 @@
     const deckWidth = Math.max(0, Math.min(856, mainRect.width - horizontalInset));
     const hermesStrip = document.getElementById('biggyHermesStrip');
     const hermesSecondaryHost = document.getElementById('biggyHermesSecondaryHost');
+    const toolsRail = document.getElementById('biggyToolsRail');
     if (deckWidth) {
       if (deck) deck.style.width = `${deckWidth}px`;
       if (hermesStrip) hermesStrip.style.width = `${deckWidth}px`;
       if (hermesSecondaryHost) hermesSecondaryHost.style.width = `${deckWidth}px`;
+      if (toolsRail) toolsRail.style.width = `${deckWidth}px`;
     }
     const reactor = document.getElementById('biggyArgusReactor');
     if (hermesSecondaryHost && reactor && reactor.offsetParent) {
@@ -805,6 +826,7 @@
     };
     placeOnMaster(document.getElementById('biggyTopRailGroup'));
     placeOnMaster(document.getElementById('biggyArgusReactor'));
+    placeOnMaster(toolsRail);
     const frame = document.getElementById('biggyV6World');
     if (frame && frame.contentWindow) {
       try {
@@ -881,6 +903,167 @@
     return strip;
   }
 
+  function loadBiggyElectricalAsset(src) {
+    const existing = document.querySelector(`script[data-biggy-electrical-src="${src}"]`);
+    if (existing) {
+      if (existing.dataset.loaded === 'true') return Promise.resolve();
+      return new Promise((resolve, reject) => {
+        existing.addEventListener('load', resolve, { once: true });
+        existing.addEventListener('error', reject, { once: true });
+      });
+    }
+    return new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = src;
+      script.async = false;
+      script.dataset.biggyElectricalSrc = src;
+      script.addEventListener('load', () => {
+        script.dataset.loaded = 'true';
+        resolve();
+      }, { once: true });
+      script.addEventListener('error', () => reject(new Error(`Could not load ${src}`)), { once: true });
+      document.head.appendChild(script);
+    });
+  }
+
+  let biggyElectricalAssetsPromise = null;
+  function ensureBiggyElectricalAssets() {
+    if (window.BiggyElectricalTools && window.SmedleyVoltageDropSizing
+        && window.SmedleyElectricalResults && window.SmedleyLiveTools) {
+      return Promise.resolve();
+    }
+    if (!document.getElementById('biggySmedleyElectricalStyles')) {
+      const link = document.createElement('link');
+      link.id = 'biggySmedleyElectricalStyles';
+      link.rel = 'stylesheet';
+      link.href = '/extensions/smedley-engineering/smedley-engineering.v0.2.5.css';
+      document.head.appendChild(link);
+    }
+    if (!document.getElementById('biggySmedleyElectricalResultStyles')) {
+      const link = document.createElement('link');
+      link.id = 'biggySmedleyElectricalResultStyles';
+      link.rel = 'stylesheet';
+      link.href = '/extensions/smedley-engineering/smedley-electrical-results.css';
+      document.head.appendChild(link);
+    }
+    if (!biggyElectricalAssetsPromise) {
+      biggyElectricalAssetsPromise = BIGGY_ELECTRICAL_ASSETS.reduce(
+        (ready, src) => ready.then(() => loadBiggyElectricalAsset(src)),
+        Promise.resolve(),
+      ).catch((error) => {
+        biggyElectricalAssetsPromise = null;
+        throw error;
+      });
+    }
+    return biggyElectricalAssetsPromise;
+  }
+
+  function setBiggyToolsRailOpen(rail, launcher, open) {
+    if (!rail) return;
+    rail.hidden = !open;
+    if (launcher) {
+      launcher.classList.toggle('active', open);
+      launcher.setAttribute('aria-expanded', open ? 'true' : 'false');
+    }
+    const main = document.querySelector('main.main');
+    if (main) main.classList.toggle('biggy-tools-rail-open', open);
+    scheduleBiggySharedCenterline();
+  }
+
+  async function openBiggyElectricalTool(mainChat, tool, toolButton) {
+    const host = ensureHermesSecondaryHost(mainChat);
+    if (!host) return false;
+    let page = host.querySelector('[data-hermes-panel="tools"]');
+    if (!page) {
+      page = el('section', 'biggy-hermes-secondary-page biggy-electrical-tool-page');
+      page.dataset.hermesPanel = 'tools';
+      page.hidden = true;
+      host.querySelector('.biggy-hermes-secondary-scroll').appendChild(page);
+    }
+    host.querySelectorAll('.biggy-hermes-secondary-page').forEach((candidate) => {
+      candidate.hidden = candidate !== page;
+    });
+    document.querySelectorAll('#biggyToolsRail .biggy-tool-launcher').forEach((button) => {
+      button.classList.toggle('active', button === toolButton);
+    });
+    const title = host.querySelector('[data-hermes-secondary-title]');
+    if (title) title.textContent = `TOOLS // ${tool[1]}`;
+    host.dataset.activePanel = 'tools';
+    host.hidden = false;
+    const main = document.querySelector('main.main');
+    if (main) {
+      main.classList.add('biggy-hermes-overlay-open');
+      main.classList.add('biggy-tools-open');
+    }
+    page.hidden = false;
+    page.innerHTML = '<div class="biggy-electrical-tool-loading">LOADING ELECTRICAL TOOL…</div>';
+    try {
+      await ensureBiggyElectricalAssets();
+      if (!window.BiggyElectricalTools || typeof window.BiggyElectricalTools.open !== 'function') {
+        throw new Error('Electrical tool runtime is unavailable.');
+      }
+      window.BiggyElectricalTools.open({
+        mount: page,
+        toolId: tool[0],
+        label: tool[1],
+        onClose: () => {
+          document.querySelectorAll('#biggyToolsRail .biggy-tool-launcher').forEach((button) => button.classList.remove('active'));
+        },
+      });
+      document.querySelectorAll('#biggyToolsRail .biggy-tool-launcher').forEach((button) => {
+        button.classList.toggle('active', button === toolButton);
+      });
+    } catch (error) {
+      page.innerHTML = `<div class="biggy-electrical-tool-error">${esc(error.message || error)}</div>`;
+    }
+    const scroll = host.querySelector('.biggy-hermes-secondary-scroll');
+    if (scroll) scroll.scrollTop = 0;
+    scheduleBiggySharedCenterline();
+    return true;
+  }
+
+  function ensureBiggyToolsRail(mainChat) {
+    if (!mainChat) return null;
+    let rail = mainChat.querySelector('#biggyToolsRail');
+    if (rail) return rail;
+    rail = el('nav', 'biggy-tools-rail');
+    rail.id = 'biggyToolsRail';
+    rail.hidden = true;
+    rail.setAttribute('aria-label', 'Electrical calculation tools');
+    [['standard', 'GENERIC CIRCUIT TOOLS'], ['motor', 'MOTOR & STARTER TOOLS']].forEach(([kind, label]) => {
+      const group = el('section', 'biggy-tools-group');
+      const heading = el('span', 'biggy-tools-group-label');
+      heading.textContent = label;
+      const buttons = el('div', 'biggy-tools-buttons');
+      BIGGY_ELECTRICAL_TOOLS.filter((tool) => tool[2] === kind).forEach((tool) => {
+        const button = el('button', 'biggy-fleet-machine biggy-tool-launcher is-online');
+        button.type = 'button';
+        button.dataset.tool = tool[0];
+        button.textContent = tool[1];
+        button.addEventListener('click', (event) => {
+          event.preventDefault();
+          openBiggyElectricalTool(mainChat, tool, button).catch(() => {});
+        });
+        buttons.appendChild(button);
+      });
+      group.append(heading, buttons);
+      rail.appendChild(group);
+    });
+    mainChat.appendChild(rail);
+    return rail;
+  }
+
+  function toggleBiggyToolsRail(mainChat, launcher) {
+    const rail = ensureBiggyToolsRail(mainChat);
+    if (!rail) return;
+    const open = rail.hidden;
+    setBiggyToolsRailOpen(rail, launcher, open);
+    if (!open) {
+      const host = document.getElementById('biggyHermesSecondaryHost');
+      if (host && host.dataset.activePanel === 'tools') closeHermesSecondaryPanel();
+    }
+  }
+
   function closeHermesSecondaryPanel({ returnToChat = false } = {}) {
     ['closeProfileDropdown', 'closeWsDropdown', 'closeModelDropdown', 'closeReasoningDropdown'].forEach((name) => {
       try {
@@ -888,6 +1071,10 @@
       } catch (_) {}
     });
     const host = document.getElementById('biggyHermesSecondaryHost');
+    if (host && host.dataset.activePanel === 'tools'
+        && window.BiggyElectricalTools && typeof window.BiggyElectricalTools.close === 'function') {
+      window.BiggyElectricalTools.close();
+    }
     if (host) {
       host.hidden = true;
       host.dataset.activePanel = '';
@@ -896,7 +1083,10 @@
       });
     }
     const main = document.querySelector('main.main');
-    if (main) main.classList.remove('biggy-hermes-overlay-open');
+    if (main) {
+      main.classList.remove('biggy-hermes-overlay-open');
+      main.classList.remove('biggy-tools-open');
+    }
     if (returnToChat && typeof window.switchPanel === 'function') {
       return window.switchPanel('chat');
     }
@@ -1024,6 +1214,10 @@
   async function openHermesSecondaryPanel(mainChat, panel, label) {
     const host = ensureHermesSecondaryHost(mainChat);
     if (!host || !Object.prototype.hasOwnProperty.call(HERMES_SECONDARY_PANELS, panel)) return false;
+    if (host.dataset.activePanel === 'tools'
+        && window.BiggyElectricalTools && typeof window.BiggyElectricalTools.close === 'function') {
+      window.BiggyElectricalTools.close();
+    }
     const page = host.querySelector(`[data-hermes-panel="${panel}"]`);
     if (!page) return false;
     host.querySelectorAll('.biggy-hermes-secondary-page').forEach((candidate) => {
@@ -1034,7 +1228,10 @@
     host.dataset.activePanel = panel;
     host.hidden = false;
     const main = document.querySelector('main.main');
-    if (main) main.classList.add('biggy-hermes-overlay-open');
+    if (main) {
+      main.classList.add('biggy-hermes-overlay-open');
+      main.classList.remove('biggy-tools-open');
+    }
     if (typeof window.switchPanel === 'function') await window.switchPanel(panel);
     const scroll = host.querySelector('.biggy-hermes-secondary-scroll');
     if (scroll) scroll.scrollTop = 0;
@@ -1058,6 +1255,7 @@
     strip.setAttribute('data-testid', 'biggy-hermes-strip');
     strip.innerHTML = '<span class="biggy-fleet-strip-label">HERMES</span>';
     ensureHermesSecondaryHost(mainChat);
+    ensureBiggyToolsRail(mainChat);
     HERMES_RAIL_PANELS.forEach(([panel, label]) => {
       const button = el('button', 'biggy-fleet-machine biggy-hermes-panel is-online');
       button.type = 'button';
@@ -1076,6 +1274,18 @@
       strip.appendChild(button);
     });
     if (footer) strip.appendChild(footer);
+    const button = el('button', 'biggy-fleet-machine biggy-hermes-panel is-online');
+    button.type = 'button';
+    button.dataset.panel = 'tools';
+    button.title = 'Show electrical calculation tools';
+    button.setAttribute('aria-controls', 'biggyToolsRail');
+    button.setAttribute('aria-expanded', 'false');
+    button.innerHTML = '<span class="biggy-fleet-state" aria-hidden="true"></span><span>TOOLS</span>';
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      toggleBiggyToolsRail(mainChat, button);
+    });
+    strip.appendChild(button);
     layout.appendChild(strip);
     return strip;
   }
