@@ -66,17 +66,6 @@ def test_rag_button_toggles_panel_without_reinstalling_conversation_stack():
     assert ".biggy-argus-conversation-lane" not in BRAND_CSS
 
 
-def test_hidden_rag_galaxy_stops_the_dormant_webgl_render_loop():
-    visibility = ARGUS_WORLD[
-        ARGUS_WORLD.index("function setRagGalaxyVisible"):
-        ARGUS_WORLD.index("function restoreBaseGalaxyVisibility")
-    ]
-    assert "g.resumeAnimation()" in visibility
-    assert "controls.autoRotate = true" in visibility
-    assert "controls.autoRotate = false" in visibility
-    assert "g.pauseAnimation()" in visibility
-
-
 def test_prompt_and_pa_deck_match_bottom_rail_without_overlap():
     assert "--biggy-bottom-deck-width:min(856px,calc(100% - 48px))" in BRAND_CSS
     assert "padding:10px 84px 66px" in BRAND_CSS
@@ -314,24 +303,6 @@ def test_galaxy_canvas_remains_full_screen_while_home_camera_controls_framing():
     assert ".biggy-v6-world{\n  position:absolute;inset:0;width:100%;height:100%" in BRAND_CSS
     assert "window.addEventListener('resize', scheduleGalaxyCanvasSize)" in BRAND
     assert "starField.scale.set(1.55, 1.35, 1.2)" in ARGUS_WORLD
-
-
-def test_home_uses_lightweight_starfield_and_lazy_loads_webgl_on_rag_reveal():
-    install = BRAND[
-        BRAND.index("function installBiggyV6World"):
-        BRAND.index("function makeHeader")
-    ]
-    toggle = BRAND[
-        BRAND.index("function setArgusRagPanelVisible"):
-        BRAND.index("function ensureArgusConversationLane")
-    ]
-    assert "iframe.dataset.src = `${V6_WORLD_PATH}" in install
-    assert "iframe.dataset.loaded = '0'" in install
-    assert "iframe.hidden = true" in install
-    assert "frame.src = frame.dataset.src" in toggle
-    assert "frame.hidden = false" in toggle
-    assert "frame.hidden = true" in toggle
-    assert ".biggy-dormant-starfield{" in BRAND_CSS
 
 
 def test_rag_reveal_restores_home_camera_and_boot_does_not_restore_stale_cards():

@@ -198,8 +198,8 @@ body.biggy-brand main.main{width:100%;height:100%;background:transparent}
   box-sizing:border-box;width:var(--biggy-bottom-deck-width);max-width:calc(100% - 48px);
   min-height:45px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;
   padding:5px 7px;border:1px solid rgba(78,204,163,.25);border-radius:7px;
-  background:rgba(5,10,14,.97);box-shadow:0 8px 24px rgba(0,0,0,.24);
-  contain:layout paint style;pointer-events:auto
+  background:rgba(5,10,14,.92);backdrop-filter:blur(8px);
+  box-shadow:0 8px 24px rgba(0,0,0,.24);pointer-events:auto
 }
 .biggy-tools-rail[hidden]{display:none!important}
 .biggy-tools-group{display:flex;flex:0 0 auto;align-items:center;gap:6px;min-width:0}
@@ -336,10 +336,7 @@ main.main.biggy-tools-open .biggy-hermes-secondary-host{top:116px}
 @media (max-width:900px){
   .biggy-top-rail-group{top:10px;max-width:calc(100% - 24px);gap:4px}
   .biggy-fleet-strip,.biggy-cockpit-strip,.biggy-hermes-strip,.biggy-tools-rail{gap:3px;padding:4px 5px}
-  .biggy-tools-rail{
-    top:52px;width:calc(100% - 24px);max-width:856px;
-    box-shadow:0 5px 14px rgba(0,0,0,.28)
-  }
+  .biggy-tools-rail{top:52px;max-width:calc(100% - 24px)}
   main.main.biggy-tools-open .biggy-hermes-secondary-host{top:102px}
   .biggy-fleet-machine{padding:5px 6px;font-size:8px}
   .biggy-fleet-strip-label{display:none}
@@ -357,21 +354,6 @@ main.main.biggy-tools-open .biggy-hermes-secondary-host{top:116px}
   border:0;z-index:var(--biggy-layer-galaxy);background:#04050a;
   pointer-events:auto;
 }
-.biggy-v6-world[hidden]{display:none!important}
-.biggy-v6-world[data-rag-ready="0"]{opacity:0;pointer-events:none}
-.biggy-dormant-starfield{
-  position:absolute;inset:0;width:100%;height:100%;z-index:var(--biggy-layer-galaxy);
-  background-color:#04050a;
-  background-image:
-    radial-gradient(circle,#e8f3ff 0 1px,transparent 1.35px),
-    radial-gradient(circle,#94c8ff 0 .8px,transparent 1.15px),
-    radial-gradient(circle,#c8b6ff 0 .65px,transparent 1px),
-    radial-gradient(circle,#74e7ff 0 .55px,transparent .9px);
-  background-size:73px 79px,127px 139px,181px 193px,239px 251px;
-  background-position:11px 17px,47px 61px,101px 29px,173px 137px;
-  filter:brightness(1.24);pointer-events:none
-}
-.biggy-dormant-starfield[hidden]{display:none!important}
 .biggy-v6-world-fallback{
   position:absolute;inset:0;width:100%;height:100%;z-index:var(--biggy-layer-galaxy);
   display:none;align-items:center;justify-content:center;
