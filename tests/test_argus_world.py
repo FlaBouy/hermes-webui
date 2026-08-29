@@ -565,8 +565,19 @@ def test_embedded_world_brightens_only_the_stock_star_field():
     source = (ROOT / "api" / "argus_world.py").read_text(encoding="utf-8")
     assert "positions.count === 1800" in source
     assert "child.material.isPointsMaterial" in source
-    assert "starField.material.color.set('#7189b8')" in source
-    assert "starField.material.opacity = 0.92" in source
+    assert "starField.material.color.set('#b5caff')" in source
+    assert "starField.material.opacity = 1" in source
+    assert "starField.material.size = 1.9" in source
+
+
+def test_embedded_world_starts_with_rag_graph_hidden_until_parent_reveals_it():
+    source = world._TRACE_RUNTIME
+    assert "let ragGalaxyVisible = false" in source
+    assert "function setRagGalaxyVisible(visible)" in source
+    assert "g.nodeVisibility(() => false)" in source
+    assert "g.linkVisibility(() => false)" in source
+    assert "data.type === 'biggy-rag-visibility'" in source
+    assert "traceGroup.visible = ragGalaxyVisible" in source
 
 
 def test_owner_prompt_renderer_never_exposes_private_voice_context():

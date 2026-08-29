@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260829-viewport-rails-35';
+  const BUILD_ID = '20260829-rag-reveal-36';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -563,6 +563,23 @@
     }
   }
 
+  function installPromptControlRail() {
+    const wrap = document.getElementById('composerWrap');
+    const box = document.getElementById('composerBox');
+    const footer = box && box.querySelector(':scope > .composer-footer');
+    if (!wrap || !box) return null;
+    let rail = document.getElementById('biggyPromptControlRail');
+    if (!rail) {
+      rail = el('nav', 'biggy-prompt-control-rail');
+      rail.id = 'biggyPromptControlRail';
+      rail.setAttribute('aria-label', 'Prompt controls');
+      rail.setAttribute('data-testid', 'biggy-prompt-control-rail');
+      wrap.insertBefore(rail, box);
+    }
+    if (footer && footer.parentElement !== rail) rail.appendChild(footer);
+    return rail;
+  }
+
   const FLEET_STATUS_PATH = '/api/biggy/fleet/status';
   let fleetStatusTimer = 0;
 
@@ -776,6 +793,7 @@
     filter.innerHTML = '<span class="biggy-fleet-state" aria-hidden="true"></span><span>FILTER</span>';
     filter.addEventListener('click', (event) => {
       event.preventDefault();
+      setArgusRagPanelVisible(true, document.getElementById('biggyCockpitRag'), true);
       const railFilter = document.getElementById('biggyCatRail-filter');
       if (railFilter) railFilter.click();
     });
@@ -791,7 +809,9 @@
       setArgusRagPanelVisible(!!(overview && overview.hidden), rag, true);
     });
     strip.appendChild(rag);
-    setArgusRagPanelVisible(loadArgusRagPanelVisible(), rag, false);
+    // Every new Biggy surface opens as an unobstructed starfield. RAG is the
+    // explicit operator reveal for both the ingest picture and graph corpus.
+    setArgusRagPanelVisible(false, rag, false);
 
     const ptt = controls.querySelector('#biggyPtt');
     const route = controls.querySelector('#biggyAudioRoute');
@@ -2239,6 +2259,16 @@
     if (persist) {
       try { localStorage.setItem(ARGUS_RAG_PANEL_STORAGE_KEY, next ? '1' : '0'); } catch (_) {}
     }
+    const frame = document.getElementById('biggyV6World');
+    if (frame) {
+      frame.dataset.ragVisible = next ? '1' : '0';
+      try {
+        if (frame.contentWindow) frame.contentWindow.postMessage(
+          { type: 'biggy-rag-visibility', visible: next },
+          window.location.origin,
+        );
+      } catch (_) {}
+    }
     requestAnimationFrame(() => syncArgusConversationLaneBoundary());
   }
 
@@ -2671,6 +2701,10 @@
           try {
             iframe.contentWindow.postMessage(
               { type: 'biggy-argus-state', state: argusOrbState },
+              window.location.origin,
+            );
+            iframe.contentWindow.postMessage(
+              { type: 'biggy-rag-visibility', visible: iframe.dataset.ragVisible === '1' },
               window.location.origin,
             );
           } catch (_) {}
@@ -5664,6 +5698,7 @@
     const modelStatus = header.querySelector('.biggy-brand-status');
     if (modelStatus) reactorDock.appendChild(modelStatus);
     const composer = document.getElementById('composerWrap');
+    installPromptControlRail();
     if (composer) composer.appendChild(reactorDock);
     else header.insertAdjacentElement('afterend', reactorDock);
     buildReactorHud();

@@ -92,6 +92,9 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
   let directoryFilterIds = null;
   let nativeNodeVisibility = null;
   let nativeLinkVisibility = null;
+  let ragGalaxyVisible = false;
+  let ragHiddenNodeVisibility = null;
+  let ragHiddenLinkVisibility = null;
   let filterCameraTimer = null;
   let idleContrastInstalled = false;
   let landingZoomApplied = false;
@@ -255,9 +258,9 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
         return !!(positions && positions.count === 1800 && child.material.isPointsMaterial);
       });
       if (starField) {
-        starField.material.color.set('#7189b8');
-        starField.material.opacity = 0.92;
-        starField.material.size = 1.65;
+        starField.material.color.set('#b5caff');
+        starField.material.opacity = 1;
+        starField.material.size = 1.9;
         starField.material.needsUpdate = true;
       }
     }
@@ -280,6 +283,31 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     // refresh() updates particle geometry without reheating the simulation.
     const g = graph();
     if (g && typeof g.refresh === 'function') g.refresh();
+  }
+  function setRagGalaxyVisible(visible) {
+    const g = graph();
+    ragGalaxyVisible = visible === true;
+    if (!g) return false;
+    if (!ragGalaxyVisible) {
+      if (ragHiddenNodeVisibility === null) {
+        const current = g.nodeVisibility();
+        ragHiddenNodeVisibility = current === undefined ? (() => true) : current;
+      }
+      if (ragHiddenLinkVisibility === null) {
+        const current = g.linkVisibility();
+        ragHiddenLinkVisibility = current === undefined ? (() => true) : current;
+      }
+      g.nodeVisibility(() => false);
+      g.linkVisibility(() => false);
+    } else {
+      if (ragHiddenNodeVisibility !== null) g.nodeVisibility(ragHiddenNodeVisibility);
+      if (ragHiddenLinkVisibility !== null) g.linkVisibility(ragHiddenLinkVisibility);
+      ragHiddenNodeVisibility = null;
+      ragHiddenLinkVisibility = null;
+    }
+    if (traceGroup) traceGroup.visible = ragGalaxyVisible;
+    if (typeof g.refresh === 'function') g.refresh();
+    return true;
   }
   function restoreBaseGalaxyVisibility() {
     const os = window.__os || {};
@@ -681,6 +709,7 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     if (!g || !THREE || !Array.isArray(route) || route.length < 2) return false;
     traceGroup = new THREE.Group();
     traceGroup.name = 'biggy-rag-trace';
+    traceGroup.visible = ragGalaxyVisible;
     for (let i = 0; i < route.length - 1; i++) {
       const from = nodeFor(route[i]), to = nodeFor(route[i + 1]);
       const key = edge(route[i], route[i + 1]);
@@ -760,6 +789,7 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
       parent.postMessage({ type: 'biggy-rag-trace-cleared' }, location.origin);
     }
     if (data.type === 'biggy-galaxy-filter-focus') applyDirectoryFilter(data.path);
+    if (data.type === 'biggy-rag-visibility') setRagGalaxyVisible(data.visible);
     if (data.type === 'biggy-argus-state') setArgusActivityState(data.state);
     if (data.type === 'biggy-home-centerline-sync') applyHomeViewOffset(graph());
     if (data.type === 'biggy-world-pause') {
@@ -835,12 +865,14 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
   });
   const waitForGraph = () => {
     if (!installIdleContrast()) { setTimeout(waitForGraph, 180); return; }
+    setRagGalaxyVisible(ragGalaxyVisible);
     installGalaxyNavigation();
     // The standalone viewer already begins at a wide camera. Give its force
     // layout a brief moment to assign coordinates, then fit the complete
     // corpus around the fixed Biggy Prompt origin without a later push-in.
     setTimeout(() => {
       if (!applyLandingCamera()) { setTimeout(waitForGraph, 180); return; }
+      setRagGalaxyVisible(ragGalaxyVisible);
       window.__biggyRagTraceReady = true;
       parent.postMessage({ type: 'biggy-rag-world-ready' }, location.origin);
     }, 650);

@@ -33,7 +33,7 @@ def test_filter_stays_functional_but_is_removed_from_right_rail():
 
 def test_orb_is_bottom_docked_and_cockpit_and_fleet_share_top_center():
     assert ".biggy-argus-reactor{" in BRAND_CSS
-    assert "bottom:calc(100% - 8px)" in BRAND_CSS
+    assert "bottom:calc(100% - 72px)" in BRAND_CSS
     assert ".biggy-top-rail-group{" in BRAND_CSS
     assert "position:absolute;left:50%;top:20px" in BRAND_CSS
     assert "group.prepend(strip)" in BRAND
@@ -57,6 +57,8 @@ def test_rag_button_toggles_panel_without_reinstalling_conversation_stack():
     assert "aria-pressed" in BRAND
     assert "ARGUS_RAG_PANEL_STORAGE_KEY" in BRAND
     assert ".biggy-argus-rag-overview[hidden]{display:none}" in BRAND_CSS
+    assert "setArgusRagPanelVisible(false, rag, false)" in cockpit
+    assert "biggy-rag-visibility" in BRAND
     shell = BRAND[BRAND.index("function applyShell()"):BRAND.index("async function tryStart()")]
     assert "installArgusConversationLane(mainChat)" not in shell
     assert ".biggy-argus-conversation-lane" not in BRAND_CSS
@@ -64,12 +66,26 @@ def test_rag_button_toggles_panel_without_reinstalling_conversation_stack():
 
 def test_half_width_prompt_is_centered_on_the_shared_cockpit_axis():
     assert "padding:10px 84px 52px" in BRAND_CSS
-    assert "#mainChat.biggy-brand-iwo #composerBox{width:50%;max-width:900px;margin-left:auto;margin-right:auto}" in BRAND_CSS
+    assert "#mainChat.biggy-brand-iwo #composerBox{width:50%;max-width:900px;margin:5px auto 0}" in BRAND_CSS
     assert "function syncBiggySharedCenterline()" in BRAND
     assert "const masterX = promptRect.left + (promptRect.width / 2)" in BRAND
     assert "placeOnMaster(document.getElementById('biggyTopRailGroup'))" in BRAND
     assert "placeOnMaster(document.getElementById('biggyArgusReactor'))" in BRAND
     assert "biggy-home-centerline-sync" in BRAND
+
+
+def test_prompt_controls_are_moved_to_a_dedicated_rail_above_half_height_entry():
+    assert "function installPromptControlRail()" in BRAND
+    assert "wrap.insertBefore(rail, box)" in BRAND
+    assert "rail.appendChild(footer)" in BRAND
+    assert "installPromptControlRail();" in BRAND
+    assert ".biggy-prompt-control-rail{" in BRAND_CSS
+    assert "min-height:30px;height:34px;max-height:92px" in BRAND_CSS
+
+
+def test_rag_overview_clears_top_rails_on_desktop_and_tablet():
+    assert "left:24px;top:76px" in BRAND_CSS
+    assert ".biggy-argus-rag-overview{left:12px;top:64px" in BRAND_CSS
 
 
 def test_legacy_conversation_stack_is_removed_from_the_active_shell():
