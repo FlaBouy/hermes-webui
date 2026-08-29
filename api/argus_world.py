@@ -245,6 +245,22 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     // very light depth cue in Biggy's embedded galaxy.
     const scene = typeof g.scene === 'function' ? g.scene() : null;
     if (scene && scene.fog && 'density' in scene.fog) scene.fog.density = 0.000035;
+    // Brighten only the stock 1,800-point backdrop. Galaxy nodes, links, and
+    // active traces keep their existing palettes and contrast.
+    if (scene && Array.isArray(scene.children)) {
+      const starField = scene.children.find(child => {
+        if (!child || !child.isPoints || !child.geometry || !child.material) return false;
+        const positions = typeof child.geometry.getAttribute === 'function'
+          ? child.geometry.getAttribute('position') : null;
+        return !!(positions && positions.count === 1800 && child.material.isPointsMaterial);
+      });
+      if (starField) {
+        starField.material.color.set('#7189b8');
+        starField.material.opacity = 0.92;
+        starField.material.size = 1.65;
+        starField.material.needsUpdate = true;
+      }
+    }
     // The stock viewer sizes geometry in world units, so the complete corpus
     // can collapse into sub-pixel dots when the operator zooms far enough out
     // to see every branch. Establish a readable full-scope floor once during

@@ -13,7 +13,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260828-travel-atomic-34';
+  const BUILD_ID = '20260829-viewport-rails-35';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -23,6 +23,19 @@
   const V6_WORLD_STATUS_PATH = '/api/biggy/v6/world/status';
   const V6_WORLD_RETRY_PATH = '/api/biggy/v6/world/retry';
   const V6_WORLD_DISPOSITION_PATH = '/api/biggy/v6/world/disposition';
+  const HERMES_RAIL_PANELS = Object.freeze([
+    ['chat', 'CHAT'],
+    ['tasks', 'TASKS'],
+    ['kanban', 'KANBAN'],
+    ['skills', 'SKILLS'],
+    ['memory', 'MEMORY'],
+    ['workspaces', 'SPACES'],
+    ['profiles', 'PROFILES'],
+    ['todos', 'TODOS'],
+    ['insights', 'INSIGHTS'],
+    ['logs', 'LOGS'],
+    ['settings', 'SETTINGS'],
+  ]);
   const ORB_STATES = Object.freeze([
     'offline', 'online', 'thinking', 'speaking', 'tool-running', 'error',
   ]);
@@ -685,15 +698,28 @@
     }
   }
 
+  function ensureTopRailGroup() {
+    const mainChat = document.getElementById('mainChat');
+    if (!mainChat) return null;
+    let group = mainChat.querySelector('#biggyTopRailGroup');
+    if (!group) {
+      group = el('div', 'biggy-top-rail-group');
+      group.id = 'biggyTopRailGroup';
+      group.setAttribute('data-testid', 'biggy-top-rail-group');
+      mainChat.appendChild(group);
+    }
+    return group;
+  }
+
   function installFleetStrip() {
-    const composer = document.getElementById('composerWrap');
-    if (!composer) return null;
+    const group = ensureTopRailGroup();
+    if (!group) return null;
     document.querySelectorAll('.biggy-fleet-strip').forEach((node) => node.remove());
     const strip = el('nav', 'biggy-fleet-strip');
     strip.id = 'biggyFleetStrip';
     strip.setAttribute('aria-label', 'Fleet machine status and launch controls');
     strip.setAttribute('data-testid', 'biggy-fleet-strip');
-    composer.appendChild(strip);
+    group.appendChild(strip);
     refreshFleetStrip(strip).catch(() => {});
     if (fleetStatusTimer) window.clearInterval(fleetStatusTimer);
     fleetStatusTimer = window.setInterval(() => refreshFleetStrip(strip).catch(() => {}), 15000);
@@ -714,8 +740,7 @@
       const parentRect = node.offsetParent.getBoundingClientRect();
       node.style.left = `${masterX - parentRect.left}px`;
     };
-    placeOnMaster(document.getElementById('biggyCockpitStrip'));
-    placeOnMaster(document.getElementById('biggyFleetStrip'));
+    placeOnMaster(document.getElementById('biggyTopRailGroup'));
     placeOnMaster(document.getElementById('biggyArgusReactor'));
     const frame = document.getElementById('biggyV6World');
     if (frame && frame.contentWindow) {
@@ -732,8 +757,8 @@
 
   function installCockpitStrip(header) {
     const controls = header && header.querySelector('.biggy-brand-controls');
-    const mainChat = document.getElementById('mainChat');
-    if (!controls || !mainChat) return null;
+    const group = ensureTopRailGroup();
+    if (!controls || !group) return null;
     document.querySelectorAll('.biggy-cockpit-strip').forEach((node) => node.remove());
 
     const strip = el('nav', 'biggy-cockpit-strip');
@@ -777,7 +802,54 @@
     });
     if (ptt) ptt.textContent = 'PTT';
     controls.remove();
-    mainChat.appendChild(strip);
+    group.prepend(strip);
+    return strip;
+  }
+
+  function installHermesTodosHost(mainChat) {
+    const todos = document.getElementById('panelTodos');
+    if (!mainChat || !todos) return null;
+    let host = mainChat.querySelector('#biggyHermesTodosHost');
+    if (!host) {
+      host = el('section', 'biggy-hermes-todos-host');
+      host.id = 'biggyHermesTodosHost';
+      host.hidden = true;
+      host.innerHTML = '<header><span>HERMES // TODOS</span><button type="button" aria-label="Close todos">&times;</button></header>';
+      host.querySelector('button').addEventListener('click', () => {
+        host.hidden = true;
+        if (typeof window.switchPanel === 'function') window.switchPanel('chat');
+      });
+      mainChat.appendChild(host);
+    }
+    if (todos.parentElement !== host) host.appendChild(todos);
+    return host;
+  }
+
+  function installHermesStrip(mainChat) {
+    const composer = document.getElementById('composerWrap');
+    const layout = document.querySelector('.layout');
+    if (!composer || !layout) return null;
+    document.querySelectorAll('.biggy-hermes-strip').forEach((node) => node.remove());
+    const strip = el('nav', 'biggy-hermes-strip');
+    strip.id = 'biggyHermesStrip';
+    strip.setAttribute('aria-label', 'Hermes interface controls');
+    strip.setAttribute('data-testid', 'biggy-hermes-strip');
+    strip.innerHTML = '<span class="biggy-fleet-strip-label">HERMES</span>';
+    const todosHost = installHermesTodosHost(mainChat);
+    HERMES_RAIL_PANELS.forEach(([panel, label]) => {
+      const button = el('button', 'biggy-fleet-machine biggy-hermes-panel is-online');
+      button.type = 'button';
+      button.dataset.panel = panel;
+      button.title = `Open Hermes ${label.toLowerCase()}`;
+      button.innerHTML = `<span class="biggy-fleet-state" aria-hidden="true"></span><span>${label}</span>`;
+      button.addEventListener('click', async (event) => {
+        event.preventDefault();
+        if (todosHost) todosHost.hidden = panel !== 'todos';
+        if (typeof window.switchPanel === 'function') await window.switchPanel(panel);
+      });
+      strip.appendChild(button);
+    });
+    layout.appendChild(strip);
     return strip;
   }
 
@@ -2191,20 +2263,8 @@
 
   function ensureArgusConversationLane(mainChat) {
     const host = mainChat || document.getElementById('mainChat');
-    if (!host) return null;
-    let lane = host.querySelector('#biggyArgusConversationLane');
-    if (lane) return lane;
-    lane = el('section', 'biggy-argus-conversation-lane');
-    lane.id = 'biggyArgusConversationLane';
-    lane.dataset.biggyLayer = 'conversation';
-    lane.setAttribute('data-testid', 'biggy-argus-conversation-lane');
-    lane.setAttribute('aria-label', 'Biggy and ARGUS conversation');
-    lane.hidden = true;
-    lane.innerHTML = '<div class="biggy-argus-conversation-heading">CONVERSATION // LIVE</div>'
-      + '<div class="biggy-argus-conversation-turns" aria-live="polite"></div>';
-    host.appendChild(lane);
-    syncArgusConversationLaneBoundary(lane, host);
-    return lane;
+    if (host) host.querySelectorAll('.biggy-argus-conversation-lane').forEach((node) => node.remove());
+    return null;
   }
 
   function syncArgusConversationLaneBoundary(lane, host) {
@@ -2328,7 +2388,9 @@
     body.scrollTop = body.scrollHeight;
   }
 
-  window.__biggyRenderArgusConversationLaneNow = renderArgusConversationLane;
+  window.__biggyRenderArgusConversationLaneNow = () => {
+    document.querySelectorAll('.biggy-argus-conversation-lane').forEach((node) => node.remove());
+  };
 
   function installArgusConversationLane(mainChat) {
     const lane = ensureArgusConversationLane(mainChat);
@@ -5602,13 +5664,19 @@
     document.querySelectorAll('.biggy-composer-controls').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-fleet-strip').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-cockpit-strip').forEach((node) => node.remove());
+    document.querySelectorAll('.biggy-top-rail-group').forEach((node) => node.remove());
+    document.querySelectorAll('.biggy-hermes-strip').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-right-cockpit-controls').forEach((node) => node.remove());
     mainChat.querySelectorAll('.biggy-argus-rag-overview').forEach((node) => node.remove());
     mainChat.querySelectorAll('.biggy-argus-conversation-lane').forEach((node) => node.remove());
+    if (conversationLaneTimer) {
+      clearInterval(conversationLaneTimer);
+      conversationLaneTimer = null;
+    }
+    conversationLaneRenderQueued = false;
     pttInstalled = false;
     installBiggyV6World(mainChat);
     ensureArgusRagOverview(mainChat);
-    installArgusConversationLane(mainChat);
     const header = makeHeader();
     mainChat.insertBefore(header, mainChat.firstChild);
     const reactorDock = makeReactorDock();
@@ -5629,6 +5697,7 @@
     installDocumentTitle();
     installComposerBranding();
     installFleetStrip();
+    installHermesStrip(mainChat);
     scheduleBiggySharedCenterline();
     setTimeout(scheduleBiggySharedCenterline, 350);
     forceChromeLabels();

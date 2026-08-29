@@ -31,11 +31,13 @@ def test_filter_stays_functional_but_is_removed_from_right_rail():
     assert 'data-category="filter"' in BRAND_CSS
 
 
-def test_orb_is_bottom_docked_and_cockpit_is_top_centered():
+def test_orb_is_bottom_docked_and_cockpit_and_fleet_share_top_center():
     assert ".biggy-argus-reactor{" in BRAND_CSS
     assert "bottom:calc(100% - 8px)" in BRAND_CSS
-    assert ".biggy-cockpit-strip{" in BRAND_CSS
-    assert "left:50%;top:20px" in BRAND_CSS
+    assert ".biggy-top-rail-group{" in BRAND_CSS
+    assert "position:absolute;left:50%;top:20px" in BRAND_CSS
+    assert "group.prepend(strip)" in BRAND
+    assert "group.appendChild(strip)" in BRAND
     assert "reactorDock.appendChild(modelStatus)" in BRAND
     assert "composer.appendChild(reactorDock)" in BRAND
 
@@ -48,47 +50,44 @@ def test_reactor_model_badge_remains_single_line_after_bottom_dock_move():
     assert "width:max-content" in status_rule
 
 
-def test_rag_button_toggles_panel_and_conversation_origin():
+def test_rag_button_toggles_panel_without_reinstalling_conversation_stack():
     cockpit = BRAND[BRAND.index("function installCockpitStrip"):BRAND.index("function forceChromeLabels")]
     assert "biggyCockpitRag" in cockpit
     assert "setArgusRagPanelVisible" in cockpit
     assert "aria-pressed" in BRAND
     assert "ARGUS_RAG_PANEL_STORAGE_KEY" in BRAND
     assert ".biggy-argus-rag-overview[hidden]{display:none}" in BRAND_CSS
-    assert ".biggy-rag-panel-off .biggy-argus-conversation-lane{top:28px}" in BRAND_CSS
+    shell = BRAND[BRAND.index("function applyShell()"):BRAND.index("async function tryStart()")]
+    assert "installArgusConversationLane(mainChat)" not in shell
+    assert ".biggy-argus-conversation-lane" not in BRAND_CSS
 
 
 def test_half_width_prompt_is_centered_on_the_shared_cockpit_axis():
-    assert "padding-left:84px;padding-right:84px" in BRAND_CSS
+    assert "padding:10px 84px 52px" in BRAND_CSS
     assert "#mainChat.biggy-brand-iwo #composerBox{width:50%;max-width:900px;margin-left:auto;margin-right:auto}" in BRAND_CSS
     assert "function syncBiggySharedCenterline()" in BRAND
     assert "const masterX = promptRect.left + (promptRect.width / 2)" in BRAND
-    assert "placeOnMaster(document.getElementById('biggyCockpitStrip'))" in BRAND
-    assert "placeOnMaster(document.getElementById('biggyFleetStrip'))" in BRAND
+    assert "placeOnMaster(document.getElementById('biggyTopRailGroup'))" in BRAND
     assert "placeOnMaster(document.getElementById('biggyArgusReactor'))" in BRAND
     assert "biggy-home-centerline-sync" in BRAND
 
 
-def test_conversation_lane_clears_full_width_composer_overlay():
-    """Dialog stack must stop above the full-width bottom overlay, not the half-width prompt."""
-    boundary = BRAND[BRAND.index("function syncArgusConversationLaneBoundary"):BRAND.index("function argusConversationText")]
-    assert "document.getElementById('composerWrap')" in boundary
-    assert "document.getElementById('composerBox')" not in boundary
-    assert "overlapsLane" not in boundary
-    assert "hostRect.bottom - overlayRect.top" in boundary
-    assert "Math.max(132," in boundary
-    assert "scheduleArgusConversationLaneBoundary" in BRAND
-    assert "scheduleArgusConversationLaneBoundary()" in BRAND
-    # Usable bottom follows overlay across viewport sizes; top positions stay RAG-gated.
-    assert ".biggy-rag-panel-off .biggy-argus-conversation-lane{top:28px}" in BRAND_CSS
-    assert "bottom:var(--biggy-conversation-bottom,176px)" in BRAND_CSS
-    assert "overflow:auto" in BRAND_CSS[BRAND_CSS.index(".biggy-argus-conversation-turns{"):BRAND_CSS.index(".biggy-argus-dialog{")]
+def test_legacy_conversation_stack_is_removed_from_the_active_shell():
+    shell = BRAND[BRAND.index("function applyShell()"):BRAND.index("async function tryStart()")]
+    assert "installArgusConversationLane(mainChat)" not in shell
+    assert "clearInterval(conversationLaneTimer)" in shell
+    assert ".biggy-argus-conversation-lane" not in BRAND_CSS
 
 
-def test_conversation_lane_keeps_complete_assistant_text():
-    renderer = BRAND[BRAND.index("function renderArgusConversationLane"):BRAND.index("function installArgusConversationLane")]
-    assert "text: text.slice(0, 1400)" not in renderer
-    assert "result.push({ identity, pending, text, index })" in renderer
+def test_hermes_controls_replace_left_navigation_beneath_prompt():
+    assert "body.biggy-brand .layout > .rail" in BRAND_CSS
+    assert "body.biggy-brand .layout > .sidebar" in BRAND_CSS
+    assert "function installHermesStrip(mainChat)" in BRAND
+    assert "layout.appendChild(strip)" in BRAND
+    assert ".biggy-hermes-strip{" in BRAND_CSS
+    assert "bottom:8px" in BRAND_CSS
+    for panel in ("chat", "tasks", "kanban", "skills", "memory", "workspaces", "profiles", "todos", "insights", "logs", "settings"):
+        assert f"['{panel}'," in BRAND
 
 
 def test_server_owned_speech_cannot_start_a_second_browser_reader():
