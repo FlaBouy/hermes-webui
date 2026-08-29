@@ -14,7 +14,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260829-rag-ingest-38';
+  const BUILD_ID = '20260829-hermes-overlays-39';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -37,6 +37,17 @@
     ['logs', 'LOGS'],
     ['settings', 'SETTINGS'],
   ]);
+  const HERMES_SECONDARY_PANELS = Object.freeze({
+    tasks: 'mainTasks',
+    kanban: 'mainKanban',
+    skills: 'mainSkills',
+    memory: 'mainMemory',
+    workspaces: 'mainWorkspaces',
+    profiles: 'mainProfiles',
+    todos: null,
+    insights: 'mainInsights',
+    logs: 'mainLogs',
+  });
   const ORB_STATES = Object.freeze([
     'offline', 'online', 'thinking', 'speaking', 'tool-running', 'error',
   ]);
@@ -764,9 +775,17 @@
     const horizontalInset = window.matchMedia('(max-width: 900px)').matches ? 24 : 168;
     const deckWidth = Math.max(0, Math.min(856, mainRect.width - horizontalInset));
     const hermesStrip = document.getElementById('biggyHermesStrip');
+    const hermesSecondaryHost = document.getElementById('biggyHermesSecondaryHost');
     if (deckWidth) {
       if (deck) deck.style.width = `${deckWidth}px`;
       if (hermesStrip) hermesStrip.style.width = `${deckWidth}px`;
+      if (hermesSecondaryHost) hermesSecondaryHost.style.width = `${deckWidth}px`;
+    }
+    const reactor = document.getElementById('biggyArgusReactor');
+    if (hermesSecondaryHost && reactor && reactor.offsetParent) {
+      const reactorRect = reactor.getBoundingClientRect();
+      const overlayBottom = Math.max(300, Math.ceil(mainRect.bottom - reactorRect.top + 12));
+      hermesSecondaryHost.style.bottom = `${overlayBottom}px`;
     }
     const axisRect = (deck || prompt).getBoundingClientRect();
     const masterX = axisRect.left + (axisRect.width / 2);
@@ -853,23 +872,73 @@
     return strip;
   }
 
-  function installHermesTodosHost(mainChat) {
-    const todos = document.getElementById('panelTodos');
-    if (!mainChat || !todos) return null;
-    let host = mainChat.querySelector('#biggyHermesTodosHost');
-    if (!host) {
-      host = el('section', 'biggy-hermes-todos-host');
-      host.id = 'biggyHermesTodosHost';
+  function closeHermesSecondaryPanel({ returnToChat = false } = {}) {
+    const host = document.getElementById('biggyHermesSecondaryHost');
+    if (host) {
       host.hidden = true;
-      host.innerHTML = '<header><span>HERMES // TODOS</span><button type="button" aria-label="Close todos">&times;</button></header>';
+      host.dataset.activePanel = '';
+      host.querySelectorAll('.biggy-hermes-secondary-page').forEach((page) => {
+        page.hidden = true;
+      });
+    }
+    const main = document.querySelector('main.main');
+    if (main) main.classList.remove('biggy-hermes-overlay-open');
+    if (returnToChat && typeof window.switchPanel === 'function') {
+      return window.switchPanel('chat');
+    }
+    return null;
+  }
+
+  function ensureHermesSecondaryHost(mainChat) {
+    if (!mainChat) return null;
+    let host = mainChat.querySelector('#biggyHermesSecondaryHost');
+    if (!host) {
+      host = el('section', 'biggy-hermes-secondary-host');
+      host.id = 'biggyHermesSecondaryHost';
+      host.hidden = true;
+      host.innerHTML = '<header><span data-hermes-secondary-title>HERMES</span><button type="button" aria-label="Close Hermes pane">&times;</button></header><div class="biggy-hermes-secondary-scroll"></div>';
       host.querySelector('button').addEventListener('click', () => {
-        host.hidden = true;
-        if (typeof window.switchPanel === 'function') window.switchPanel('chat');
+        const result = closeHermesSecondaryPanel({ returnToChat: true });
+        if (result && typeof result.catch === 'function') result.catch(() => {});
       });
       mainChat.appendChild(host);
     }
-    if (todos.parentElement !== host) host.appendChild(todos);
+    const scroll = host.querySelector('.biggy-hermes-secondary-scroll');
+    Object.entries(HERMES_SECONDARY_PANELS).forEach(([panel, mainId]) => {
+      let page = scroll.querySelector(`[data-hermes-panel="${panel}"]`);
+      if (!page) {
+        page = el('section', 'biggy-hermes-secondary-page');
+        page.dataset.hermesPanel = panel;
+        page.hidden = true;
+        scroll.appendChild(page);
+      }
+      const panelNode = document.getElementById(`panel${panel.charAt(0).toUpperCase()}${panel.slice(1)}`);
+      if (panelNode && panelNode.parentElement !== page) page.appendChild(panelNode);
+      const mainNode = mainId ? document.getElementById(mainId) : null;
+      if (mainNode && mainNode.parentElement !== page) page.appendChild(mainNode);
+    });
     return host;
+  }
+
+  async function openHermesSecondaryPanel(mainChat, panel, label) {
+    const host = ensureHermesSecondaryHost(mainChat);
+    if (!host || !Object.prototype.hasOwnProperty.call(HERMES_SECONDARY_PANELS, panel)) return false;
+    const page = host.querySelector(`[data-hermes-panel="${panel}"]`);
+    if (!page) return false;
+    host.querySelectorAll('.biggy-hermes-secondary-page').forEach((candidate) => {
+      candidate.hidden = candidate !== page;
+    });
+    const title = host.querySelector('[data-hermes-secondary-title]');
+    if (title) title.textContent = `HERMES // ${label}`;
+    host.dataset.activePanel = panel;
+    host.hidden = false;
+    const main = document.querySelector('main.main');
+    if (main) main.classList.add('biggy-hermes-overlay-open');
+    if (typeof window.switchPanel === 'function') await window.switchPanel(panel);
+    const scroll = host.querySelector('.biggy-hermes-secondary-scroll');
+    if (scroll) scroll.scrollTop = 0;
+    scheduleBiggySharedCenterline();
+    return true;
   }
 
   function installHermesStrip(mainChat) {
@@ -887,7 +956,7 @@
     strip.setAttribute('aria-label', 'Hermes interface controls');
     strip.setAttribute('data-testid', 'biggy-hermes-strip');
     strip.innerHTML = '<span class="biggy-fleet-strip-label">HERMES</span>';
-    const todosHost = installHermesTodosHost(mainChat);
+    ensureHermesSecondaryHost(mainChat);
     HERMES_RAIL_PANELS.forEach(([panel, label]) => {
       const button = el('button', 'biggy-fleet-machine biggy-hermes-panel is-online');
       button.type = 'button';
@@ -896,7 +965,17 @@
       button.innerHTML = `<span class="biggy-fleet-state" aria-hidden="true"></span><span>${label}</span>`;
       button.addEventListener('click', async (event) => {
         event.preventDefault();
-        if (todosHost) todosHost.hidden = panel !== 'todos';
+        if (Object.prototype.hasOwnProperty.call(HERMES_SECONDARY_PANELS, panel)) {
+          await openHermesSecondaryPanel(mainChat, panel, label);
+          return;
+        }
+        closeHermesSecondaryPanel();
+        // Settings deliberately retains Hermes' native main-pane behavior;
+        // it is not mounted into or restyled by the cockpit overlay.
+        if (panel === 'settings') {
+          if (typeof window.switchPanel === 'function') await window.switchPanel(panel);
+          return;
+        }
         if (typeof window.switchPanel === 'function') await window.switchPanel(panel);
       });
       strip.appendChild(button);

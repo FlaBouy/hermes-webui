@@ -174,6 +174,42 @@ def test_hermes_controls_replace_left_navigation_beneath_prompt():
         assert f"['{panel}'," in BRAND
 
 
+def test_hermes_secondary_panels_share_one_centered_starfield_overlay():
+    assert "const HERMES_SECONDARY_PANELS = Object.freeze({" in BRAND
+    for panel, main_id in (
+        ("tasks", "mainTasks"),
+        ("kanban", "mainKanban"),
+        ("skills", "mainSkills"),
+        ("memory", "mainMemory"),
+        ("workspaces", "mainWorkspaces"),
+        ("profiles", "mainProfiles"),
+        ("insights", "mainInsights"),
+        ("logs", "mainLogs"),
+    ):
+        assert f"{panel}: '{main_id}'" in BRAND
+    assert "todos: null" in BRAND
+    assert "function ensureHermesSecondaryHost(mainChat)" in BRAND
+    assert "function openHermesSecondaryPanel(mainChat, panel, label)" in BRAND
+    assert "function closeHermesSecondaryPanel" in BRAND
+    assert "host.id = 'biggyHermesSecondaryHost'" in BRAND
+    assert "page.dataset.hermesPanel = panel" in BRAND
+    assert "await window.switchPanel(panel)" in BRAND
+    assert "panel === 'settings'" in BRAND
+    assert ".biggy-hermes-secondary-host{" in BRAND_CSS
+    assert "width:var(--biggy-bottom-deck-width)" in BRAND_CSS
+    assert ".biggy-hermes-secondary-scroll{" in BRAND_CSS
+    assert "overflow-y:auto" in BRAND_CSS
+    assert "flex-direction:column" in BRAND_CSS
+
+
+def test_hermes_secondary_overlay_tracks_the_rendered_lower_rail_width():
+    sync = BRAND[BRAND.index("function syncBiggySharedCenterline"):BRAND.index("function scheduleBiggySharedCenterline")]
+    assert "const hermesSecondaryHost = document.getElementById('biggyHermesSecondaryHost')" in sync
+    assert "hermesSecondaryHost.style.width = `${deckWidth}px`" in sync
+    assert "const reactorRect = reactor.getBoundingClientRect()" in sync
+    assert "hermesSecondaryHost.style.bottom = `${overlayBottom}px`" in sync
+
+
 def test_server_owned_speech_cannot_start_a_second_browser_reader():
     policy = BRAND[BRAND.index("function installSmedleyAudioPolicy"):BRAND.index("function isBiggyInstance")]
     assert "newestAssistant.ptt_owned_tts" in policy

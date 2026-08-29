@@ -210,22 +210,48 @@ body.biggy-brand main.main{width:100%;height:100%;background:transparent}
 .biggy-hermes-strip .biggy-fleet-machine.active{
   color:#f0c14b;border-color:rgba(240,193,75,.55);background:rgba(42,31,7,.92)
 }
-.biggy-hermes-todos-host{
-  position:absolute;left:24px;bottom:150px;z-index:var(--biggy-layer-workspace,6);
-  width:min(440px,calc(100% - 48px));max-height:min(62vh,640px);overflow:auto;
-  border:1px solid rgba(98,219,255,.34);border-radius:8px;
-  background:rgba(5,10,16,.94);box-shadow:0 18px 42px rgba(0,0,0,.48);
-  pointer-events:auto
+body.biggy-brand main.main.biggy-hermes-overlay-open>#mainChat.biggy-brand-iwo{display:flex!important}
+.biggy-hermes-secondary-host{
+  position:absolute;left:50%;top:76px;bottom:370px;z-index:calc(var(--biggy-layer-reactor,10) - 1);
+  transform:translateX(-50%);box-sizing:border-box;
+  width:var(--biggy-bottom-deck-width);max-width:calc(100% - 48px);min-height:0;
+  overflow:hidden;border:1px solid rgba(98,219,255,.34);border-radius:8px;
+  background:rgba(5,10,16,.91);box-shadow:0 18px 42px rgba(0,0,0,.48);
+  backdrop-filter:blur(8px);pointer-events:auto
 }
-.biggy-hermes-todos-host[hidden]{display:none!important}
-.biggy-hermes-todos-host>header{
-  position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;
-  padding:9px 12px;border-bottom:1px solid rgba(98,219,255,.24);
+.biggy-hermes-secondary-host[hidden]{display:none!important}
+.biggy-hermes-secondary-host>header{
+  position:relative;z-index:2;display:flex;align-items:center;justify-content:space-between;
+  min-height:36px;padding:7px 12px;box-sizing:border-box;border-bottom:1px solid rgba(98,219,255,.24);
   background:rgba(5,10,16,.97);color:#8fdfff;
   font:800 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em
 }
-.biggy-hermes-todos-host>header button{border:0;background:transparent;color:#9fb0bc;font-size:20px;cursor:pointer}
-.biggy-hermes-todos-host>#panelTodos{display:block;min-height:280px}
+.biggy-hermes-secondary-host>header button{border:0;background:transparent;color:#9fb0bc;font-size:20px;cursor:pointer}
+.biggy-hermes-secondary-scroll{
+  height:calc(100% - 36px);min-height:0;overflow-y:auto;overflow-x:hidden;
+  display:flex;flex-direction:column;scrollbar-width:thin
+}
+.biggy-hermes-secondary-page{display:flex;flex-direction:column;flex:0 0 auto;width:100%;min-height:100%}
+.biggy-hermes-secondary-page[hidden]{display:none!important}
+.biggy-hermes-secondary-page>.panel-view{
+  display:flex!important;flex:0 0 clamp(150px,26vh,250px);width:100%;min-height:150px;
+  overflow-y:auto;overflow-x:hidden;border-bottom:1px solid rgba(98,219,255,.2);background:rgba(7,13,20,.72)
+}
+.biggy-hermes-secondary-page>.main-view{
+  display:flex!important;flex:0 0 auto;width:100%;min-height:300px;overflow:visible;background:transparent
+}
+.biggy-hermes-secondary-page>.main-view>.main-view-body,
+.biggy-hermes-secondary-page>.main-view>.main-view-content{overflow:visible!important}
+.biggy-hermes-secondary-page[data-hermes-panel="todos"]>.panel-view{flex-basis:100%;min-height:320px;border-bottom:0}
+.biggy-hermes-secondary-page[data-hermes-panel="insights"]>.panel-view,
+.biggy-hermes-secondary-page[data-hermes-panel="logs"]>.panel-view{flex-basis:auto;min-height:0}
+.biggy-hermes-secondary-page[data-hermes-panel="insights"]>.main-view,
+.biggy-hermes-secondary-page[data-hermes-panel="logs"]>.main-view{min-height:420px}
+.biggy-hermes-secondary-page .panel-head,
+.biggy-hermes-secondary-page .panel-head-sub,
+.biggy-hermes-secondary-page .skills-search,
+.biggy-hermes-secondary-page .skill-item{box-sizing:border-box;max-width:100%;min-width:0}
+.biggy-hermes-secondary-page .skill-desc{white-space:normal;overflow-wrap:anywhere}
 .biggy-fleet-strip-label{
   color:#6f8794;font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
   letter-spacing:.14em;padding:0 4px 0 2px;
@@ -262,6 +288,7 @@ body.biggy-brand main.main{width:100%;height:100%;background:transparent}
   .biggy-fleet-strip-label{display:none}
   #mainChat.biggy-brand-iwo .composer-wrap{padding-left:12px;padding-right:12px}
   #mainChat.biggy-brand-iwo .biggy-prompt-deck{width:var(--biggy-bottom-deck-width)}
+  .biggy-hermes-secondary-host{top:64px;bottom:310px;max-width:calc(100% - 24px)}
 }
 
 /* A.R.G.U.S. 3D graph/galaxy — occupies the full center canvas behind the
