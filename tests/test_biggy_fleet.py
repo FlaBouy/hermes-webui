@@ -56,12 +56,12 @@ def test_fleet_status_distinguishes_busy_error_and_stale(monkeypatch, tmp_path):
     assert by_id["PLATO"]["state"] == "online"
 
 
-def test_fleet_strip_is_top_rail_anchored_and_routes_are_same_origin():
+def test_fleet_strip_is_composer_anchored_and_routes_are_same_origin():
     assert "const FLEET_STATUS_PATH = '/api/biggy/fleet/status'" in BIGGY_JS
-    assert "function ensureTopRailGroup()" in BIGGY_JS
-    assert "group.appendChild(strip)" in BIGGY_JS
-    assert ".biggy-top-rail-group{" in BIGGY_CSS
-    assert "position:absolute;left:50%;top:20px" in BIGGY_CSS
+    assert "composer.appendChild(strip)" in BIGGY_JS
+    assert "bottom:calc(100% + 8px)" in BIGGY_CSS
+    assert "left:50%" in BIGGY_CSS
+    assert "transform:translateX(-50%)" in BIGGY_CSS
     assert "launchFleetMachine(machine)" in BIGGY_JS
     assert "openSmedleyGui();" in BIGGY_JS
     assert "resetBiggyWorkspace();" in BIGGY_JS

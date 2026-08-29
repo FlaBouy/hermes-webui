@@ -555,29 +555,18 @@ def test_right_rail_utility_labels_remain_canonical():
     assert 'id="biggyOpenSmedley"' not in BIGGY_JS
 
 
-def test_argus_conversation_lane_is_removed_from_active_glass():
-    shell = BIGGY_JS[BIGGY_JS.index("function applyShell()"):BIGGY_JS.index("async function tryStart()")]
-    assert "installArgusConversationLane(mainChat)" not in shell
-    assert ".biggy-argus-conversation-lane" not in BIGGY_CSS
-
-
-def test_embedded_world_brightens_only_the_stock_star_field():
-    source = (ROOT / "api" / "argus_world.py").read_text(encoding="utf-8")
-    assert "positions.count === 1800" in source
-    assert "child.material.isPointsMaterial" in source
-    assert "starField.material.color.set('#b5caff')" in source
-    assert "starField.material.opacity = 1" in source
-    assert "starField.material.size = 1.9" in source
-
-
-def test_embedded_world_starts_with_rag_graph_hidden_until_parent_reveals_it():
-    source = world._TRACE_RUNTIME
-    assert "let ragGalaxyVisible = false" in source
-    assert "function setRagGalaxyVisible(visible)" in source
-    assert "g.nodeVisibility(() => false)" in source
-    assert "g.linkVisibility(() => false)" in source
-    assert "data.type === 'biggy-rag-visibility'" in source
-    assert "traceGroup.visible = ragGalaxyVisible" in source
+def test_argus_conversation_lane_mirrors_existing_message_state():
+    assert 'id = \'biggyArgusConversationLane\'' in BIGGY_JS
+    assert "Array.isArray(S.messages)" in BIGGY_JS
+    assert "message.ask_jarvis_pending || message._live" in BIGGY_JS
+    assert "identity === 'argus' || identity === 'jarvis'" in BIGGY_JS
+    assert "installArgusConversationLane(mainChat)" in BIGGY_JS
+    assert ".biggy-argus-conversation-lane" in BIGGY_CSS
+    assert "width:min(410px,calc(34% - 34px))" in BIGGY_CSS
+    assert "font-size:14px" in BIGGY_CSS
+    assert 'x="101.5"' in BIGGY_JS
+    assert "syncArgusConversationLaneBoundary(lane)" in BIGGY_JS
+    assert "--biggy-conversation-bottom" in BIGGY_CSS
 
 
 def test_owner_prompt_renderer_never_exposes_private_voice_context():
@@ -660,10 +649,11 @@ def test_travel_categories_do_not_leak_stale_cards_and_map_survives_category_swi
     assert "section.setAttribute('data-rec-category', railKey)" in BIGGY_JS
 
 
-def test_rag_palette_matches_argus_hud_after_conversation_stack_removal():
+def test_conversation_palette_matches_argus_hud():
     assert ".biggy-argus-rag-subtitle{margin-top:5px;color:#b59cff" in BIGGY_CSS
-    assert ".biggy-argus-conversation-lane" not in BIGGY_CSS
-    assert "border-left-color:#62dbff" in BIGGY_CSS
+    assert ".biggy-argus-dialog.is-operator .biggy-argus-dialog-copy{color:#c7afff}" in BIGGY_CSS
+    assert ".biggy-argus-dialog.is-biggy .biggy-argus-dialog-copy{color:#8bdba0}" in BIGGY_CSS
+    assert ".biggy-argus-dialog.is-argus .biggy-argus-dialog-copy{color:#8fdcf2}" in BIGGY_CSS
 
 
 def test_rag_status_requires_three_missed_polls_before_offline():
@@ -699,7 +689,7 @@ def test_routes_wire_world_endpoint():
 def test_iwo_background_image_removed_from_css():
     assert "iwo.jpg" not in BIGGY_CSS
     assert ".biggy-argus-rag-overview" in BIGGY_CSS
-    assert "padding:10px 84px 66px" in BIGGY_CSS
+    assert "padding-right:84px" in BIGGY_CSS
 
 
 def test_gitignore_covers_local_world_config():

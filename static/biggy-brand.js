@@ -10,11 +10,10 @@
   const IWO_CLASS = 'biggy-brand-iwo';
   const BODY_CLASS = 'biggy-brand';
   const PTT_PROXY = '/api/extensions/biggy-brand/sidecar';
-  const ARGUS_RAG_INGEST_PROXY = '/api/biggy/rag';
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260829-electrical-tools-41';
+  const BUILD_ID = '20260828-travel-atomic-34';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -24,50 +23,6 @@
   const V6_WORLD_STATUS_PATH = '/api/biggy/v6/world/status';
   const V6_WORLD_RETRY_PATH = '/api/biggy/v6/world/retry';
   const V6_WORLD_DISPOSITION_PATH = '/api/biggy/v6/world/disposition';
-  const HERMES_RAIL_PANELS = Object.freeze([
-    ['chat', 'CHAT'],
-    ['tasks', 'TASKS'],
-    ['kanban', 'KANBAN'],
-    ['skills', 'SKILLS'],
-    ['memory', 'MEMORY'],
-    ['workspaces', 'SPACES'],
-    ['profiles', 'PROFILES'],
-    ['todos', 'TODOS'],
-    ['insights', 'INSIGHTS'],
-    ['logs', 'LOGS'],
-    ['settings', 'SETTINGS'],
-  ]);
-  const HERMES_SECONDARY_PANELS = Object.freeze({
-    tasks: 'mainTasks',
-    kanban: 'mainKanban',
-    skills: 'mainSkills',
-    memory: 'mainMemory',
-    workspaces: 'mainWorkspaces',
-    profiles: 'mainProfiles',
-    todos: null,
-    insights: 'mainInsights',
-    logs: 'mainLogs',
-    settings: 'mainSettings',
-  });
-  const BIGGY_ELECTRICAL_TOOLS = Object.freeze([
-    ['voltage-drop', 'VOLTAGE DROP', 'standard'],
-    ['feeder-size', 'FEEDER SIZE', 'standard'],
-    ['conductor-sets', 'CONDUCTOR SETS', 'standard'],
-    ['ocpd-size', 'OCPD SIZE', 'standard'],
-    ['conduit-fill', 'CONDUIT FILL', 'standard'],
-    ['grounding', 'GROUNDING', 'standard'],
-    ['cable-tray-fill', 'CABLE TRAY FILL', 'standard'],
-    ['motor-circuit', 'MOTOR CIRCUIT', 'motor'],
-    ['motor-starter', 'MOTOR STARTER', 'motor'],
-    ['mcc-bucket', 'MCC BUCKET', 'motor'],
-    ['vfd-circuit', 'VFD CIRCUIT', 'motor'],
-  ]);
-  const BIGGY_ELECTRICAL_ASSETS = Object.freeze([
-    '/extensions/smedley-engineering/voltage-drop-sizing.js',
-    '/extensions/smedley-engineering/smedley-electrical-results.js',
-    '/extensions/smedley-engineering/smedley-live-tools.v0.2.5.js',
-    '/static/biggy-electrical-tools.js',
-  ]);
   const ORB_STATES = Object.freeze([
     'offline', 'online', 'thinking', 'speaking', 'tool-running', 'error',
   ]);
@@ -104,8 +59,6 @@
   let identityTimer = null;
   let diagTimer = null;
   let ragWorldTimer = null;
-  let ragIngestPollTimer = null;
-  let ragIngestStatusInFlight = false;
   let conversationLaneTimer = null;
   let conversationLaneRenderQueued = false;
   let activeSessionReconcileTimer = null;
@@ -120,7 +73,6 @@
   let started = false;
   let pttInstalled = false;
   let sessionEnsurePromise = null;
-  let sharedCenterlineLayoutObserver = null;
 
   function esc(value) {
     return String(value ?? '').replace(/[&<>"']/g, (c) => ({
@@ -598,32 +550,6 @@
     }
   }
 
-  function installPromptInlineControls() {
-    const box = document.getElementById('composerBox');
-    const attach = document.getElementById('btnAttach');
-    const savedPrompts = document.getElementById('btnSavedPrompts');
-    const dictate = document.getElementById('btnMic');
-    const voice = document.getElementById('btnGptVoice');
-    const send = document.getElementById('btnSend');
-    const savedPromptsPopup = document.getElementById('savedPromptsPopup');
-    if (!box) return null;
-    let controls = document.getElementById('biggyPromptInlineControls');
-    if (!controls) {
-      controls = el('div', 'biggy-prompt-inline-controls');
-      controls.id = 'biggyPromptInlineControls';
-      controls.setAttribute('aria-label', 'Prompt voice and send controls');
-      controls.setAttribute('data-testid', 'biggy-prompt-inline-controls');
-      box.appendChild(controls);
-    }
-    if (attach && attach.parentElement !== controls) controls.appendChild(attach);
-    if (savedPrompts && savedPrompts.parentElement !== controls) controls.appendChild(savedPrompts);
-    if (dictate && dictate.parentElement !== controls) controls.appendChild(dictate);
-    if (voice && voice.parentElement !== controls) controls.appendChild(voice);
-    if (send && send.parentElement !== controls) controls.appendChild(send);
-    if (savedPromptsPopup && savedPromptsPopup.parentElement !== box) box.appendChild(savedPromptsPopup);
-    return controls;
-  }
-
   const FLEET_STATUS_PATH = '/api/biggy/fleet/status';
   let fleetStatusTimer = 0;
 
@@ -759,28 +685,15 @@
     }
   }
 
-  function ensureTopRailGroup() {
-    const mainChat = document.getElementById('mainChat');
-    if (!mainChat) return null;
-    let group = mainChat.querySelector('#biggyTopRailGroup');
-    if (!group) {
-      group = el('div', 'biggy-top-rail-group');
-      group.id = 'biggyTopRailGroup';
-      group.setAttribute('data-testid', 'biggy-top-rail-group');
-      mainChat.appendChild(group);
-    }
-    return group;
-  }
-
   function installFleetStrip() {
-    const group = ensureTopRailGroup();
-    if (!group) return null;
+    const composer = document.getElementById('composerWrap');
+    if (!composer) return null;
     document.querySelectorAll('.biggy-fleet-strip').forEach((node) => node.remove());
     const strip = el('nav', 'biggy-fleet-strip');
     strip.id = 'biggyFleetStrip';
     strip.setAttribute('aria-label', 'Fleet machine status and launch controls');
     strip.setAttribute('data-testid', 'biggy-fleet-strip');
-    group.appendChild(strip);
+    composer.appendChild(strip);
     refreshFleetStrip(strip).catch(() => {});
     if (fleetStatusTimer) window.clearInterval(fleetStatusTimer);
     fleetStatusTimer = window.setInterval(() => refreshFleetStrip(strip).catch(() => {}), 15000);
@@ -792,41 +705,18 @@
   function syncBiggySharedCenterline() {
     sharedCenterlineTimer = null;
     const prompt = document.getElementById('composerBox');
-    const deck = document.getElementById('biggyPromptDeck');
     const mainChat = document.getElementById('mainChat');
     if (!prompt || !mainChat) return;
-    // mainChat is the common visual viewport on both Smedley and TD. Resolve
-    // one pixel width from it, then give that exact width to both bottom
-    // surfaces; percentage custom properties resolve against different
-    // containing blocks and drift on TD's aspect ratio.
-    const mainRect = mainChat.getBoundingClientRect();
-    const horizontalInset = window.matchMedia('(max-width: 900px)').matches ? 24 : 168;
-    const deckWidth = Math.max(0, Math.min(856, mainRect.width - horizontalInset));
-    const hermesStrip = document.getElementById('biggyHermesStrip');
-    const hermesSecondaryHost = document.getElementById('biggyHermesSecondaryHost');
-    const toolsRail = document.getElementById('biggyToolsRail');
-    if (deckWidth) {
-      if (deck) deck.style.width = `${deckWidth}px`;
-      if (hermesStrip) hermesStrip.style.width = `${deckWidth}px`;
-      if (hermesSecondaryHost) hermesSecondaryHost.style.width = `${deckWidth}px`;
-      if (toolsRail) toolsRail.style.width = `${deckWidth}px`;
-    }
-    const reactor = document.getElementById('biggyArgusReactor');
-    if (hermesSecondaryHost && reactor && reactor.offsetParent) {
-      const reactorRect = reactor.getBoundingClientRect();
-      const overlayBottom = Math.max(300, Math.ceil(mainRect.bottom - reactorRect.top + 12));
-      hermesSecondaryHost.style.bottom = `${overlayBottom}px`;
-    }
-    const axisRect = (deck || prompt).getBoundingClientRect();
-    const masterX = axisRect.left + (axisRect.width / 2);
+    const promptRect = prompt.getBoundingClientRect();
+    const masterX = promptRect.left + (promptRect.width / 2);
     const placeOnMaster = (node) => {
       if (!node || !node.offsetParent) return;
       const parentRect = node.offsetParent.getBoundingClientRect();
       node.style.left = `${masterX - parentRect.left}px`;
     };
-    placeOnMaster(document.getElementById('biggyTopRailGroup'));
+    placeOnMaster(document.getElementById('biggyCockpitStrip'));
+    placeOnMaster(document.getElementById('biggyFleetStrip'));
     placeOnMaster(document.getElementById('biggyArgusReactor'));
-    placeOnMaster(toolsRail);
     const frame = document.getElementById('biggyV6World');
     if (frame && frame.contentWindow) {
       try {
@@ -840,19 +730,10 @@
     sharedCenterlineTimer = setTimeout(syncBiggySharedCenterline, 80);
   }
 
-  function installBiggyDeckLayoutObserver(mainChat) {
-    if (sharedCenterlineLayoutObserver) sharedCenterlineLayoutObserver.disconnect();
-    sharedCenterlineLayoutObserver = null;
-    if (!mainChat || typeof MutationObserver !== 'function') return;
-    sharedCenterlineLayoutObserver = new MutationObserver(scheduleBiggySharedCenterline);
-    sharedCenterlineLayoutObserver.observe(document.body, { attributes: true, attributeFilter: ['class', 'style'] });
-    sharedCenterlineLayoutObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-workspace-panel'] });
-  }
-
   function installCockpitStrip(header) {
     const controls = header && header.querySelector('.biggy-brand-controls');
-    const group = ensureTopRailGroup();
-    if (!controls || !group) return null;
+    const mainChat = document.getElementById('mainChat');
+    if (!controls || !mainChat) return null;
     document.querySelectorAll('.biggy-cockpit-strip').forEach((node) => node.remove());
 
     const strip = el('nav', 'biggy-cockpit-strip');
@@ -870,7 +751,6 @@
     filter.innerHTML = '<span class="biggy-fleet-state" aria-hidden="true"></span><span>FILTER</span>';
     filter.addEventListener('click', (event) => {
       event.preventDefault();
-      setArgusRagPanelVisible(true, document.getElementById('biggyCockpitRag'), true);
       const railFilter = document.getElementById('biggyCatRail-filter');
       if (railFilter) railFilter.click();
     });
@@ -886,9 +766,7 @@
       setArgusRagPanelVisible(!!(overview && overview.hidden), rag, true);
     });
     strip.appendChild(rag);
-    // Every new Biggy surface opens as an unobstructed starfield. RAG is the
-    // explicit operator reveal for both the ingest picture and graph corpus.
-    setArgusRagPanelVisible(false, rag, false);
+    setArgusRagPanelVisible(loadArgusRagPanelVisible(), rag, false);
 
     const ptt = controls.querySelector('#biggyPtt');
     const route = controls.querySelector('#biggyAudioRoute');
@@ -899,432 +777,8 @@
     });
     if (ptt) ptt.textContent = 'PTT';
     controls.remove();
-    group.prepend(strip);
+    mainChat.appendChild(strip);
     return strip;
-  }
-
-  function loadBiggyElectricalAsset(src) {
-    const existing = document.querySelector(`script[data-biggy-electrical-src="${src}"]`);
-    if (existing) {
-      if (existing.dataset.loaded === 'true') return Promise.resolve();
-      return new Promise((resolve, reject) => {
-        existing.addEventListener('load', resolve, { once: true });
-        existing.addEventListener('error', reject, { once: true });
-      });
-    }
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = src;
-      script.async = false;
-      script.dataset.biggyElectricalSrc = src;
-      script.addEventListener('load', () => {
-        script.dataset.loaded = 'true';
-        resolve();
-      }, { once: true });
-      script.addEventListener('error', () => reject(new Error(`Could not load ${src}`)), { once: true });
-      document.head.appendChild(script);
-    });
-  }
-
-  let biggyElectricalAssetsPromise = null;
-  function ensureBiggyElectricalAssets() {
-    if (window.BiggyElectricalTools && window.SmedleyVoltageDropSizing
-        && window.SmedleyElectricalResults && window.SmedleyLiveTools) {
-      return Promise.resolve();
-    }
-    if (!document.getElementById('biggySmedleyElectricalStyles')) {
-      const link = document.createElement('link');
-      link.id = 'biggySmedleyElectricalStyles';
-      link.rel = 'stylesheet';
-      link.href = '/extensions/smedley-engineering/smedley-engineering.v0.2.5.css';
-      document.head.appendChild(link);
-    }
-    if (!document.getElementById('biggySmedleyElectricalResultStyles')) {
-      const link = document.createElement('link');
-      link.id = 'biggySmedleyElectricalResultStyles';
-      link.rel = 'stylesheet';
-      link.href = '/extensions/smedley-engineering/smedley-electrical-results.css';
-      document.head.appendChild(link);
-    }
-    if (!biggyElectricalAssetsPromise) {
-      biggyElectricalAssetsPromise = BIGGY_ELECTRICAL_ASSETS.reduce(
-        (ready, src) => ready.then(() => loadBiggyElectricalAsset(src)),
-        Promise.resolve(),
-      ).catch((error) => {
-        biggyElectricalAssetsPromise = null;
-        throw error;
-      });
-    }
-    return biggyElectricalAssetsPromise;
-  }
-
-  function setBiggyToolsRailOpen(rail, launcher, open) {
-    if (!rail) return;
-    rail.hidden = !open;
-    if (launcher) {
-      launcher.classList.toggle('active', open);
-      launcher.setAttribute('aria-expanded', open ? 'true' : 'false');
-    }
-    const main = document.querySelector('main.main');
-    if (main) main.classList.toggle('biggy-tools-rail-open', open);
-    scheduleBiggySharedCenterline();
-  }
-
-  async function openBiggyElectricalTool(mainChat, tool, toolButton) {
-    const host = ensureHermesSecondaryHost(mainChat);
-    if (!host) return false;
-    let page = host.querySelector('[data-hermes-panel="tools"]');
-    if (!page) {
-      page = el('section', 'biggy-hermes-secondary-page biggy-electrical-tool-page');
-      page.dataset.hermesPanel = 'tools';
-      page.hidden = true;
-      host.querySelector('.biggy-hermes-secondary-scroll').appendChild(page);
-    }
-    host.querySelectorAll('.biggy-hermes-secondary-page').forEach((candidate) => {
-      candidate.hidden = candidate !== page;
-    });
-    document.querySelectorAll('#biggyToolsRail .biggy-tool-launcher').forEach((button) => {
-      button.classList.toggle('active', button === toolButton);
-    });
-    const title = host.querySelector('[data-hermes-secondary-title]');
-    if (title) title.textContent = `TOOLS // ${tool[1]}`;
-    host.dataset.activePanel = 'tools';
-    host.hidden = false;
-    const main = document.querySelector('main.main');
-    if (main) {
-      main.classList.add('biggy-hermes-overlay-open');
-      main.classList.add('biggy-tools-open');
-    }
-    page.hidden = false;
-    page.innerHTML = '<div class="biggy-electrical-tool-loading">LOADING ELECTRICAL TOOL…</div>';
-    try {
-      await ensureBiggyElectricalAssets();
-      if (!window.BiggyElectricalTools || typeof window.BiggyElectricalTools.open !== 'function') {
-        throw new Error('Electrical tool runtime is unavailable.');
-      }
-      window.BiggyElectricalTools.open({
-        mount: page,
-        toolId: tool[0],
-        label: tool[1],
-        onClose: () => {
-          document.querySelectorAll('#biggyToolsRail .biggy-tool-launcher').forEach((button) => button.classList.remove('active'));
-        },
-      });
-      document.querySelectorAll('#biggyToolsRail .biggy-tool-launcher').forEach((button) => {
-        button.classList.toggle('active', button === toolButton);
-      });
-    } catch (error) {
-      page.innerHTML = `<div class="biggy-electrical-tool-error">${esc(error.message || error)}</div>`;
-    }
-    const scroll = host.querySelector('.biggy-hermes-secondary-scroll');
-    if (scroll) scroll.scrollTop = 0;
-    scheduleBiggySharedCenterline();
-    return true;
-  }
-
-  function ensureBiggyToolsRail(mainChat) {
-    if (!mainChat) return null;
-    let rail = mainChat.querySelector('#biggyToolsRail');
-    if (rail) return rail;
-    rail = el('nav', 'biggy-tools-rail');
-    rail.id = 'biggyToolsRail';
-    rail.hidden = true;
-    rail.setAttribute('aria-label', 'Electrical calculation tools');
-    [['standard', 'GENERIC CIRCUIT TOOLS'], ['motor', 'MOTOR & STARTER TOOLS']].forEach(([kind, label]) => {
-      const group = el('section', 'biggy-tools-group');
-      const heading = el('span', 'biggy-tools-group-label');
-      heading.textContent = label;
-      const buttons = el('div', 'biggy-tools-buttons');
-      BIGGY_ELECTRICAL_TOOLS.filter((tool) => tool[2] === kind).forEach((tool) => {
-        const button = el('button', 'biggy-fleet-machine biggy-tool-launcher is-online');
-        button.type = 'button';
-        button.dataset.tool = tool[0];
-        button.textContent = tool[1];
-        button.addEventListener('click', (event) => {
-          event.preventDefault();
-          openBiggyElectricalTool(mainChat, tool, button).catch(() => {});
-        });
-        buttons.appendChild(button);
-      });
-      group.append(heading, buttons);
-      rail.appendChild(group);
-    });
-    mainChat.appendChild(rail);
-    return rail;
-  }
-
-  function toggleBiggyToolsRail(mainChat, launcher) {
-    const rail = ensureBiggyToolsRail(mainChat);
-    if (!rail) return;
-    const open = rail.hidden;
-    setBiggyToolsRailOpen(rail, launcher, open);
-    if (!open) {
-      const host = document.getElementById('biggyHermesSecondaryHost');
-      if (host && host.dataset.activePanel === 'tools') closeHermesSecondaryPanel();
-    }
-  }
-
-  function closeHermesSecondaryPanel({ returnToChat = false } = {}) {
-    ['closeProfileDropdown', 'closeWsDropdown', 'closeModelDropdown', 'closeReasoningDropdown'].forEach((name) => {
-      try {
-        if (typeof window[name] === 'function') window[name]();
-      } catch (_) {}
-    });
-    const host = document.getElementById('biggyHermesSecondaryHost');
-    if (host && host.dataset.activePanel === 'tools'
-        && window.BiggyElectricalTools && typeof window.BiggyElectricalTools.close === 'function') {
-      window.BiggyElectricalTools.close();
-    }
-    if (host) {
-      host.hidden = true;
-      host.dataset.activePanel = '';
-      host.querySelectorAll('.biggy-hermes-secondary-page').forEach((page) => {
-        page.hidden = true;
-      });
-    }
-    const main = document.querySelector('main.main');
-    if (main) {
-      main.classList.remove('biggy-hermes-overlay-open');
-      main.classList.remove('biggy-tools-open');
-    }
-    if (returnToChat && typeof window.switchPanel === 'function') {
-      return window.switchPanel('chat');
-    }
-    return null;
-  }
-
-  function positionHermesSettingsDropdown(dropdown, trigger) {
-    if (!dropdown || !trigger) return;
-    const host = document.getElementById('biggyHermesSecondaryHost');
-    const hostRect = host && host.getBoundingClientRect();
-    const triggerRect = trigger.getBoundingClientRect();
-    const measuredWidth = Math.max(160, dropdown.offsetWidth || 320);
-    const maxWidth = Math.max(160, Math.min(
-      measuredWidth,
-      (hostRect ? hostRect.width : window.innerWidth) - 24,
-      window.innerWidth - 16,
-    ));
-    const leftEdge = hostRect ? hostRect.left + 8 : 8;
-    const rightEdge = hostRect ? hostRect.right - 8 : window.innerWidth - 8;
-    const left = Math.max(leftEdge, Math.min(triggerRect.left, rightEdge - maxWidth));
-    const top = triggerRect.bottom + 4;
-    const bottomEdge = hostRect ? hostRect.bottom - 8 : window.innerHeight - 8;
-    const maxHeight = Math.max(96, bottomEdge - top);
-    if (dropdown.parentElement !== document.body) document.body.appendChild(dropdown);
-    dropdown.classList.add('biggy-hermes-settings-dropdown');
-    dropdown.style.left = `${left}px`;
-    dropdown.style.top = `${top}px`;
-    dropdown.style.bottom = 'auto';
-    dropdown.style.width = `${maxWidth}px`;
-    dropdown.style.maxWidth = `${maxWidth}px`;
-    dropdown.style.maxHeight = `${maxHeight}px`;
-  }
-
-  function installHermesSettingsControls(page) {
-    if (!page) return null;
-    let controls = page.querySelector('#biggyHermesSettingsControls');
-    if (!controls) {
-      controls = el('section', 'biggy-hermes-settings-controls');
-      controls.id = 'biggyHermesSettingsControls';
-      controls.setAttribute('aria-label', 'Conversation defaults');
-      controls.innerHTML = '<span class="biggy-hermes-settings-controls-label">SESSION CONTROLS</span>';
-      page.insertBefore(controls, page.firstChild);
-    }
-
-    const profile = document.getElementById('profileChipWrap');
-    const workspaceGroup = document.getElementById('composerWorkspaceGroup');
-    const workspace = workspaceGroup && workspaceGroup.closest('.composer-ws-wrap');
-    const modelChip = document.getElementById('composerModelChip');
-    const model = modelChip && modelChip.closest('.composer-model-wrap');
-    const reasoning = document.getElementById('composerReasoningWrap');
-    [profile, workspace, model, reasoning].forEach((node) => {
-      if (node && node.parentElement !== controls) controls.appendChild(node);
-    });
-    // Settings is the explicit home for Effort in Biggy, so it must not inherit
-    // the compact composer-footer's responsive hiding once reparented here.
-    if (reasoning) reasoning.style.display = '';
-
-    const dropdownPairs = [
-      [document.getElementById('composerWsDropdown'), workspaceGroup && document.getElementById('composerWorkspaceChip')],
-      [document.getElementById('composerModelDropdown'), modelChip],
-      [document.getElementById('composerReasoningDropdown'), document.getElementById('composerReasoningChip')],
-    ];
-    dropdownPairs.forEach(([dropdown, trigger]) => {
-      if (dropdown && dropdown.parentElement !== controls) controls.appendChild(dropdown);
-      if (dropdown && trigger && !dropdown.dataset.biggySettingsObserver) {
-        dropdown.dataset.biggySettingsObserver = '1';
-        new MutationObserver(() => {
-          const isOpen = dropdown.classList.contains('open') || !dropdown.hidden;
-          if (isOpen) positionHermesSettingsDropdown(dropdown, trigger);
-        }).observe(dropdown, { attributes: true, attributeFilter: ['hidden', 'class'] });
-      }
-    });
-    if (!controls.dataset.biggyDropdownPositioning) {
-      controls.dataset.biggyDropdownPositioning = '1';
-      controls.addEventListener('click', (event) => {
-        const trigger = event.target.closest('#composerWorkspaceChip, #composerModelChip, #composerReasoningChip');
-        if (!trigger) return;
-        const dropdownId = trigger.id === 'composerWorkspaceChip'
-          ? 'composerWsDropdown'
-          : trigger.id === 'composerModelChip'
-            ? 'composerModelDropdown'
-            : 'composerReasoningDropdown';
-        setTimeout(() => {
-          const dropdown = document.getElementById(dropdownId);
-          const isOpen = dropdown && (dropdown.classList.contains('open') || !dropdown.hidden);
-          if (isOpen) positionHermesSettingsDropdown(dropdown, trigger);
-        }, 0);
-      });
-    }
-    return controls;
-  }
-
-  function ensureHermesSecondaryHost(mainChat) {
-    if (!mainChat) return null;
-    let host = mainChat.querySelector('#biggyHermesSecondaryHost');
-    if (!host) {
-      host = el('section', 'biggy-hermes-secondary-host');
-      host.id = 'biggyHermesSecondaryHost';
-      host.hidden = true;
-      host.innerHTML = '<header><span data-hermes-secondary-title>HERMES</span><button type="button" aria-label="Close Hermes pane">&times;</button></header><div class="biggy-hermes-secondary-scroll"></div>';
-      host.querySelector('button').addEventListener('click', () => {
-        const result = closeHermesSecondaryPanel({ returnToChat: true });
-        if (result && typeof result.catch === 'function') result.catch(() => {});
-      });
-      mainChat.appendChild(host);
-    }
-    const scroll = host.querySelector('.biggy-hermes-secondary-scroll');
-    Object.entries(HERMES_SECONDARY_PANELS).forEach(([panel, mainId]) => {
-      let page = scroll.querySelector(`[data-hermes-panel="${panel}"]`);
-      if (!page) {
-        page = el('section', 'biggy-hermes-secondary-page');
-        page.dataset.hermesPanel = panel;
-        page.hidden = true;
-        scroll.appendChild(page);
-      }
-      const panelNode = document.getElementById(`panel${panel.charAt(0).toUpperCase()}${panel.slice(1)}`);
-      if (panelNode && panelNode.parentElement !== page) page.appendChild(panelNode);
-      const mainNode = mainId ? document.getElementById(mainId) : null;
-      if (mainNode && mainNode.parentElement !== page) page.appendChild(mainNode);
-      if (panel === 'settings') installHermesSettingsControls(page);
-    });
-    return host;
-  }
-
-  async function openHermesSecondaryPanel(mainChat, panel, label) {
-    const host = ensureHermesSecondaryHost(mainChat);
-    if (!host || !Object.prototype.hasOwnProperty.call(HERMES_SECONDARY_PANELS, panel)) return false;
-    if (host.dataset.activePanel === 'tools'
-        && window.BiggyElectricalTools && typeof window.BiggyElectricalTools.close === 'function') {
-      window.BiggyElectricalTools.close();
-    }
-    const page = host.querySelector(`[data-hermes-panel="${panel}"]`);
-    if (!page) return false;
-    host.querySelectorAll('.biggy-hermes-secondary-page').forEach((candidate) => {
-      candidate.hidden = candidate !== page;
-    });
-    const title = host.querySelector('[data-hermes-secondary-title]');
-    if (title) title.textContent = `HERMES // ${label}`;
-    host.dataset.activePanel = panel;
-    host.hidden = false;
-    const main = document.querySelector('main.main');
-    if (main) {
-      main.classList.add('biggy-hermes-overlay-open');
-      main.classList.remove('biggy-tools-open');
-    }
-    if (typeof window.switchPanel === 'function') await window.switchPanel(panel);
-    const scroll = host.querySelector('.biggy-hermes-secondary-scroll');
-    if (scroll) scroll.scrollTop = 0;
-    scheduleBiggySharedCenterline();
-    return true;
-  }
-
-  function installHermesStrip(mainChat) {
-    const composer = document.getElementById('composerWrap');
-    const box = document.getElementById('composerBox');
-    const layout = document.querySelector('.layout');
-    if (!composer || !layout) return null;
-    const footer = document.querySelector('.composer-footer');
-    // applyShell can safely run more than once. Preserve the native footer
-    // before replacing its prior Hermes host so no stock control is lost.
-    if (footer && footer.closest('.biggy-hermes-strip') && box) box.appendChild(footer);
-    document.querySelectorAll('.biggy-hermes-strip').forEach((node) => node.remove());
-    const strip = el('nav', 'biggy-hermes-strip');
-    strip.id = 'biggyHermesStrip';
-    strip.setAttribute('aria-label', 'Hermes interface controls');
-    strip.setAttribute('data-testid', 'biggy-hermes-strip');
-    strip.innerHTML = '<span class="biggy-fleet-strip-label">HERMES</span>';
-    ensureHermesSecondaryHost(mainChat);
-    ensureBiggyToolsRail(mainChat);
-    HERMES_RAIL_PANELS.forEach(([panel, label]) => {
-      const button = el('button', 'biggy-fleet-machine biggy-hermes-panel is-online');
-      button.type = 'button';
-      button.dataset.panel = panel;
-      button.title = `Open Hermes ${label.toLowerCase()}`;
-      button.innerHTML = `<span class="biggy-fleet-state" aria-hidden="true"></span><span>${label}</span>`;
-      button.addEventListener('click', async (event) => {
-        event.preventDefault();
-        if (Object.prototype.hasOwnProperty.call(HERMES_SECONDARY_PANELS, panel)) {
-          await openHermesSecondaryPanel(mainChat, panel, label);
-          return;
-        }
-        closeHermesSecondaryPanel();
-        if (typeof window.switchPanel === 'function') await window.switchPanel(panel);
-      });
-      strip.appendChild(button);
-    });
-    if (footer) strip.appendChild(footer);
-    const button = el('button', 'biggy-fleet-machine biggy-hermes-panel is-online');
-    button.type = 'button';
-    button.dataset.panel = 'tools';
-    button.title = 'Show electrical calculation tools';
-    button.setAttribute('aria-controls', 'biggyToolsRail');
-    button.setAttribute('aria-expanded', 'false');
-    button.innerHTML = '<span class="biggy-fleet-state" aria-hidden="true"></span><span>TOOLS</span>';
-    button.addEventListener('click', (event) => {
-      event.preventDefault();
-      toggleBiggyToolsRail(mainChat, button);
-    });
-    strip.appendChild(button);
-    layout.appendChild(strip);
-    return strip;
-  }
-
-  function installPaRailToggle(mainChat) {
-    const composer = document.getElementById('composerWrap');
-    const box = document.getElementById('composerBox');
-    if (!composer || !box || !mainChat) return null;
-    let deck = document.getElementById('biggyPromptDeck');
-    if (!deck) {
-      deck = el('div', 'biggy-prompt-deck');
-      deck.id = 'biggyPromptDeck';
-      deck.setAttribute('data-testid', 'biggy-prompt-deck');
-      box.insertAdjacentElement('beforebegin', deck);
-    }
-    if (box.parentElement !== deck) deck.appendChild(box);
-    document.querySelectorAll('.biggy-pa-toggle').forEach((node) => node.remove());
-    const button = el('button', 'biggy-pa-toggle');
-    button.id = 'biggyPaToggle';
-    button.type = 'button';
-    button.textContent = 'PA';
-    button.title = 'Open personal assistant controls';
-    button.setAttribute('aria-label', button.title);
-    const setOpen = (open) => {
-      const next = open === true;
-      mainChat.classList.toggle('biggy-pa-rail-open', next);
-      document.body.classList.toggle('biggy-pa-rail-open', next);
-      button.setAttribute('aria-expanded', next ? 'true' : 'false');
-      button.classList.toggle('is-open', next);
-      button.title = next ? 'Close personal assistant controls' : 'Open personal assistant controls';
-      button.setAttribute('aria-label', button.title);
-    };
-    button.addEventListener('click', (event) => {
-      event.preventDefault();
-      setOpen(!mainChat.classList.contains('biggy-pa-rail-open'));
-    });
-    deck.insertBefore(button, box);
-    setOpen(false);
-    return button;
   }
 
   function forceChromeLabels() {
@@ -2693,22 +2147,17 @@
     const host = mainChat || document.getElementById('mainChat');
     if (!host) return null;
     let hud = host.querySelector('#biggyArgusRagOverview');
-    if (!hud) {
-      hud = el('section', 'biggy-argus-rag-overview');
-      hud.id = 'biggyArgusRagOverview';
-      hud.dataset.biggyLayer = 'workspace';
-      hud.setAttribute('data-testid', 'biggy-argus-rag-overview');
-      hud.setAttribute('aria-label', 'ARGUS RAG overview');
-      host.appendChild(hud);
-    }
-    if (!hud.querySelector('#biggyArgusRagSummary')) {
-      hud.innerHTML = '<div id="biggyArgusRagSummary" class="biggy-argus-rag-summary">'
-        + '<div class="biggy-argus-rag-title">A.R.G.U.S.</div>'
-        + '<div class="biggy-argus-rag-subtitle">AUGMENTED RETRIEVAL &amp; GROUNDED UNDERSTANDING SYSTEM</div>'
-        + '<div class="biggy-argus-rag-section">SYSTEM STATUS</div>'
-        + '<div class="biggy-argus-rag-state is-offline">● AWAITING INGEST STATUS</div></div>';
-    }
-    ensureArgusRagIngestTools(hud);
+    if (hud) return hud;
+    hud = el('section', 'biggy-argus-rag-overview');
+    hud.id = 'biggyArgusRagOverview';
+    hud.dataset.biggyLayer = 'workspace';
+    hud.setAttribute('data-testid', 'biggy-argus-rag-overview');
+    hud.setAttribute('aria-label', 'ARGUS RAG overview');
+    hud.innerHTML = '<div class="biggy-argus-rag-title">A.R.G.U.S.</div>'
+      + '<div class="biggy-argus-rag-subtitle">AUGMENTED RETRIEVAL &amp; GROUNDED UNDERSTANDING SYSTEM</div>'
+      + '<div class="biggy-argus-rag-section">SYSTEM STATUS</div>'
+      + '<div class="biggy-argus-rag-state is-offline">● AWAITING INGEST STATUS</div>';
+    host.appendChild(hud);
     return hud;
   }
 
@@ -2737,32 +2186,25 @@
     if (persist) {
       try { localStorage.setItem(ARGUS_RAG_PANEL_STORAGE_KEY, next ? '1' : '0'); } catch (_) {}
     }
-    if (next) startArgusRagIngestPolling();
-    else stopArgusRagIngestPolling();
-    const frame = document.getElementById('biggyV6World');
-    if (frame) {
-      const wasVisible = frame.dataset.ragVisible === '1';
-      frame.dataset.ragVisible = next ? '1' : '0';
-      try {
-        if (frame.contentWindow) frame.contentWindow.postMessage(
-          { type: 'biggy-rag-visibility', visible: next },
-          window.location.origin,
-        );
-        // A deliberate RAG reveal always begins from the complete HOME view.
-        // Filters and evidence traces may move the camera after this baseline.
-        if (next && !wasVisible) frame.contentWindow.postMessage(
-          { type: 'biggy-rag-home' },
-          window.location.origin,
-        );
-      } catch (_) {}
-    }
     requestAnimationFrame(() => syncArgusConversationLaneBoundary());
   }
 
   function ensureArgusConversationLane(mainChat) {
     const host = mainChat || document.getElementById('mainChat');
-    if (host) host.querySelectorAll('.biggy-argus-conversation-lane').forEach((node) => node.remove());
-    return null;
+    if (!host) return null;
+    let lane = host.querySelector('#biggyArgusConversationLane');
+    if (lane) return lane;
+    lane = el('section', 'biggy-argus-conversation-lane');
+    lane.id = 'biggyArgusConversationLane';
+    lane.dataset.biggyLayer = 'conversation';
+    lane.setAttribute('data-testid', 'biggy-argus-conversation-lane');
+    lane.setAttribute('aria-label', 'Biggy and ARGUS conversation');
+    lane.hidden = true;
+    lane.innerHTML = '<div class="biggy-argus-conversation-heading">CONVERSATION // LIVE</div>'
+      + '<div class="biggy-argus-conversation-turns" aria-live="polite"></div>';
+    host.appendChild(lane);
+    syncArgusConversationLaneBoundary(lane, host);
+    return lane;
   }
 
   function syncArgusConversationLaneBoundary(lane, host) {
@@ -2886,9 +2328,7 @@
     body.scrollTop = body.scrollHeight;
   }
 
-  window.__biggyRenderArgusConversationLaneNow = () => {
-    document.querySelectorAll('.biggy-argus-conversation-lane').forEach((node) => node.remove());
-  };
+  window.__biggyRenderArgusConversationLaneNow = renderArgusConversationLane;
 
   function installArgusConversationLane(mainChat) {
     const lane = ensureArgusConversationLane(mainChat);
@@ -2991,330 +2431,9 @@
     });
   }
 
-  async function argusRagIngestJson(path, options = {}) {
-    const url = `${ARGUS_RAG_INGEST_PROXY}${path}`;
-    if (typeof window.api === 'function') return window.api(url, options);
-    const response = await fetch(url, { ...options, cache: 'no-store' });
-    if (!response.ok) throw new Error(`HTTP ${response.status}: ${(await response.text()).slice(0, 240)}`);
-    return response.json();
-  }
-
-  function selectedArgusLibraryFolder(panel) {
-    if (!panel) return '';
-    return [
-      panel.querySelector('#biggyArgusLibraryFolder'),
-      panel.querySelector('#biggyArgusLibrarySubfolder'),
-      panel.querySelector('#biggyArgusLibraryLevel3'),
-      panel.querySelector('#biggyArgusLibraryLevel4'),
-    ].map((select) => String(select && select.value || '').trim()).filter(Boolean).join('/');
-  }
-
-  function heartbeatAgeSeconds(value) {
-    const numeric = Number(value);
-    if (Number.isFinite(numeric) && numeric > 0) return (Date.now() / 1000) - numeric;
-    const parsed = Date.parse(String(value || ''));
-    return Number.isFinite(parsed) ? (Date.now() - parsed) / 1000 : Infinity;
-  }
-
-  function ensureArgusRagIngestTools(hud) {
-    if (!hud) return null;
-    let panel = hud.querySelector('#biggyArgusIngestTools');
-    if (panel) return panel;
-    panel = el('section', 'biggy-argus-ingest-tools');
-    panel.id = 'biggyArgusIngestTools';
-    panel.setAttribute('aria-label', 'ARGUS RAG ingestion tools');
-    panel.innerHTML = '<div class="biggy-argus-ingest-heading"><span>RAG INGEST TOOLS</span>'
-      + '<button id="biggyArgusRefreshFolders" type="button" title="Refresh library folders" aria-label="Refresh library folders">↺</button></div>'
-      + '<div class="biggy-argus-ingest-kicker">DROP TO LIBRARY FOLDER // WATCHER INDEXES</div>'
-      + '<div class="biggy-argus-ingest-folder-grid">'
-      + '<label>FOLDER<select id="biggyArgusLibraryFolder"><option value="">LOADING…</option></select></label>'
-      + '<label>SUBFOLDER<select id="biggyArgusLibrarySubfolder" disabled><option value="">SELECT FOLDER FIRST</option></select></label>'
-      + '<label>LEVEL 3<select id="biggyArgusLibraryLevel3" disabled><option value="">SELECT SUBFOLDER FIRST</option></select></label>'
-      + '<label>LEVEL 4<select id="biggyArgusLibraryLevel4" disabled><option value="">SELECT LEVEL 3 FIRST</option></select></label></div>'
-      + '<label class="biggy-argus-ingest-drop" tabindex="0">DROP FILE TO INGEST<input id="biggyArgusIngestFile" type="file" hidden></label>'
-      + '<div id="biggyArgusIngestUploadStatus" class="biggy-argus-ingest-note" aria-live="polite"></div>'
-      + '<div class="biggy-argus-ingest-block"><div class="biggy-argus-ingest-label">INGEST STATUS <span id="biggyArgusWatcherDot">●</span></div>'
-      + '<div id="biggyArgusIngestJobs" class="biggy-argus-ingest-job">● <span>WAITING FOR WATCHER EVENT</span></div>'
-      + '<div id="biggyArgusIngestIdentity" class="biggy-argus-ingest-note"></div><div class="biggy-argus-ingest-heartbeat"><i></i></div>'
-      + '<div id="biggyArgusIngestQueue" class="biggy-argus-ingest-queue"><div class="biggy-argus-ingest-empty">NO INGEST EVENTS YET</div></div>'
-      + '<div id="biggyArgusQuarantine" class="biggy-argus-ingest-note"></div></div>'
-      + '<div class="biggy-argus-ingest-block"><div class="biggy-argus-ingest-label">NEW LIBRARY FOLDER</div>'
-      + '<div id="biggyArgusNewFolderParent" class="biggy-argus-ingest-kicker">CREATE A TOP-LEVEL LIBRARY FOLDER</div>'
-      + '<div class="biggy-argus-new-folder"><input id="biggyArgusNewFolderName" type="text" placeholder="FOLDER NAME" autocomplete="off">'
-      + '<button id="biggyArgusCreateFolder" type="button" aria-label="Create library folder">+</button></div>'
-      + '<div id="biggyArgusFolderStatus" class="biggy-argus-ingest-note" aria-live="polite"></div></div>'
-      + '<div class="biggy-argus-ingest-footer-grid"><div><span>CORPUS STATUS</span><b id="biggyArgusCorpusVectors">—</b><small id="biggyArgusCorpusCollection"></small></div>'
-      + '<div><span>LOW-LATENCY PATH</span><b class="biggy-argus-ingest-flow">EMBED → QDRANT → ARGUS</b><small>ONE VERIFIED PATH WITH MEMORY AND CONTINUITY</small></div></div>';
-    hud.appendChild(panel);
-
-    const folder = panel.querySelector('#biggyArgusLibraryFolder');
-    const subfolder = panel.querySelector('#biggyArgusLibrarySubfolder');
-    const level3 = panel.querySelector('#biggyArgusLibraryLevel3');
-    const level4 = panel.querySelector('#biggyArgusLibraryLevel4');
-    const upload = panel.querySelector('#biggyArgusIngestFile');
-    const drop = panel.querySelector('.biggy-argus-ingest-drop');
-    const uploadStatus = panel.querySelector('#biggyArgusIngestUploadStatus');
-
-    const setOptions = (select, names, rootLabel) => {
-      select.innerHTML = '';
-      if (rootLabel) {
-        const root = el('option');
-        root.value = '';
-        root.textContent = `${rootLabel.toUpperCase()} (ROOT)`;
-        select.appendChild(root);
-      }
-      names.forEach((name) => {
-        const option = el('option');
-        option.value = String(name);
-        option.textContent = String(name).toUpperCase();
-        select.appendChild(option);
-      });
-    };
-    const setUnavailable = (select, text) => {
-      select.innerHTML = '';
-      const option = el('option');
-      option.value = '';
-      option.textContent = text;
-      select.appendChild(option);
-      select.disabled = true;
-    };
-    const refreshNewFolderParent = () => {
-      const parent = selectedArgusLibraryFolder(panel);
-      panel.querySelector('#biggyArgusNewFolderParent').textContent = parent
-        ? `CREATE IN ${parent.toUpperCase()}` : 'CREATE A TOP-LEVEL LIBRARY FOLDER';
-    };
-    const fillArgusChildFolders = async (select, parent, emptyLabel, priorValue = '') => {
-      if (!parent) {
-        setUnavailable(select, emptyLabel);
-        return;
-      }
-      setUnavailable(select, 'LOADING…');
-      try {
-        const data = await argusRagIngestJson(`/library-folders?parent=${encodeURIComponent(parent)}`);
-        setOptions(select, Array.isArray(data.folders) ? data.folders : [], parent);
-        select.disabled = false;
-        if (priorValue && Array.from(select.options).some((option) => option.value === priorValue)) select.value = priorValue;
-      } catch (_) {
-        setUnavailable(select, 'FOLDER API OFFLINE');
-      }
-    };
-    const refreshArgusLibraryLevel4 = async (priorValue = '') => {
-      const parent = folder.value && subfolder.value && level3.value
-        ? `${folder.value}/${subfolder.value}/${level3.value}` : '';
-      await fillArgusChildFolders(level4, parent, 'SELECT LEVEL 3 FIRST', priorValue);
-      refreshNewFolderParent();
-    };
-    const refreshArgusLibraryLevel3 = async (priorLevel3 = '', priorLevel4 = '') => {
-      const parent = folder.value && subfolder.value ? `${folder.value}/${subfolder.value}` : '';
-      await fillArgusChildFolders(level3, parent, 'SELECT SUBFOLDER FIRST', priorLevel3);
-      await refreshArgusLibraryLevel4(priorLevel4);
-    };
-    const refreshArgusLibrarySubfolders = async (priorSubfolder = '', priorLevel3 = '', priorLevel4 = '') => {
-      await fillArgusChildFolders(subfolder, folder.value, 'SELECT FOLDER FIRST', priorSubfolder);
-      await refreshArgusLibraryLevel3(priorLevel3, priorLevel4);
-    };
-    const refreshArgusLibraryFolders = async () => {
-      const previous = [folder.value, subfolder.value, level3.value, level4.value];
-      setUnavailable(folder, 'LOADING…');
-      try {
-        const data = await argusRagIngestJson('/library-folders');
-        const names = Array.isArray(data.folders) ? data.folders : [];
-        setOptions(folder, names, '');
-        folder.disabled = false;
-        if (!names.length) setUnavailable(folder, 'NO FOLDERS FOUND');
-        else if (previous[0] && names.includes(previous[0])) folder.value = previous[0];
-        await refreshArgusLibrarySubfolders(previous[1], previous[2], previous[3]);
-        panel.dataset.foldersLoaded = '1';
-      } catch (_) {
-        setUnavailable(folder, 'FOLDER API OFFLINE');
-        setUnavailable(subfolder, 'SUBFOLDER API OFFLINE');
-        setUnavailable(level3, 'SELECT SUBFOLDER FIRST');
-        setUnavailable(level4, 'SELECT LEVEL 3 FIRST');
-      }
-      refreshNewFolderParent();
-    };
-
-    const renderQueue = (status) => {
-      const box = panel.querySelector('#biggyArgusIngestQueue');
-      const rows = (status && Array.isArray(status.queue) ? status.queue : [])
-        .filter((row) => ['failed', 'quarantined'].includes(String(row && row.phase || '').toLowerCase()));
-      if (!rows.length) {
-        box.innerHTML = '<div class="biggy-argus-ingest-empty">NO INGEST EVENTS YET</div>';
-        return;
-      }
-      box.innerHTML = rows.slice(0, 8).map((row) => {
-        const phaseName = String(row && row.phase || 'issue').toLowerCase();
-        const path = encodeURIComponent(String(row && row.path || ''));
-        const reason = row && row.reason ? `<small>${esc(row.reason)}</small>` : '';
-        return `<div class="biggy-argus-ingest-queue-row is-${esc(phaseName)}"><b>${esc(row && (row.pub_id || row.basename) || 'UNKNOWN FILE')}</b>`
-          + `<span>${esc(phaseName.toUpperCase())} · ${esc(row && (row.folder || row.source) || '')}</span>${reason}`
-          + `<button type="button" data-argus-ingest-retry="${path}">RETRY</button></div>`;
-      }).join('');
-      box.querySelectorAll('[data-argus-ingest-retry]').forEach((button) => button.addEventListener('click', async () => {
-        const path = decodeURIComponent(button.dataset.argusIngestRetry || '');
-        if (!path) return;
-        button.disabled = true;
-        button.textContent = 'QUEUED';
-        try {
-          await argusRagIngestJson('/ingest-retry', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }),
-          });
-        } catch (_) {
-          button.textContent = 'FAILED';
-        }
-        refreshArgusRagIngestStatus().catch(() => {});
-      }));
-    };
-
-    panel.__renderStatus = (health, status) => {
-      const count = health && (health.vector_count ?? health.vectors ?? health.qdrant_vectors);
-      panel.querySelector('#biggyArgusCorpusVectors').textContent = `${count ?? '—'} VECTORS`;
-      panel.querySelector('#biggyArgusCorpusCollection').textContent = String(health && (health.collection || health.qdrant_collection) || 'argus_kb');
-      const stale = !status || heartbeatAgeSeconds(status.heartbeat) > 90;
-      const active = !!(status && (status.indicator === 'red' || status.status === 'active' || status.indicator_state === 'ACTIVE' || status.indicator_state === 'ALARM'));
-      const alarm = stale || active;
-      const phaseName = String(status && (status.current_phase || status.indicator_state || status.status) || (stale ? 'WATCHER UNREACHABLE' : 'RUNNING'));
-      const file = String(status && status.last_file || '');
-      const reason = String(status && status.last_error || '');
-      const job = panel.querySelector('#biggyArgusIngestJobs');
-      job.className = `biggy-argus-ingest-job ${alarm ? 'is-active' : 'is-ready'}`;
-      job.innerHTML = `● <span>${esc(phaseName.toUpperCase())}${file ? ` · ${esc(file)}` : ''}</span>`;
-      panel.querySelector('#biggyArgusWatcherDot').className = alarm ? 'is-active' : 'is-ready';
-      panel.querySelector('#biggyArgusIngestIdentity').textContent = reason || '';
-      const quarantined = status && (status.quarantine_count ?? status.quarantined);
-      panel.querySelector('#biggyArgusQuarantine').textContent = quarantined ? `${quarantined} QUARANTINED FILE(S) // LISTED ABOVE` : '';
-      renderQueue(status);
-      return active ? 1000 : 4000;
-    };
-    panel.__setStatusError = (error) => {
-      panel.querySelector('#biggyArgusCorpusVectors').textContent = 'CORPUS OFFLINE';
-      const job = panel.querySelector('#biggyArgusIngestJobs');
-      job.className = 'biggy-argus-ingest-job is-active';
-      job.innerHTML = '<span>● STATUS PATH UNAVAILABLE</span>';
-      panel.querySelector('#biggyArgusIngestIdentity').textContent = String(error && error.message || error || '');
-    };
-    panel.__refreshFolders = refreshArgusLibraryFolders;
-
-    folder.addEventListener('change', async () => { await refreshArgusLibrarySubfolders(); refreshNewFolderParent(); });
-    subfolder.addEventListener('change', async () => { await refreshArgusLibraryLevel3(); refreshNewFolderParent(); });
-    level3.addEventListener('change', async () => { await refreshArgusLibraryLevel4(); refreshNewFolderParent(); });
-    level4.addEventListener('change', refreshNewFolderParent);
-    panel.querySelector('#biggyArgusRefreshFolders').addEventListener('click', () => refreshArgusLibraryFolders());
-
-    const queueUpload = async (file) => {
-      if (!file) return;
-      const destination = selectedArgusLibraryFolder(panel);
-      if (!destination) {
-        uploadStatus.textContent = 'SELECT A RAG LIBRARY FOLDER FIRST';
-        return;
-      }
-      const body = new FormData();
-      body.append('file', file);
-      uploadStatus.textContent = `UPLOADING ${file.name} → ${destination}…`;
-      try {
-        const response = await fetch(`${ARGUS_RAG_INGEST_PROXY}/ingest-upload?folder=${encodeURIComponent(destination)}`, { method: 'POST', body });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const payload = await response.json().catch(() => ({}));
-        uploadStatus.textContent = `QUEUED ${payload.filename || file.name} IN ${payload.destination || `LIBRARY/${destination}`}`;
-      } catch (error) {
-        uploadStatus.textContent = `INGEST UPLOAD FAILED // ${String(error.message || error)}`;
-      }
-      upload.value = '';
-      refreshArgusRagIngestStatus().catch(() => {});
-    };
-    upload.addEventListener('change', () => queueUpload(upload.files && upload.files[0]));
-    drop.addEventListener('dragover', (event) => { event.preventDefault(); drop.classList.add('is-dragging'); });
-    drop.addEventListener('dragleave', () => drop.classList.remove('is-dragging'));
-    drop.addEventListener('drop', (event) => {
-      event.preventDefault();
-      drop.classList.remove('is-dragging');
-      queueUpload(event.dataTransfer && event.dataTransfer.files && event.dataTransfer.files[0]);
-    });
-    drop.addEventListener('keydown', (event) => {
-      if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); upload.click(); }
-    });
-
-    const createFolder = async () => {
-      const input = panel.querySelector('#biggyArgusNewFolderName');
-      const status = panel.querySelector('#biggyArgusFolderStatus');
-      const leaf = input.value.trim();
-      if (!leaf) return;
-      if (leaf === '.' || leaf === '..' || /[/\\]/.test(leaf)) {
-        status.textContent = 'USE A SINGLE FOLDER NAME WITHOUT SLASHES';
-        return;
-      }
-      const parent = selectedArgusLibraryFolder(panel);
-      const name = [parent, leaf].filter(Boolean).join('/');
-      try {
-        await argusRagIngestJson('/library-folders', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }),
-        });
-        status.textContent = `CREATED ${name}`;
-        input.value = '';
-        await refreshArgusLibraryFolders();
-      } catch (error) {
-        status.textContent = `CREATE FAILED // ${String(error.message || error)}`;
-      }
-    };
-    panel.querySelector('#biggyArgusCreateFolder').addEventListener('click', createFolder);
-    panel.querySelector('#biggyArgusNewFolderName').addEventListener('keydown', (event) => {
-      if (event.key === 'Enter') { event.preventDefault(); createFolder(); }
-    });
-    refreshNewFolderParent();
-    return panel;
-  }
-
-  function scheduleArgusRagIngestStatus(delay = 4000) {
-    stopArgusRagIngestPolling();
-    const hud = document.getElementById('biggyArgusRagOverview');
-    if (!hud || hud.hidden) return;
-    ragIngestPollTimer = setTimeout(() => refreshArgusRagIngestStatus().catch(() => {}), delay);
-  }
-
-  async function refreshArgusRagIngestStatus() {
-    if (ragIngestStatusInFlight) return;
-    const hud = document.getElementById('biggyArgusRagOverview');
-    if (!hud || hud.hidden) return;
-    const panel = ensureArgusRagIngestTools(hud);
-    ragIngestStatusInFlight = true;
-    let nextDelay = 5000;
-    try {
-      const [health, status] = await Promise.all([
-        argusRagIngestJson('/health'),
-        argusRagIngestJson('/ingest-status').catch(() => null),
-      ]);
-      nextDelay = panel.__renderStatus(health, status);
-    } catch (error) {
-      panel.__setStatusError(error);
-    } finally {
-      ragIngestStatusInFlight = false;
-      scheduleArgusRagIngestStatus(nextDelay);
-    }
-  }
-
-  function refreshArgusRagIngestTools(options = {}) {
-    const hud = document.getElementById('biggyArgusRagOverview');
-    if (!hud) return;
-    const panel = ensureArgusRagIngestTools(hud);
-    if (options.folders || panel.dataset.foldersLoaded !== '1') panel.__refreshFolders().catch(() => {});
-    refreshArgusRagIngestStatus().catch(() => {});
-  }
-
-  function startArgusRagIngestPolling() {
-    stopArgusRagIngestPolling();
-    refreshArgusRagIngestTools();
-  }
-
-  function stopArgusRagIngestPolling() {
-    if (ragIngestPollTimer !== null) clearTimeout(ragIngestPollTimer);
-    ragIngestPollTimer = null;
-  }
-
   function renderArgusRagOverview(status) {
     const hud = ensureArgusRagOverview();
     if (!hud) return;
-    const summary = hud.querySelector('#biggyArgusRagSummary');
-    if (!summary) return;
     const data = status && typeof status === 'object' ? status : {};
     const state = String(data.state || 'offline').toLowerCase();
     const phase = String(data.phase || '').trim();
@@ -3360,7 +2479,7 @@
       }
       return `<li class="is-${esc(rowState)}"><i>◆</i><b>${esc(file)}</b><small>${esc(detail)}</small></li>`;
     }).join('') : '<li class="is-empty"><small>NO RECENT LEDGER EVENTS</small></li>';
-    summary.innerHTML = '<div class="biggy-argus-rag-title">A.R.G.U.S.</div>'
+    hud.innerHTML = '<div class="biggy-argus-rag-title">A.R.G.U.S.</div>'
       + '<div class="biggy-argus-rag-subtitle">AUGMENTED RETRIEVAL &amp; GROUNDED UNDERSTANDING SYSTEM</div>'
       + '<div class="biggy-argus-rag-section">SYSTEM STATUS</div>'
       + `<div class="biggy-argus-rag-state ${stateClass}">● ${esc(stateText)}</div>`
@@ -3372,7 +2491,7 @@
       + '</dl>'
       + '<div class="biggy-argus-rag-radar-label">INGEST RADAR // LAST 5</div>'
       + `<ol class="biggy-argus-rag-radar">${radar}</ol>`;
-    summary.querySelectorAll('[data-argus-ingest-action]').forEach((button) => {
+    hud.querySelectorAll('[data-argus-ingest-action]').forEach((button) => {
       button.addEventListener('pointerdown', (event) => event.stopPropagation());
       button.addEventListener('dblclick', (event) => {
         event.preventDefault();
@@ -3509,10 +2628,6 @@
           try {
             iframe.contentWindow.postMessage(
               { type: 'biggy-argus-state', state: argusOrbState },
-              window.location.origin,
-            );
-            iframe.contentWindow.postMessage(
-              { type: 'biggy-rag-visibility', visible: iframe.dataset.ragVisible === '1' },
               window.location.origin,
             );
           } catch (_) {}
@@ -6384,7 +5499,7 @@
     ].join('|');
   }
 
-  async function reconcileActiveBiggySessionCompletion({ force = false, primeOnly = false } = {}) {
+  async function reconcileActiveBiggySessionCompletion({ force = false } = {}) {
     const sid = currentHermesSessionId();
     if (!isValidSessionId(sid) || activeSessionReconcileInFlight) return false;
     activeSessionReconcileInFlight = true;
@@ -6401,9 +5516,6 @@
       const signature = activeSessionCompletionSignature(sid, session, messages);
       if (!signature || (!force && signature === activeSessionReconcileSignature)) return false;
       activeSessionReconcileSignature = signature;
-      // Persisted conversation history is not a startup command. Prime the
-      // completion watermark without resurrecting its old visual cards.
-      if (primeOnly) return false;
       completionMessages = messages;
       completionMessagesSessionId = sid;
       persistGuiSessionId(sid);
@@ -6451,7 +5563,7 @@
   function installActiveSessionCompletionReconciler() {
     if (activeSessionReconcileTimer) clearInterval(activeSessionReconcileTimer);
     setTimeout(() => {
-      reconcileActiveBiggySessionCompletion({ force: true, primeOnly: true }).catch(() => {});
+      reconcileActiveBiggySessionCompletion({ force: true }).catch(() => {});
     }, 600);
     // This local, low-frequency safety path closes the gap left by a dropped
     // normal-chat SSE completion. PTT and direct-response hooks remain the
@@ -6490,26 +5602,19 @@
     document.querySelectorAll('.biggy-composer-controls').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-fleet-strip').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-cockpit-strip').forEach((node) => node.remove());
-    document.querySelectorAll('.biggy-top-rail-group').forEach((node) => node.remove());
-    document.querySelectorAll('.biggy-pa-toggle').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-right-cockpit-controls').forEach((node) => node.remove());
     mainChat.querySelectorAll('.biggy-argus-rag-overview').forEach((node) => node.remove());
     mainChat.querySelectorAll('.biggy-argus-conversation-lane').forEach((node) => node.remove());
-    if (conversationLaneTimer) {
-      clearInterval(conversationLaneTimer);
-      conversationLaneTimer = null;
-    }
-    conversationLaneRenderQueued = false;
     pttInstalled = false;
     installBiggyV6World(mainChat);
     ensureArgusRagOverview(mainChat);
+    installArgusConversationLane(mainChat);
     const header = makeHeader();
     mainChat.insertBefore(header, mainChat.firstChild);
     const reactorDock = makeReactorDock();
     const modelStatus = header.querySelector('.biggy-brand-status');
     if (modelStatus) reactorDock.appendChild(modelStatus);
     const composer = document.getElementById('composerWrap');
-    installPromptInlineControls();
     if (composer) composer.appendChild(reactorDock);
     else header.insertAdjacentElement('afterend', reactorDock);
     buildReactorHud();
@@ -6524,8 +5629,6 @@
     installDocumentTitle();
     installComposerBranding();
     installFleetStrip();
-    installHermesStrip(mainChat);
-    installBiggyDeckLayoutObserver(mainChat);
     scheduleBiggySharedCenterline();
     setTimeout(scheduleBiggySharedCenterline, 350);
     forceChromeLabels();
@@ -6533,8 +5636,6 @@
     removeCaduceus();
     updateIdentityChip();
     ensureTravelMapDialog();
-    installPaRailToggle(mainChat);
-    if (typeof window.closeWorkspacePanel === 'function') window.closeWorkspacePanel();
     installActiveSessionCompletionReconciler();
     return true;
   }

@@ -31,7 +31,7 @@ import socket as _socket
 from collections import defaultdict, deque
 from pathlib import Path
 from contextlib import closing
-from urllib.parse import parse_qs, quote, unquote, urlencode, urljoin, urlsplit
+from urllib.parse import parse_qs, quote, unquote, urljoin, urlsplit
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, HTTPSHandler, ProxyHandler, Request, build_opener
 from api.agent_runtime import (
@@ -5869,118 +5869,6 @@ def _handle_extension_sidecar_proxy(
             exc_info=True,
         )
         return bad(handler, "Failed to reach extension sidecar", status=502)
-
-
-_BIGGY_RAG_SIDECAR_ORIGIN = "http://127.0.0.1:5004"
-_BIGGY_RAG_PROXY_PREFIX = "/api/biggy/rag/"
-_BIGGY_RAG_ALLOWED_METHODS = {
-    "health": {"GET"},
-    "ingest-status": {"GET"},
-    "library-folders": {"GET", "POST"},
-    "ingest-upload": {"POST"},
-    "ingest-retry": {"POST"},
-}
-_BIGGY_RAG_ALLOWED_QUERY = {
-    "library-folders": {"parent"},
-    "ingest-upload": {"folder"},
-}
-
-
-def _biggy_rag_proxy_target(parsed, method: str) -> str | None:
-    """Resolve one exact Biggy RAG operation to the fixed local sidecar.
-
-    This deliberately is not a general-purpose loopback proxy. Biggy only needs
-    the five ingestion-control operations exposed in its Ingest Radar pane, so
-    every path, method, and query key is allowlisted here.
-    """
-    path = str(getattr(parsed, "path", "") or "")
-    if not path.startswith(_BIGGY_RAG_PROXY_PREFIX):
-        return None
-    endpoint = path[len(_BIGGY_RAG_PROXY_PREFIX):]
-    verb = str(method or "").upper()
-    if endpoint not in _BIGGY_RAG_ALLOWED_METHODS:
-        raise ValueError("unsupported Biggy RAG operation")
-    if verb not in _BIGGY_RAG_ALLOWED_METHODS[endpoint]:
-        raise PermissionError("method not allowed")
-
-    try:
-        params = parse_qs(
-            str(getattr(parsed, "query", "") or ""),
-            keep_blank_values=True,
-            max_num_fields=4,
-        )
-    except ValueError as exc:
-        raise ValueError("invalid Biggy RAG query") from exc
-    allowed_keys = _BIGGY_RAG_ALLOWED_QUERY.get(endpoint, set())
-    if set(params) - allowed_keys or any(len(values) != 1 for values in params.values()):
-        raise ValueError("unsupported Biggy RAG query")
-    normalized: dict[str, str] = {}
-    for key, values in params.items():
-        value = str(values[0] or "").strip()
-        if len(value) > 1024 or "\x00" in value:
-            raise ValueError("invalid Biggy RAG folder")
-        parts = value.replace("\\", "/").split("/")
-        if value.startswith(("/", "~")) or any(part in {"", ".", ".."} for part in parts):
-            raise ValueError("invalid Biggy RAG folder")
-        normalized[key] = value
-    query = f"?{urlencode(normalized)}" if normalized else ""
-    return f"{_BIGGY_RAG_SIDECAR_ORIGIN}/{endpoint}{query}"
-
-
-def _handle_biggy_rag_sidecar_proxy(
-    handler,
-    parsed,
-    method: str,
-    *,
-    read_request_body: bool = False,
-):
-    try:
-        target = _biggy_rag_proxy_target(parsed, method)
-    except PermissionError as exc:
-        return bad(handler, str(exc), status=405)
-    except ValueError as exc:
-        return bad(handler, str(exc), status=400)
-    if target is None:
-        return False
-    try:
-        request_body = _read_body_bytes(handler) if read_request_body else None
-    except ValueError as exc:
-        status = 413 if "too large" in str(exc).lower() else 400
-        return bad(handler, str(exc), status=status)
-
-    proxied_headers = _extension_sidecar_proxy_request_headers(handler)
-    request = Request(target, data=request_body, headers=proxied_headers, method=method)
-    opener = _extension_sidecar_proxy_same_origin_opener(_BIGGY_RAG_SIDECAR_ORIGIN)
-    try:
-        with opener.open(request, timeout=10) as response:
-            body = _read_extension_sidecar_proxy_body(response)
-            return _send_extension_sidecar_proxy_response(
-                handler,
-                getattr(response, "status", 200),
-                body,
-                response.headers,
-            )
-    except HTTPError as exc:
-        try:
-            body = _read_extension_sidecar_proxy_body(exc)
-        except ValueError as read_exc:
-            return bad(handler, str(read_exc), status=502)
-        return _send_extension_sidecar_proxy_response(
-            handler,
-            exc.code,
-            body,
-            exc.headers,
-        )
-    except ValueError as exc:
-        return bad(handler, str(exc), status=502)
-    except (TimeoutError, URLError, OSError):
-        logger.warning(
-            "Biggy RAG sidecar proxy failed for %s %s",
-            method,
-            getattr(parsed, "path", ""),
-            exc_info=True,
-        )
-        return bad(handler, "Failed to reach RAG service", status=502)
 
 
 def _client_ip_for_rate_limit(handler) -> str:
@@ -12403,10 +12291,6 @@ def handle_get(handler, parsed) -> bool:
     if proxy_result is not False:
         return proxy_result
 
-    biggy_rag_proxy_result = _handle_biggy_rag_sidecar_proxy(handler, parsed, "GET")
-    if biggy_rag_proxy_result is not False:
-        return biggy_rag_proxy_result
-
     rag_navigation_result = _handle_biggy_rag_navigation(handler, parsed)
     if rag_navigation_result is not False:
         return rag_navigation_result
@@ -14672,17 +14556,6 @@ def handle_post(handler, parsed) -> bool:
         if diag:
             diag.finish()
         return proxy_result
-
-    biggy_rag_proxy_result = _handle_biggy_rag_sidecar_proxy(
-        handler,
-        parsed,
-        "POST",
-        read_request_body=True,
-    )
-    if biggy_rag_proxy_result is not False:
-        if diag:
-            diag.finish()
-        return biggy_rag_proxy_result
 
     if parsed.path in {"/api/notes/create", "/api/notes/update", "/api/notes/delete"}:
         try:

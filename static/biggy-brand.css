@@ -1,14 +1,6 @@
 /* Biggy presentation — visual language aligned with Smedley (zeus/dark + Iwo).
    Loaded only by the Biggy isolated WebUI extension manifest. */
 body.biggy-brand > .app-titlebar{display:none!important}
-/* Biggy owns a viewport-first cockpit. Hermes navigation remains in the DOM
-   for its stock panel logic, but the legacy left rail/drawer no longer takes
-   space away from the galaxy. */
-body.biggy-brand .layout > .rail,
-body.biggy-brand .layout > .sidebar,
-body.biggy-brand .app-titlebar-hamburger{display:none!important}
-body.biggy-brand .layout{position:relative;width:100vw;height:100vh;overflow:hidden}
-body.biggy-brand main.main{width:100%;height:100%;background:transparent}
 
 .biggy-brand-header{
   position:relative;z-index:var(--biggy-layer-workspace, 6);overflow:visible;
@@ -29,7 +21,7 @@ body.biggy-brand main.main{width:100%;height:100%;background:transparent}
    wrapper-relative + horizontally centered over the header/workspace seam;
    every id, class, and style value below is copied unmodified from 3d.html. */
 .biggy-argus-reactor{
-  position:absolute;left:50%;top:auto;bottom:calc(100% - 72px);transform:translateX(-50%);
+  position:absolute;left:50%;top:auto;bottom:calc(100% - 8px);transform:translateX(-50%);
   width:204px;height:330px;z-index:var(--biggy-layer-reactor, 10);pointer-events:none;
 }
 #j-orb{
@@ -46,7 +38,7 @@ body.biggy-brand main.main{width:100%;height:100%;background:transparent}
   border-radius:50%;background:#04050a;z-index:0;pointer-events:none;
 }
 #j-state{
-  position:absolute;left:50%;top:244px;transform:translateX(-50%);width:204px;text-align:center;
+  position:absolute;left:50%;top:250px;transform:translateX(-50%);width:204px;text-align:center;
   font-family:'SF Mono',ui-monospace,monospace;font-size:13px;font-weight:700;letter-spacing:.24em;color:#5a6b62;text-transform:uppercase;
   text-shadow:0 0 14px rgba(52,211,153,.25);transition:color .25s;
 }
@@ -132,7 +124,6 @@ body.biggy-brand main.main{width:100%;height:100%;background:transparent}
   --biggy-layer-conversation:2;
   --biggy-layer-workspace:6;
   --biggy-layer-reactor:10;
-  --biggy-bottom-deck-width:min(856px,calc(100% - 48px));
 }
 #mainChat.biggy-brand-iwo .messages-shell,
 #mainChat.biggy-brand-iwo .messages{background:transparent!important}
@@ -142,168 +133,26 @@ body.biggy-brand main.main{width:100%;height:100%;background:transparent}
 /* The collapsed ARGUS rail remains visible over the right edge of mainChat.
    Reserve its 48px width plus breathing room only inside the composer: Hermes
    still owns dynamic layout changes when either real sidebar opens/closes. */
-#mainChat.biggy-brand-iwo .composer-wrap{
-  background:transparent;padding:10px 84px 66px;pointer-events:none
-}
-#mainChat.biggy-brand-iwo .composer-wrap::before{display:none}
-#mainChat.biggy-brand-iwo .biggy-prompt-deck{
-  display:flex;align-items:stretch;gap:6px;
-  box-sizing:border-box;max-width:calc(100% - 24px);
-  width:var(--biggy-bottom-deck-width);margin:0 auto;pointer-events:auto
-}
-#mainChat.biggy-brand-iwo #composerBox{
-  flex:1 1 auto;width:auto;max-width:none;min-width:0;margin:0;
-  border:1px solid rgba(78,204,163,.25);border-radius:7px;
-  background:rgba(5,10,14,.90);backdrop-filter:blur(8px);
-  box-shadow:0 8px 24px rgba(0,0,0,.24)
-}
-#mainChat.biggy-brand-iwo #composerBox:focus-within{
-  border-color:rgba(78,204,163,.25);box-shadow:0 8px 24px rgba(0,0,0,.24)
-}
-#mainChat.biggy-brand-iwo #composerBox textarea#msg{
-  box-sizing:border-box;min-height:34px;height:36px;max-height:92px;padding:7px 164px 7px 14px;line-height:1.35
-}
-#mainChat.biggy-brand-iwo #composerBox,
-#mainChat.biggy-brand-iwo .composer-flyout,
-#mainChat.biggy-brand-iwo .composer-selection-chips{pointer-events:auto}
-.biggy-prompt-inline-controls{
-  position:absolute;right:4px;top:auto;bottom:4px;z-index:8;transform:none;
-  display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:3px;pointer-events:auto
-}
-.biggy-prompt-inline-controls #btnAttach,
-.biggy-prompt-inline-controls #btnSavedPrompts,
-.biggy-prompt-inline-controls #btnMic,
-.biggy-prompt-inline-controls #btnGptVoice,
-.biggy-prompt-inline-controls #btnSend{
-  box-sizing:border-box;width:28px;height:28px;min-width:28px;min-height:28px;
-  margin:0;padding:5px;border-radius:5px
-}
+#mainChat.biggy-brand-iwo .composer-wrap{background:rgba(13,17,23,.82);padding-left:84px;padding-right:84px;pointer-events:auto}
+#mainChat.biggy-brand-iwo #composerBox{width:50%;max-width:900px;margin-left:auto;margin-right:auto}
+#mainChat.biggy-brand-iwo #profileChipWrap{display:none!important}
 .biggy-composer-controls{display:flex;align-items:center;gap:7px;flex:0 0 auto;margin-left:6px;pointer-events:auto}
-.biggy-top-rail-group{
-  position:absolute;left:50%;top:20px;z-index:118;transform:translateX(-50%);
-  display:flex;align-items:flex-start;justify-content:center;gap:8px;
-  max-width:calc(100% - 160px);pointer-events:none;
-}
-.biggy-fleet-strip,
-.biggy-cockpit-strip{
-  position:relative;left:auto;top:auto;bottom:auto;z-index:auto;transform:none;
+.biggy-fleet-strip{
+  position:absolute;left:50%;bottom:calc(100% + 8px);z-index:118;
+  transform:translateX(-50%);
   display:flex;align-items:center;gap:5px;max-width:calc(100% - 24px);
   padding:5px 7px;border:1px solid rgba(78,204,163,.25);border-radius:7px;
   background:rgba(5,10,14,.90);backdrop-filter:blur(8px);
   box-shadow:0 8px 24px rgba(0,0,0,.24);pointer-events:auto;
 }
-.biggy-tools-rail{
-  position:absolute;left:50%;top:64px;z-index:117;transform:translateX(-50%);
-  display:flex;align-items:stretch;justify-content:flex-start;gap:10px;
-  box-sizing:border-box;width:var(--biggy-bottom-deck-width);max-width:calc(100% - 48px);
-  min-height:45px;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin;
-  padding:5px 7px;border:1px solid rgba(78,204,163,.25);border-radius:7px;
-  background:rgba(5,10,14,.92);backdrop-filter:blur(8px);
-  box-shadow:0 8px 24px rgba(0,0,0,.24);pointer-events:auto
-}
-.biggy-tools-rail[hidden]{display:none!important}
-.biggy-tools-group{display:flex;flex:0 0 auto;align-items:center;gap:6px;min-width:0}
-.biggy-tools-group+.biggy-tools-group{padding-left:9px;border-left:1px solid rgba(98,219,255,.2)}
-.biggy-tools-group-label{
-  flex:0 0 auto;max-width:82px;color:#6f8794;
-  font:800 8px/1.25 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.1em
-}
-.biggy-tools-buttons{display:flex;align-items:center;gap:4px}
-.biggy-tool-launcher{padding:5px 6px;font-size:8px}
-.biggy-tool-launcher.active{color:#f0c14b;border-color:rgba(240,193,75,.55);background:rgba(42,31,7,.92)}
-.biggy-hermes-strip{
-  position:absolute;left:50%;bottom:8px;z-index:118;transform:translateX(-50%);
-  display:flex;align-items:center;justify-content:flex-start;gap:5px;
-  box-sizing:border-box;width:var(--biggy-bottom-deck-width);max-width:calc(100% - 48px);
-  overflow-x:auto;scrollbar-width:thin;
+.biggy-cockpit-strip{
+  position:absolute;left:50%;top:20px;z-index:118;
+  transform:translateX(-50%);
+  display:flex;align-items:center;gap:5px;max-width:calc(100% - 160px);
   padding:5px 7px;border:1px solid rgba(78,204,163,.25);border-radius:7px;
   background:rgba(5,10,14,.90);backdrop-filter:blur(8px);
   box-shadow:0 8px 24px rgba(0,0,0,.24);pointer-events:auto;
 }
-.biggy-hermes-strip>.composer-footer{
-  flex:0 0 auto;box-sizing:border-box;width:auto;min-width:max-content;min-height:25px;
-  margin:0;padding:0;background:transparent;border:0;gap:5px
-}
-.biggy-hermes-strip>.composer-footer .composer-left{
-  flex:0 0 auto;overflow:visible;gap:4px
-}
-.biggy-hermes-strip>.composer-footer .composer-right{gap:4px}
-.biggy-hermes-strip .biggy-fleet-machine.active{
-  color:#f0c14b;border-color:rgba(240,193,75,.55);background:rgba(42,31,7,.92)
-}
-body.biggy-brand main.main.biggy-hermes-overlay-open>#mainChat.biggy-brand-iwo{display:flex!important}
-.biggy-hermes-secondary-host{
-  position:absolute;left:50%;top:76px;bottom:370px;z-index:calc(var(--biggy-layer-reactor,10) - 1);
-  transform:translateX(-50%);box-sizing:border-box;
-  width:var(--biggy-bottom-deck-width);max-width:calc(100% - 48px);min-height:0;
-  overflow:hidden;border:1px solid rgba(98,219,255,.34);border-radius:8px;
-  background:rgba(5,10,16,.91);box-shadow:0 18px 42px rgba(0,0,0,.48);
-  backdrop-filter:blur(8px);pointer-events:auto
-}
-.biggy-hermes-secondary-host[hidden]{display:none!important}
-main.main.biggy-tools-open .biggy-hermes-secondary-host{top:116px}
-.biggy-hermes-secondary-host>header{
-  position:relative;z-index:2;display:flex;align-items:center;justify-content:space-between;
-  min-height:36px;padding:7px 12px;box-sizing:border-box;border-bottom:1px solid rgba(98,219,255,.24);
-  background:rgba(5,10,16,.97);color:#8fdfff;
-  font:800 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em
-}
-.biggy-hermes-secondary-host>header button{border:0;background:transparent;color:#9fb0bc;font-size:20px;cursor:pointer}
-.biggy-hermes-secondary-scroll{
-  height:calc(100% - 36px);min-height:0;overflow-y:auto;overflow-x:hidden;
-  display:flex;flex-direction:column;scrollbar-width:thin
-}
-.biggy-hermes-secondary-page{display:flex;flex-direction:column;flex:0 0 auto;width:100%;min-height:100%}
-.biggy-hermes-secondary-page[hidden]{display:none!important}
-.biggy-hermes-secondary-page[data-hermes-panel="tools"]{height:100%;min-height:0}
-.biggy-electrical-tool-page{overflow:hidden}
-.biggy-electrical-tool{display:flex;flex:1 1 auto;height:100%;min-height:0;overflow:hidden}
-.biggy-electrical-tool .smedley-engineering-tool-body{width:100%;height:100%;min-height:0}
-.biggy-electrical-tool-loading,.biggy-electrical-tool-error{
-  padding:18px;color:#8fdfff;font:800 11px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
-  letter-spacing:.08em
-}
-.biggy-electrical-tool-error{color:#ff8178}
-.biggy-hermes-secondary-page>.panel-view{
-  display:flex!important;flex:0 0 clamp(150px,26vh,250px);width:100%;min-height:150px;
-  overflow-y:auto;overflow-x:hidden;border-bottom:1px solid rgba(98,219,255,.2);background:rgba(7,13,20,.72)
-}
-.biggy-hermes-secondary-page>.main-view{
-  display:flex!important;flex:0 0 auto;width:100%;min-height:300px;overflow:visible;background:transparent
-}
-.biggy-hermes-secondary-page>.main-view>.main-view-body,
-.biggy-hermes-secondary-page>.main-view>.main-view-content{overflow:visible!important}
-.biggy-hermes-secondary-page[data-hermes-panel="todos"]>.panel-view{flex-basis:100%;min-height:320px;border-bottom:0}
-.biggy-hermes-secondary-page[data-hermes-panel="insights"]>.panel-view,
-.biggy-hermes-secondary-page[data-hermes-panel="logs"]>.panel-view{flex-basis:auto;min-height:0}
-.biggy-hermes-secondary-page[data-hermes-panel="insights"]>.main-view,
-.biggy-hermes-secondary-page[data-hermes-panel="logs"]>.main-view{min-height:420px}
-.biggy-hermes-settings-controls{
-  position:relative;z-index:4;display:flex;flex:0 0 auto;align-items:center;flex-wrap:wrap;gap:8px;
-  box-sizing:border-box;width:100%;min-height:52px;padding:9px 12px;
-  border-bottom:1px solid rgba(98,219,255,.2);background:rgba(7,13,20,.88)
-}
-.biggy-hermes-settings-controls-label{
-  flex:0 0 100%;color:#6f8794;font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
-  letter-spacing:.12em
-}
-.biggy-hermes-settings-controls #profileChipWrap{display:block!important}
-.biggy-hermes-settings-controls .composer-ws-wrap{display:flex!important}
-.biggy-hermes-settings-controls .composer-model-wrap,
-.biggy-hermes-settings-controls #composerReasoningWrap{display:block!important;position:relative;flex:0 0 auto}
-.biggy-hermes-settings-dropdown{
-  position:fixed!important;right:auto!important;bottom:auto!important;z-index:220!important;
-  box-sizing:border-box;overflow-y:auto
-}
-.biggy-hermes-secondary-page[data-hermes-panel="settings"]>.panel-view{
-  flex-basis:auto;min-height:230px;max-height:330px
-}
-.biggy-hermes-secondary-page[data-hermes-panel="settings"]>.main-view{min-height:520px}
-.biggy-hermes-secondary-page .panel-head,
-.biggy-hermes-secondary-page .panel-head-sub,
-.biggy-hermes-secondary-page .skills-search,
-.biggy-hermes-secondary-page .skill-item{box-sizing:border-box;max-width:100%;min-width:0}
-.biggy-hermes-secondary-page .skill-desc{white-space:normal;overflow-wrap:anywhere}
 .biggy-fleet-strip-label{
   color:#6f8794;font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
   letter-spacing:.14em;padding:0 4px 0 2px;
@@ -334,15 +183,9 @@ main.main.biggy-tools-open .biggy-hermes-secondary-host{top:116px}
 .biggy-cockpit-action.down{border-color:#8b3030;color:#f06b64;background:#1a0d0d}
 .biggy-cockpit-action.muted{border-color:#b83d3d;color:#ff8178;background:#210b0b}
 @media (max-width:900px){
-  .biggy-top-rail-group{top:10px;max-width:calc(100% - 24px);gap:4px}
-  .biggy-fleet-strip,.biggy-cockpit-strip,.biggy-hermes-strip,.biggy-tools-rail{gap:3px;padding:4px 5px}
-  .biggy-tools-rail{top:52px;max-width:calc(100% - 24px)}
-  main.main.biggy-tools-open .biggy-hermes-secondary-host{top:102px}
+  .biggy-fleet-strip,.biggy-cockpit-strip{gap:3px;padding:4px 5px}
   .biggy-fleet-machine{padding:5px 6px;font-size:8px}
   .biggy-fleet-strip-label{display:none}
-  #mainChat.biggy-brand-iwo .composer-wrap{padding-left:12px;padding-right:12px}
-  #mainChat.biggy-brand-iwo .biggy-prompt-deck{width:var(--biggy-bottom-deck-width)}
-  .biggy-hermes-secondary-host{top:64px;bottom:310px;max-width:calc(100% - 24px)}
 }
 
 /* A.R.G.U.S. 3D graph/galaxy — occupies the full center canvas behind the
@@ -375,11 +218,10 @@ main.main.biggy-tools-open .biggy-hermes-secondary-host{top:116px}
 /* ARGUS RAG operations picture. This is display-only by design: it sits above
    the Galaxy but cannot intercept the existing pan, zoom, or node controls. */
 .biggy-argus-rag-overview{
-  position:absolute;left:24px;top:76px;z-index:var(--biggy-layer-workspace);
+  position:absolute;left:24px;top:28px;z-index:var(--biggy-layer-workspace);
   width:min(410px,calc(100% - 48px));box-sizing:border-box;padding:16px 18px 15px;
   border:1px solid rgba(58,183,237,.52);border-left-color:#62dbff;background:rgba(3,9,15,.82);
   box-shadow:0 0 28px rgba(30,140,194,.12),inset 0 0 24px rgba(9,73,109,.09);
-  max-height:calc(100% - 166px);overflow:auto;scrollbar-width:thin;scrollbar-color:rgba(98,219,255,.45) transparent;
   backdrop-filter:blur(6px);color:#afdff4;pointer-events:auto;
   font:700 12px/1.35 ui-monospace,'SF Mono',monospace;letter-spacing:.1em;
 }
@@ -390,47 +232,54 @@ main.main.biggy-tools-open .biggy-hermes-secondary-host{top:116px}
 .biggy-argus-rag-state{margin-top:8px;font-size:11px;letter-spacing:.14em}.biggy-argus-rag-state.is-ready{color:#48e0a1}.biggy-argus-rag-state.is-ingesting{color:#f4a93a;animation:argus-ingest-pulse 1.15s ease-in-out infinite}.biggy-argus-rag-state.is-issue,.biggy-argus-rag-state.is-offline{color:#ff756c}@keyframes argus-ingest-pulse{50%{opacity:.45}}
 .biggy-argus-rag-metrics{display:grid;grid-template-columns:1fr 1fr;gap:9px 22px;margin:14px 0 0}.biggy-argus-rag-metrics div{display:flex;justify-content:space-between;gap:8px;min-width:0}.biggy-argus-rag-metrics dt{color:#8eb4c8;font-size:10px}.biggy-argus-rag-metrics dd{margin:0;color:#e1f8ff;font-size:11px;white-space:nowrap}
 .biggy-argus-rag-radar-label{margin-top:15px;padding-top:10px;border-top:1px solid rgba(72,180,221,.22);color:#8eb4c8;font-size:10px}.biggy-argus-rag-radar{display:grid;gap:7px;margin:10px 0 0;padding:0;list-style:none;letter-spacing:.035em}.biggy-argus-rag-radar li{display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:6px;align-items:baseline;min-width:0;color:#53e0a4}.biggy-argus-rag-radar li.is-issue{color:#ff756c}.biggy-argus-rag-radar li.is-ingesting{color:#f4c56e}.biggy-argus-rag-radar li.is-empty{display:block;color:#8eb4c8}.biggy-argus-rag-radar i{font-style:normal;font-size:10px}.biggy-argus-rag-radar b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:700}.biggy-argus-rag-radar small{color:currentColor;opacity:.75;font-size:9px;white-space:nowrap}.biggy-argus-rag-radar button[data-argus-ingest-action]{display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:6px;align-items:baseline;width:100%;padding:5px 4px;border:1px solid rgba(244,197,110,.55);border-radius:3px;background:rgba(102,70,18,.2);color:inherit;cursor:pointer;font:inherit;text-align:left;pointer-events:auto}.biggy-argus-rag-radar button[data-argus-ingest-action]:hover,.biggy-argus-rag-radar button[data-argus-ingest-action]:focus-visible{background:rgba(152,104,24,.34);outline:none}.biggy-argus-rag-radar li.is-issue button[data-argus-ingest-action]{border-color:rgba(255,117,108,.5);background:rgba(112,20,18,.2)}.biggy-argus-rag-radar li.is-issue button[data-argus-ingest-action]:hover,.biggy-argus-rag-radar li.is-issue button[data-argus-ingest-action]:focus-visible{background:rgba(174,35,31,.35)}
-.biggy-argus-ingest-tools{
-  margin-top:15px;padding-top:12px;border-top:1px solid rgba(72,180,221,.28);
-  color:#8eb4c8;font:700 9px/1.35 ui-monospace,'SF Mono',monospace;letter-spacing:.08em
+.biggy-argus-ingest-dialog{position:absolute;left:24px;top:calc(28px + 390px);z-index:calc(var(--biggy-layer-workspace) + 2);width:min(410px,calc(100% - 48px));box-sizing:border-box;padding:16px 18px;border:1px solid rgba(255,117,108,.72);background:rgba(22,7,9,.94);box-shadow:0 0 30px rgba(220,56,47,.22);color:#ffd0cc;font:700 12px/1.4 ui-monospace,'SF Mono',monospace;letter-spacing:.07em;pointer-events:auto}.biggy-argus-ingest-dialog[hidden]{display:none}.biggy-argus-ingest-dialog-kicker{color:#ff756c;font-size:10px;letter-spacing:.18em}.biggy-argus-ingest-dialog strong{display:block;margin-top:8px;color:#fff0ec;font-size:12px}.biggy-argus-ingest-dialog small{display:block;margin-top:3px;color:#d58c86;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}.biggy-argus-ingest-dialog p{margin:10px 0;color:#ffb4ae;font-size:10px}.biggy-argus-ingest-dialog-actions{display:flex;justify-content:flex-end;gap:7px}.biggy-argus-ingest-dialog-actions button{border:1px solid rgba(255,117,108,.65);border-radius:3px;padding:6px 8px;background:#2a1012;color:#ffd0cc;cursor:pointer;font:700 9px ui-monospace,'SF Mono',monospace;letter-spacing:.09em}.biggy-argus-ingest-dialog-actions button:last-child{border-color:#f4a93a;background:#3a2711;color:#ffe0a6}.biggy-argus-ingest-dialog-actions button:disabled{opacity:.55;cursor:wait}
+@media(max-width:760px){.biggy-argus-rag-overview{left:12px;top:16px;width:min(280px,calc(100% - 24px));padding:11px 12px}}
+
+/* Live conversation lane. It mirrors Hermes's active message state and owns
+   only the left third below the RAG console; the remaining canvas stays open
+   for graph traces and operational cards. */
+.biggy-argus-conversation-lane{
+  position:absolute;left:24px;top:380px;bottom:var(--biggy-conversation-bottom,176px);
+  z-index:var(--biggy-layer-conversation);width:min(410px,calc(34% - 34px));
+  box-sizing:border-box;display:flex;flex-direction:column;min-height:120px;
+  color:#cfe9f4;pointer-events:none;font-family:ui-monospace,'SF Mono',monospace;
 }
-.biggy-argus-ingest-heading{display:flex;align-items:center;justify-content:space-between;color:#67d9ff;font-size:10px;letter-spacing:.18em}
-.biggy-argus-ingest-heading button,.biggy-argus-new-folder button,.biggy-argus-ingest-queue-row button{
-  border:1px solid rgba(98,219,255,.38);border-radius:3px;background:rgba(8,28,39,.82);color:#67d9ff;cursor:pointer;
-  font:800 10px/1 ui-monospace,'SF Mono',monospace
+.biggy-argus-conversation-lane[hidden]{display:none}
+#mainChat.biggy-brand-iwo.biggy-rag-panel-off .biggy-argus-conversation-lane{top:28px}
+.biggy-argus-conversation-heading{
+  flex:0 0 auto;margin:0 0 8px;padding:0 2px;color:#78b9d5;
+  font-size:10px;font-weight:800;letter-spacing:.18em;text-shadow:0 0 12px rgba(70,200,255,.25);
 }
-.biggy-argus-ingest-heading button{width:25px;height:23px;padding:0}
-.biggy-argus-ingest-heading button:hover,.biggy-argus-new-folder button:hover,.biggy-argus-ingest-queue-row button:hover{border-color:#62dbff;background:rgba(18,65,88,.75)}
-.biggy-argus-ingest-kicker{margin-top:5px;color:#64899b;font-size:8px;letter-spacing:.08em}
-.biggy-argus-ingest-folder-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
-.biggy-argus-ingest-folder-grid label{display:grid;gap:4px;color:#8eb4c8;font-size:8px;letter-spacing:.12em;min-width:0}
-.biggy-argus-ingest-folder-grid select,.biggy-argus-new-folder input{
-  box-sizing:border-box;width:100%;height:29px;min-width:0;padding:0 8px;border:1px solid rgba(98,219,255,.25);border-radius:3px;
-  background:rgba(3,12,19,.88);color:#d9f7ff;outline:none;font:700 9px ui-monospace,'SF Mono',monospace;text-transform:uppercase
+.biggy-argus-conversation-turns{
+  display:flex;flex-direction:column;gap:9px;overflow:auto;padding:2px 7px 4px 2px;
+  scrollbar-width:thin;scrollbar-color:rgba(98,219,255,.28) transparent;pointer-events:auto;
 }
-.biggy-argus-ingest-folder-grid select:focus,.biggy-argus-new-folder input:focus{border-color:rgba(98,219,255,.72)}
-.biggy-argus-ingest-folder-grid select:disabled{color:#587381;opacity:.72}
-.biggy-argus-ingest-drop{
-  display:flex;align-items:center;justify-content:center;box-sizing:border-box;min-height:38px;margin-top:10px;padding:8px;
-  border:1px dashed rgba(98,219,255,.42);border-radius:3px;background:rgba(6,24,34,.48);color:#8fdfff;cursor:pointer;text-align:center
+.biggy-argus-dialog{
+  flex:0 0 auto;padding:10px 12px;border:1px solid rgba(110,146,162,.32);
+  border-left:2px solid #7993a1;border-radius:0 6px 6px 0;
+  background:linear-gradient(105deg,rgba(10,17,23,.94),rgba(7,13,19,.76));
+  box-shadow:0 8px 24px rgba(0,0,0,.22);backdrop-filter:blur(5px);
 }
-.biggy-argus-ingest-drop:hover,.biggy-argus-ingest-drop:focus-visible,.biggy-argus-ingest-drop.is-dragging{border-color:#62dbff;background:rgba(15,61,82,.55);outline:none}
-.biggy-argus-ingest-note{min-height:11px;margin-top:5px;color:#7ba4b8;font-size:8px;overflow-wrap:anywhere;letter-spacing:.035em}
-.biggy-argus-ingest-block{margin-top:12px;padding-top:10px;border-top:1px solid rgba(72,180,221,.18)}
-.biggy-argus-ingest-label{display:flex;align-items:center;justify-content:space-between;color:#8eb4c8;font-size:9px;letter-spacing:.14em}
-#biggyArgusWatcherDot.is-ready,.biggy-argus-ingest-job.is-ready{color:#48e0a1}
-#biggyArgusWatcherDot.is-active,.biggy-argus-ingest-job.is-active{color:#f4a93a}
-.biggy-argus-ingest-job{margin-top:7px;padding:7px 8px;border:1px solid rgba(98,219,255,.22);background:rgba(3,12,19,.68);font-size:9px;letter-spacing:.06em}
-.biggy-argus-ingest-heartbeat{height:2px;margin-top:8px;background:rgba(98,219,255,.12);overflow:hidden}.biggy-argus-ingest-heartbeat i{display:block;width:36%;height:100%;background:#48e0a1;box-shadow:0 0 8px rgba(72,224,161,.7);animation:argus-ingest-heartbeat 1.8s ease-in-out infinite}@keyframes argus-ingest-heartbeat{50%{transform:translateX(180%)}}
-.biggy-argus-ingest-queue{display:grid;gap:6px;margin-top:7px}.biggy-argus-ingest-empty{color:#587381;font-size:8px}
-.biggy-argus-ingest-queue-row{position:relative;display:grid;gap:2px;padding:7px 52px 7px 8px;border:1px solid rgba(255,117,108,.34);background:rgba(78,15,16,.2);color:#ff9b93}
-.biggy-argus-ingest-queue-row b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}.biggy-argus-ingest-queue-row span,.biggy-argus-ingest-queue-row small{font-size:8px;overflow-wrap:anywhere}.biggy-argus-ingest-queue-row button{position:absolute;right:6px;top:7px;padding:4px 6px;font-size:8px}
-.biggy-argus-new-folder{display:grid;grid-template-columns:1fr 30px;gap:6px;margin-top:7px}.biggy-argus-new-folder button{height:29px;padding:0}
-.biggy-argus-ingest-footer-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px;padding-top:10px;border-top:1px solid rgba(72,180,221,.2)}
-.biggy-argus-ingest-footer-grid>div{display:grid;align-content:start;gap:5px;min-width:0;padding:8px;border:1px solid rgba(98,219,255,.18);background:rgba(3,12,19,.58)}
-.biggy-argus-ingest-footer-grid span{color:#8eb4c8;font-size:8px;letter-spacing:.12em}.biggy-argus-ingest-footer-grid b{color:#d9f7ff;font-size:9px;overflow-wrap:anywhere}.biggy-argus-ingest-footer-grid small{color:#587381;font-size:7px;overflow-wrap:anywhere}.biggy-argus-ingest-flow{line-height:1.55}
-.biggy-argus-ingest-dialog{position:absolute;left:24px;top:calc(76px + 390px);z-index:calc(var(--biggy-layer-workspace) + 2);width:min(410px,calc(100% - 48px));box-sizing:border-box;padding:16px 18px;border:1px solid rgba(255,117,108,.72);background:rgba(22,7,9,.94);box-shadow:0 0 30px rgba(220,56,47,.22);color:#ffd0cc;font:700 12px/1.4 ui-monospace,'SF Mono',monospace;letter-spacing:.07em;pointer-events:auto}.biggy-argus-ingest-dialog[hidden]{display:none}.biggy-argus-ingest-dialog-kicker{color:#ff756c;font-size:10px;letter-spacing:.18em}.biggy-argus-ingest-dialog strong{display:block;margin-top:8px;color:#fff0ec;font-size:12px}.biggy-argus-ingest-dialog small{display:block;margin-top:3px;color:#d58c86;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}.biggy-argus-ingest-dialog p{margin:10px 0;color:#ffb4ae;font-size:10px}.biggy-argus-ingest-dialog-actions{display:flex;justify-content:flex-end;gap:7px}.biggy-argus-ingest-dialog-actions button{border:1px solid rgba(255,117,108,.65);border-radius:3px;padding:6px 8px;background:#2a1012;color:#ffd0cc;cursor:pointer;font:700 9px ui-monospace,'SF Mono',monospace;letter-spacing:.09em}.biggy-argus-ingest-dialog-actions button:last-child{border-color:#f4a93a;background:#3a2711;color:#ffe0a6}.biggy-argus-ingest-dialog-actions button:disabled{opacity:.55;cursor:wait}
-@media(max-width:760px){.biggy-argus-rag-overview{left:12px;top:64px;width:min(280px,calc(100% - 24px));max-height:calc(100% - 142px);padding:11px 12px}.biggy-argus-ingest-folder-grid,.biggy-argus-ingest-footer-grid{grid-template-columns:1fr}}
+.biggy-argus-dialog.is-operator{border-left-color:#d5b33e;background:linear-gradient(105deg,rgba(30,25,10,.92),rgba(15,14,9,.72))}
+.biggy-argus-dialog.is-biggy{border-left-color:#55c96b;background:linear-gradient(105deg,rgba(10,27,15,.93),rgba(8,16,12,.74))}
+.biggy-argus-dialog.is-argus{border-left-color:#62dbff;background:linear-gradient(105deg,rgba(5,24,34,.94),rgba(6,15,22,.76))}
+.biggy-argus-dialog.is-pending{animation:argus-dialog-working 1.25s ease-in-out infinite}
+@keyframes argus-dialog-working{50%{border-left-color:#f4a93a;box-shadow:0 0 20px rgba(244,169,58,.12)}}
+.biggy-argus-dialog-role{margin-bottom:6px;color:#8eafbe;font-size:11px;font-weight:900;letter-spacing:.16em}
+.biggy-argus-dialog.is-operator .biggy-argus-dialog-role{color:#b59cff}
+.biggy-argus-dialog.is-biggy .biggy-argus-dialog-role{color:#69d77d}
+.biggy-argus-dialog.is-argus .biggy-argus-dialog-role{color:#6fdcff}
+.biggy-argus-dialog-copy{color:#aac8d4;font-size:14px;font-weight:600;line-height:1.5;letter-spacing:.015em;overflow-wrap:anywhere}
+.biggy-argus-dialog.is-operator .biggy-argus-dialog-copy{color:#c7afff}
+.biggy-argus-dialog.is-biggy .biggy-argus-dialog-copy{color:#8bdba0}
+.biggy-argus-dialog.is-argus .biggy-argus-dialog-copy{color:#8fdcf2}
+@media(max-width:1100px){
+  .biggy-argus-conversation-lane{left:12px;top:350px;width:min(340px,calc(38% - 20px))}
+}
+@media(max-width:760px){
+  .biggy-argus-conversation-lane{left:12px;top:310px;width:min(280px,calc(46% - 18px))}
+  #mainChat.biggy-brand-iwo.biggy-rag-panel-off .biggy-argus-conversation-lane{top:16px}
+}
 
 /* Readable chat contrast over Iwo */
 #mainChat.biggy-brand-iwo .msg-row[data-role="assistant"] .msg-body,
@@ -551,12 +400,6 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo .biggy-travel-dock{
   padding:52px 0 8px;gap:0;
   background:#0d0f0d;border:0;border-left:1px solid rgba(148,163,184,.22);
   border-radius:0;overflow:hidden;
-  opacity:0;visibility:hidden;pointer-events:none;transform:translateX(100%);
-  transition:transform .2s ease,opacity .16s ease,visibility 0s linear .2s;
-}
-#mainChat.biggy-brand-iwo.biggy-pa-rail-open > .biggy-category-rail{
-  opacity:1;visibility:visible;pointer-events:auto;transform:translateX(0);
-  transition:transform .2s ease,opacity .16s ease
 }
 html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo > .biggy-category-rail{right:0}
 #mainChat.biggy-brand-iwo > .biggy-category-rail .biggy-category-rail-btn{
@@ -571,17 +414,6 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo > .biggy-category-ra
 /* Keep the workspace chevron in the top-right command position, above the
    exposed PA rail rather than stranded at mid-screen. */
 #btnWorkspacePanelEdgeToggle{top:8px!important;right:7px!important;bottom:auto!important;z-index:122!important}
-body.biggy-brand #btnWorkspacePanelEdgeToggle{display:none!important}
-.biggy-pa-toggle{
-  position:relative;left:auto;right:auto;top:auto;bottom:auto;z-index:123;box-sizing:border-box;
-  flex:0 0 38px;width:38px;height:auto;min-height:38px;border:1px solid rgba(78,204,163,.38);border-radius:6px;
-  background:rgba(5,10,14,.94);color:#6ee7b7;box-shadow:0 8px 24px rgba(0,0,0,.34);
-  backdrop-filter:blur(8px);cursor:pointer;
-  font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.1em
-}
-.biggy-pa-toggle:hover,.biggy-pa-toggle.is-open{
-  color:#f0c14b;border-color:rgba(240,193,75,.58);background:rgba(42,31,7,.94)
-}
 #mainChat.biggy-brand-iwo > .biggy-category-rail .biggy-utility-control.ok{
   color:#55c96b;border-color:#2f7d42;background:#0d1a10;
 }
