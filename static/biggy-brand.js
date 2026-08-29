@@ -14,7 +14,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260829-electrical-tools-41';
+  const BUILD_ID = '20260829-electrical-tools-tablet-43';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -804,12 +804,10 @@
     const deckWidth = Math.max(0, Math.min(856, mainRect.width - horizontalInset));
     const hermesStrip = document.getElementById('biggyHermesStrip');
     const hermesSecondaryHost = document.getElementById('biggyHermesSecondaryHost');
-    const toolsRail = document.getElementById('biggyToolsRail');
     if (deckWidth) {
       if (deck) deck.style.width = `${deckWidth}px`;
       if (hermesStrip) hermesStrip.style.width = `${deckWidth}px`;
       if (hermesSecondaryHost) hermesSecondaryHost.style.width = `${deckWidth}px`;
-      if (toolsRail) toolsRail.style.width = `${deckWidth}px`;
     }
     const reactor = document.getElementById('biggyArgusReactor');
     if (hermesSecondaryHost && reactor && reactor.offsetParent) {
@@ -826,7 +824,6 @@
     };
     placeOnMaster(document.getElementById('biggyTopRailGroup'));
     placeOnMaster(document.getElementById('biggyArgusReactor'));
-    placeOnMaster(toolsRail);
     const frame = document.getElementById('biggyV6World');
     if (frame && frame.contentWindow) {
       try {
@@ -965,9 +962,9 @@
       launcher.classList.toggle('active', open);
       launcher.setAttribute('aria-expanded', open ? 'true' : 'false');
     }
-    const main = document.querySelector('main.main');
-    if (main) main.classList.toggle('biggy-tools-rail-open', open);
-    scheduleBiggySharedCenterline();
+    // The tools rail is independently centered and sized in CSS. Do not run
+    // the shared centerline routine here: that routine also repositions the
+    // WebGL galaxy and is expensive enough to stall remote tablet browsers.
   }
 
   async function openBiggyElectricalTool(mainChat, tool, toolButton) {
@@ -1018,7 +1015,6 @@
     }
     const scroll = host.querySelector('.biggy-hermes-secondary-scroll');
     if (scroll) scroll.scrollTop = 0;
-    scheduleBiggySharedCenterline();
     return true;
   }
 
@@ -2740,9 +2736,22 @@
     if (next) startArgusRagIngestPolling();
     else stopArgusRagIngestPolling();
     const frame = document.getElementById('biggyV6World');
+    const dormantStarfield = document.getElementById('biggyDormantStarfield');
     if (frame) {
       const wasVisible = frame.dataset.ragVisible === '1';
       frame.dataset.ragVisible = next ? '1' : '0';
+      if (next) {
+        frame.hidden = false;
+        if (frame.dataset.loaded !== '1') {
+          frame.dataset.loaded = '1';
+          frame.src = frame.dataset.src;
+        } else if (frame.dataset.ragReady === '1' && dormantStarfield) {
+          dormantStarfield.hidden = true;
+        }
+      } else {
+        frame.hidden = true;
+        if (dormantStarfield) dormantStarfield.hidden = false;
+      }
       try {
         if (frame.contentWindow) frame.contentWindow.postMessage(
           { type: 'biggy-rag-visibility', visible: next },
@@ -3425,8 +3434,16 @@
     if (!mainChat) return;
     ragWorldReady = false;
     pendingRagTrace = null;
-    mainChat.querySelectorAll('.biggy-v6-world, .biggy-v6-world-fallback')
+    mainChat.querySelectorAll('.biggy-v6-world, .biggy-v6-world-fallback, .biggy-dormant-starfield')
       .forEach((node) => node.remove());
+
+    // HOME needs the cockpit starfield, not a live 1,100-node physics scene.
+    // Keep this inexpensive surface on glass and lazy-load the actual galaxy
+    // only when the operator explicitly selects RAG.
+    const dormantStarfield = el('div', 'biggy-dormant-starfield');
+    dormantStarfield.id = 'biggyDormantStarfield';
+    dormantStarfield.setAttribute('aria-hidden', 'true');
+    mainChat.appendChild(dormantStarfield);
 
     const fallback = el('div', 'biggy-v6-world-fallback');
     fallback.dataset.biggyLayer = 'galaxy-fallback';
@@ -3446,7 +3463,11 @@
     iframe.setAttribute('data-testid', 'biggy-v6-world');
     iframe.setAttribute('title', 'A.R.G.U.S. \u2014 3D memory graph');
     iframe.setAttribute('referrerpolicy', 'no-referrer');
-    iframe.src = `${V6_WORLD_PATH}?v=${encodeURIComponent(BUILD_ID)}`;
+    iframe.dataset.src = `${V6_WORLD_PATH}?v=${encodeURIComponent(BUILD_ID)}`;
+    iframe.dataset.loaded = '0';
+    iframe.dataset.ragReady = '0';
+    iframe.dataset.ragVisible = '0';
+    iframe.hidden = true;
     // Chrome's own fullscreen (F11 / browser wrapper) resizes the top-level
     // page, but ForceGraph3D retains the dimensions captured when it was
     // constructed. Reconcile only on a real outer-window resize and only if
@@ -3481,6 +3502,7 @@
       iframe.remove();
     });
     iframe.addEventListener('load', () => {
+      if (iframe.dataset.loaded !== '1') return;
       // The proxy injects Biggy's chrome reset before this document paints.
       // Do not mutate the iframe after load: that was the visible native-V6
       // flash between Hermes boot and the finished Biggy shell.
@@ -3505,7 +3527,9 @@
           booted = false;
         }
         if (booted) {
+          iframe.dataset.ragReady = '1';
           fallback.classList.remove('is-active');
+          if (iframe.dataset.ragVisible === '1') dormantStarfield.hidden = true;
           try {
             iframe.contentWindow.postMessage(
               { type: 'biggy-argus-state', state: argusOrbState },

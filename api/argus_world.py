@@ -294,6 +294,15 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     const g = graph();
     ragGalaxyVisible = visible === true;
     if (!g) return false;
+    const controls = typeof g.controls === 'function' ? g.controls() : null;
+    // HOME intentionally shows only the ambient starfield. Once that frame is
+    // painted there is no reason to keep the 1,100-node WebGL scene and orbit
+    // controller running underneath it. Remote tablet browsers were paying
+    // that full render cost even with every corpus node hidden.
+    if (ragGalaxyVisible) {
+      if (typeof g.resumeAnimation === 'function') g.resumeAnimation();
+      if (controls) controls.autoRotate = true;
+    }
     if (!ragGalaxyVisible) {
       if (ragHiddenNodeVisibility === null) {
         const current = g.nodeVisibility();
@@ -313,6 +322,14 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     }
     if (traceGroup) traceGroup.visible = ragGalaxyVisible;
     if (typeof g.refresh === 'function') g.refresh();
+    if (!ragGalaxyVisible) {
+      if (controls) controls.autoRotate = false;
+      // Yield one frame so visibility changes and the bright starfield reach
+      // the display before freezing the dormant WebGL renderer.
+      requestAnimationFrame(() => {
+        if (!ragGalaxyVisible && typeof g.pauseAnimation === 'function') g.pauseAnimation();
+      });
+    }
     return true;
   }
   function restoreBaseGalaxyVisibility() {
