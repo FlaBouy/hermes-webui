@@ -699,7 +699,7 @@ def test_routes_wire_world_endpoint():
 def test_iwo_background_image_removed_from_css():
     assert "iwo.jpg" not in BIGGY_CSS
     assert ".biggy-argus-rag-overview" in BIGGY_CSS
-    assert "padding:10px 84px 52px" in BIGGY_CSS
+    assert "padding:10px 84px 66px" in BIGGY_CSS
 
 
 def test_gitignore_covers_local_world_config():

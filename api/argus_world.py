@@ -166,7 +166,8 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     let desiredCenterX = innerWidth / 2;
     let desiredCenterY = innerHeight / 2;
     try {
-      const prompt = parent.document.getElementById('composerBox');
+      const prompt = parent.document.getElementById('biggyPromptDeck')
+        || parent.document.getElementById('composerBox');
       const frame = parent.document.getElementById('biggyV6World');
       const cockpit = parent.document.getElementById('biggyCockpitStrip');
       const orb = parent.document.getElementById('j-orb');
@@ -262,6 +263,11 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
         starField.material.opacity = 1;
         starField.material.size = 1.9;
         starField.material.needsUpdate = true;
+        // The embedded cockpit is much wider than the standalone V6 card.
+        // Spread the existing point field to the physical viewport edges so
+        // it never reads as a centered rectangle with black wings.
+        starField.scale.set(1.55, 1.35, 1.2);
+        starField.frustumCulled = false;
       }
     }
     // The stock viewer sizes geometry in world units, so the complete corpus
@@ -790,6 +796,7 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     }
     if (data.type === 'biggy-galaxy-filter-focus') applyDirectoryFilter(data.path);
     if (data.type === 'biggy-rag-visibility') setRagGalaxyVisible(data.visible);
+    if (data.type === 'biggy-rag-home') resetLandingCamera();
     if (data.type === 'biggy-argus-state') setArgusActivityState(data.state);
     if (data.type === 'biggy-home-centerline-sync') applyHomeViewOffset(graph());
     if (data.type === 'biggy-world-pause') {
