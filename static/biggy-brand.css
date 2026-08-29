@@ -1,6 +1,14 @@
 /* Biggy presentation — visual language aligned with Smedley (zeus/dark + Iwo).
    Loaded only by the Biggy isolated WebUI extension manifest. */
 body.biggy-brand > .app-titlebar{display:none!important}
+/* Biggy owns a viewport-first cockpit. Hermes navigation remains in the DOM
+   for its stock panel logic, but the legacy left rail/drawer no longer takes
+   space away from the galaxy. */
+body.biggy-brand .layout > .rail,
+body.biggy-brand .layout > .sidebar,
+body.biggy-brand .app-titlebar-hamburger{display:none!important}
+body.biggy-brand .layout{position:relative;width:100vw;height:100vh;overflow:hidden}
+body.biggy-brand main.main{width:100%;height:100%;background:transparent}
 
 .biggy-brand-header{
   position:relative;z-index:var(--biggy-layer-workspace, 6);overflow:visible;
@@ -133,26 +141,56 @@ body.biggy-brand > .app-titlebar{display:none!important}
 /* The collapsed ARGUS rail remains visible over the right edge of mainChat.
    Reserve its 48px width plus breathing room only inside the composer: Hermes
    still owns dynamic layout changes when either real sidebar opens/closes. */
-#mainChat.biggy-brand-iwo .composer-wrap{background:rgba(13,17,23,.82);padding-left:84px;padding-right:84px;pointer-events:auto}
+#mainChat.biggy-brand-iwo .composer-wrap{
+  background:transparent;padding:10px 84px 52px;pointer-events:none
+}
+#mainChat.biggy-brand-iwo .composer-wrap::before{display:none}
 #mainChat.biggy-brand-iwo #composerBox{width:50%;max-width:900px;margin-left:auto;margin-right:auto}
+#mainChat.biggy-brand-iwo #composerBox,
+#mainChat.biggy-brand-iwo .composer-flyout,
+#mainChat.biggy-brand-iwo .composer-selection-chips{pointer-events:auto}
 #mainChat.biggy-brand-iwo #profileChipWrap{display:none!important}
 .biggy-composer-controls{display:flex;align-items:center;gap:7px;flex:0 0 auto;margin-left:6px;pointer-events:auto}
-.biggy-fleet-strip{
-  position:absolute;left:50%;bottom:calc(100% + 8px);z-index:118;
-  transform:translateX(-50%);
+.biggy-top-rail-group{
+  position:absolute;left:50%;top:20px;z-index:118;transform:translateX(-50%);
+  display:flex;align-items:flex-start;justify-content:center;gap:8px;
+  max-width:calc(100% - 160px);pointer-events:none;
+}
+.biggy-fleet-strip,
+.biggy-cockpit-strip{
+  position:relative;left:auto;top:auto;bottom:auto;z-index:auto;transform:none;
   display:flex;align-items:center;gap:5px;max-width:calc(100% - 24px);
   padding:5px 7px;border:1px solid rgba(78,204,163,.25);border-radius:7px;
   background:rgba(5,10,14,.90);backdrop-filter:blur(8px);
   box-shadow:0 8px 24px rgba(0,0,0,.24);pointer-events:auto;
 }
-.biggy-cockpit-strip{
-  position:absolute;left:50%;top:20px;z-index:118;
-  transform:translateX(-50%);
-  display:flex;align-items:center;gap:5px;max-width:calc(100% - 160px);
+.biggy-hermes-strip{
+  position:absolute;left:50%;bottom:8px;z-index:118;transform:translateX(-50%);
+  display:flex;align-items:center;justify-content:flex-start;gap:5px;
+  max-width:calc(100% - 48px);overflow-x:auto;scrollbar-width:thin;
   padding:5px 7px;border:1px solid rgba(78,204,163,.25);border-radius:7px;
   background:rgba(5,10,14,.90);backdrop-filter:blur(8px);
   box-shadow:0 8px 24px rgba(0,0,0,.24);pointer-events:auto;
 }
+.biggy-hermes-strip .biggy-fleet-machine.active{
+  color:#f0c14b;border-color:rgba(240,193,75,.55);background:rgba(42,31,7,.92)
+}
+.biggy-hermes-todos-host{
+  position:absolute;left:24px;bottom:150px;z-index:var(--biggy-layer-workspace,6);
+  width:min(440px,calc(100% - 48px));max-height:min(62vh,640px);overflow:auto;
+  border:1px solid rgba(98,219,255,.34);border-radius:8px;
+  background:rgba(5,10,16,.94);box-shadow:0 18px 42px rgba(0,0,0,.48);
+  pointer-events:auto
+}
+.biggy-hermes-todos-host[hidden]{display:none!important}
+.biggy-hermes-todos-host>header{
+  position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;
+  padding:9px 12px;border-bottom:1px solid rgba(98,219,255,.24);
+  background:rgba(5,10,16,.97);color:#8fdfff;
+  font:800 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em
+}
+.biggy-hermes-todos-host>header button{border:0;background:transparent;color:#9fb0bc;font-size:20px;cursor:pointer}
+.biggy-hermes-todos-host>#panelTodos{display:block;min-height:280px}
 .biggy-fleet-strip-label{
   color:#6f8794;font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
   letter-spacing:.14em;padding:0 4px 0 2px;
@@ -183,9 +221,12 @@ body.biggy-brand > .app-titlebar{display:none!important}
 .biggy-cockpit-action.down{border-color:#8b3030;color:#f06b64;background:#1a0d0d}
 .biggy-cockpit-action.muted{border-color:#b83d3d;color:#ff8178;background:#210b0b}
 @media (max-width:900px){
-  .biggy-fleet-strip,.biggy-cockpit-strip{gap:3px;padding:4px 5px}
+  .biggy-top-rail-group{top:10px;max-width:calc(100% - 24px);gap:4px}
+  .biggy-fleet-strip,.biggy-cockpit-strip,.biggy-hermes-strip{gap:3px;padding:4px 5px}
   .biggy-fleet-machine{padding:5px 6px;font-size:8px}
   .biggy-fleet-strip-label{display:none}
+  #mainChat.biggy-brand-iwo .composer-wrap{padding-left:12px;padding-right:12px}
+  #mainChat.biggy-brand-iwo #composerBox{width:min(92%,900px)}
 }
 
 /* A.R.G.U.S. 3D graph/galaxy — occupies the full center canvas behind the
@@ -234,52 +275,6 @@ body.biggy-brand > .app-titlebar{display:none!important}
 .biggy-argus-rag-radar-label{margin-top:15px;padding-top:10px;border-top:1px solid rgba(72,180,221,.22);color:#8eb4c8;font-size:10px}.biggy-argus-rag-radar{display:grid;gap:7px;margin:10px 0 0;padding:0;list-style:none;letter-spacing:.035em}.biggy-argus-rag-radar li{display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:6px;align-items:baseline;min-width:0;color:#53e0a4}.biggy-argus-rag-radar li.is-issue{color:#ff756c}.biggy-argus-rag-radar li.is-ingesting{color:#f4c56e}.biggy-argus-rag-radar li.is-empty{display:block;color:#8eb4c8}.biggy-argus-rag-radar i{font-style:normal;font-size:10px}.biggy-argus-rag-radar b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:700}.biggy-argus-rag-radar small{color:currentColor;opacity:.75;font-size:9px;white-space:nowrap}.biggy-argus-rag-radar button[data-argus-ingest-action]{display:grid;grid-template-columns:12px minmax(0,1fr) auto;gap:6px;align-items:baseline;width:100%;padding:5px 4px;border:1px solid rgba(244,197,110,.55);border-radius:3px;background:rgba(102,70,18,.2);color:inherit;cursor:pointer;font:inherit;text-align:left;pointer-events:auto}.biggy-argus-rag-radar button[data-argus-ingest-action]:hover,.biggy-argus-rag-radar button[data-argus-ingest-action]:focus-visible{background:rgba(152,104,24,.34);outline:none}.biggy-argus-rag-radar li.is-issue button[data-argus-ingest-action]{border-color:rgba(255,117,108,.5);background:rgba(112,20,18,.2)}.biggy-argus-rag-radar li.is-issue button[data-argus-ingest-action]:hover,.biggy-argus-rag-radar li.is-issue button[data-argus-ingest-action]:focus-visible{background:rgba(174,35,31,.35)}
 .biggy-argus-ingest-dialog{position:absolute;left:24px;top:calc(28px + 390px);z-index:calc(var(--biggy-layer-workspace) + 2);width:min(410px,calc(100% - 48px));box-sizing:border-box;padding:16px 18px;border:1px solid rgba(255,117,108,.72);background:rgba(22,7,9,.94);box-shadow:0 0 30px rgba(220,56,47,.22);color:#ffd0cc;font:700 12px/1.4 ui-monospace,'SF Mono',monospace;letter-spacing:.07em;pointer-events:auto}.biggy-argus-ingest-dialog[hidden]{display:none}.biggy-argus-ingest-dialog-kicker{color:#ff756c;font-size:10px;letter-spacing:.18em}.biggy-argus-ingest-dialog strong{display:block;margin-top:8px;color:#fff0ec;font-size:12px}.biggy-argus-ingest-dialog small{display:block;margin-top:3px;color:#d58c86;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:9px}.biggy-argus-ingest-dialog p{margin:10px 0;color:#ffb4ae;font-size:10px}.biggy-argus-ingest-dialog-actions{display:flex;justify-content:flex-end;gap:7px}.biggy-argus-ingest-dialog-actions button{border:1px solid rgba(255,117,108,.65);border-radius:3px;padding:6px 8px;background:#2a1012;color:#ffd0cc;cursor:pointer;font:700 9px ui-monospace,'SF Mono',monospace;letter-spacing:.09em}.biggy-argus-ingest-dialog-actions button:last-child{border-color:#f4a93a;background:#3a2711;color:#ffe0a6}.biggy-argus-ingest-dialog-actions button:disabled{opacity:.55;cursor:wait}
 @media(max-width:760px){.biggy-argus-rag-overview{left:12px;top:16px;width:min(280px,calc(100% - 24px));padding:11px 12px}}
-
-/* Live conversation lane. It mirrors Hermes's active message state and owns
-   only the left third below the RAG console; the remaining canvas stays open
-   for graph traces and operational cards. */
-.biggy-argus-conversation-lane{
-  position:absolute;left:24px;top:380px;bottom:var(--biggy-conversation-bottom,176px);
-  z-index:var(--biggy-layer-conversation);width:min(410px,calc(34% - 34px));
-  box-sizing:border-box;display:flex;flex-direction:column;min-height:120px;
-  color:#cfe9f4;pointer-events:none;font-family:ui-monospace,'SF Mono',monospace;
-}
-.biggy-argus-conversation-lane[hidden]{display:none}
-#mainChat.biggy-brand-iwo.biggy-rag-panel-off .biggy-argus-conversation-lane{top:28px}
-.biggy-argus-conversation-heading{
-  flex:0 0 auto;margin:0 0 8px;padding:0 2px;color:#78b9d5;
-  font-size:10px;font-weight:800;letter-spacing:.18em;text-shadow:0 0 12px rgba(70,200,255,.25);
-}
-.biggy-argus-conversation-turns{
-  display:flex;flex-direction:column;gap:9px;overflow:auto;padding:2px 7px 4px 2px;
-  scrollbar-width:thin;scrollbar-color:rgba(98,219,255,.28) transparent;pointer-events:auto;
-}
-.biggy-argus-dialog{
-  flex:0 0 auto;padding:10px 12px;border:1px solid rgba(110,146,162,.32);
-  border-left:2px solid #7993a1;border-radius:0 6px 6px 0;
-  background:linear-gradient(105deg,rgba(10,17,23,.94),rgba(7,13,19,.76));
-  box-shadow:0 8px 24px rgba(0,0,0,.22);backdrop-filter:blur(5px);
-}
-.biggy-argus-dialog.is-operator{border-left-color:#d5b33e;background:linear-gradient(105deg,rgba(30,25,10,.92),rgba(15,14,9,.72))}
-.biggy-argus-dialog.is-biggy{border-left-color:#55c96b;background:linear-gradient(105deg,rgba(10,27,15,.93),rgba(8,16,12,.74))}
-.biggy-argus-dialog.is-argus{border-left-color:#62dbff;background:linear-gradient(105deg,rgba(5,24,34,.94),rgba(6,15,22,.76))}
-.biggy-argus-dialog.is-pending{animation:argus-dialog-working 1.25s ease-in-out infinite}
-@keyframes argus-dialog-working{50%{border-left-color:#f4a93a;box-shadow:0 0 20px rgba(244,169,58,.12)}}
-.biggy-argus-dialog-role{margin-bottom:6px;color:#8eafbe;font-size:11px;font-weight:900;letter-spacing:.16em}
-.biggy-argus-dialog.is-operator .biggy-argus-dialog-role{color:#b59cff}
-.biggy-argus-dialog.is-biggy .biggy-argus-dialog-role{color:#69d77d}
-.biggy-argus-dialog.is-argus .biggy-argus-dialog-role{color:#6fdcff}
-.biggy-argus-dialog-copy{color:#aac8d4;font-size:14px;font-weight:600;line-height:1.5;letter-spacing:.015em;overflow-wrap:anywhere}
-.biggy-argus-dialog.is-operator .biggy-argus-dialog-copy{color:#c7afff}
-.biggy-argus-dialog.is-biggy .biggy-argus-dialog-copy{color:#8bdba0}
-.biggy-argus-dialog.is-argus .biggy-argus-dialog-copy{color:#8fdcf2}
-@media(max-width:1100px){
-  .biggy-argus-conversation-lane{left:12px;top:350px;width:min(340px,calc(38% - 20px))}
-}
-@media(max-width:760px){
-  .biggy-argus-conversation-lane{left:12px;top:310px;width:min(280px,calc(46% - 18px))}
-  #mainChat.biggy-brand-iwo.biggy-rag-panel-off .biggy-argus-conversation-lane{top:16px}
-}
 
 /* Readable chat contrast over Iwo */
 #mainChat.biggy-brand-iwo .msg-row[data-role="assistant"] .msg-body,
