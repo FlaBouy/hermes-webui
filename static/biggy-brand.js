@@ -14,7 +14,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260829-hermes-overlays-39';
+  const BUILD_ID = '20260829-settings-overlay-40';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -47,6 +47,7 @@
     todos: null,
     insights: 'mainInsights',
     logs: 'mainLogs',
+    settings: 'mainSettings',
   });
   const ORB_STATES = Object.freeze([
     'offline', 'online', 'thinking', 'speaking', 'tool-running', 'error',
@@ -580,8 +581,12 @@
 
   function installPromptInlineControls() {
     const box = document.getElementById('composerBox');
+    const attach = document.getElementById('btnAttach');
+    const savedPrompts = document.getElementById('btnSavedPrompts');
+    const dictate = document.getElementById('btnMic');
     const voice = document.getElementById('btnGptVoice');
     const send = document.getElementById('btnSend');
+    const savedPromptsPopup = document.getElementById('savedPromptsPopup');
     if (!box) return null;
     let controls = document.getElementById('biggyPromptInlineControls');
     if (!controls) {
@@ -591,8 +596,12 @@
       controls.setAttribute('data-testid', 'biggy-prompt-inline-controls');
       box.appendChild(controls);
     }
+    if (attach && attach.parentElement !== controls) controls.appendChild(attach);
+    if (savedPrompts && savedPrompts.parentElement !== controls) controls.appendChild(savedPrompts);
+    if (dictate && dictate.parentElement !== controls) controls.appendChild(dictate);
     if (voice && voice.parentElement !== controls) controls.appendChild(voice);
     if (send && send.parentElement !== controls) controls.appendChild(send);
+    if (savedPromptsPopup && savedPromptsPopup.parentElement !== box) box.appendChild(savedPromptsPopup);
     return controls;
   }
 
@@ -873,6 +882,11 @@
   }
 
   function closeHermesSecondaryPanel({ returnToChat = false } = {}) {
+    ['closeProfileDropdown', 'closeWsDropdown', 'closeModelDropdown', 'closeReasoningDropdown'].forEach((name) => {
+      try {
+        if (typeof window[name] === 'function') window[name]();
+      } catch (_) {}
+    });
     const host = document.getElementById('biggyHermesSecondaryHost');
     if (host) {
       host.hidden = true;
@@ -887,6 +901,92 @@
       return window.switchPanel('chat');
     }
     return null;
+  }
+
+  function positionHermesSettingsDropdown(dropdown, trigger) {
+    if (!dropdown || !trigger) return;
+    const host = document.getElementById('biggyHermesSecondaryHost');
+    const hostRect = host && host.getBoundingClientRect();
+    const triggerRect = trigger.getBoundingClientRect();
+    const measuredWidth = Math.max(160, dropdown.offsetWidth || 320);
+    const maxWidth = Math.max(160, Math.min(
+      measuredWidth,
+      (hostRect ? hostRect.width : window.innerWidth) - 24,
+      window.innerWidth - 16,
+    ));
+    const leftEdge = hostRect ? hostRect.left + 8 : 8;
+    const rightEdge = hostRect ? hostRect.right - 8 : window.innerWidth - 8;
+    const left = Math.max(leftEdge, Math.min(triggerRect.left, rightEdge - maxWidth));
+    const top = triggerRect.bottom + 4;
+    const bottomEdge = hostRect ? hostRect.bottom - 8 : window.innerHeight - 8;
+    const maxHeight = Math.max(96, bottomEdge - top);
+    if (dropdown.parentElement !== document.body) document.body.appendChild(dropdown);
+    dropdown.classList.add('biggy-hermes-settings-dropdown');
+    dropdown.style.left = `${left}px`;
+    dropdown.style.top = `${top}px`;
+    dropdown.style.bottom = 'auto';
+    dropdown.style.width = `${maxWidth}px`;
+    dropdown.style.maxWidth = `${maxWidth}px`;
+    dropdown.style.maxHeight = `${maxHeight}px`;
+  }
+
+  function installHermesSettingsControls(page) {
+    if (!page) return null;
+    let controls = page.querySelector('#biggyHermesSettingsControls');
+    if (!controls) {
+      controls = el('section', 'biggy-hermes-settings-controls');
+      controls.id = 'biggyHermesSettingsControls';
+      controls.setAttribute('aria-label', 'Conversation defaults');
+      controls.innerHTML = '<span class="biggy-hermes-settings-controls-label">SESSION CONTROLS</span>';
+      page.insertBefore(controls, page.firstChild);
+    }
+
+    const profile = document.getElementById('profileChipWrap');
+    const workspaceGroup = document.getElementById('composerWorkspaceGroup');
+    const workspace = workspaceGroup && workspaceGroup.closest('.composer-ws-wrap');
+    const modelChip = document.getElementById('composerModelChip');
+    const model = modelChip && modelChip.closest('.composer-model-wrap');
+    const reasoning = document.getElementById('composerReasoningWrap');
+    [profile, workspace, model, reasoning].forEach((node) => {
+      if (node && node.parentElement !== controls) controls.appendChild(node);
+    });
+    // Settings is the explicit home for Effort in Biggy, so it must not inherit
+    // the compact composer-footer's responsive hiding once reparented here.
+    if (reasoning) reasoning.style.display = '';
+
+    const dropdownPairs = [
+      [document.getElementById('composerWsDropdown'), workspaceGroup && document.getElementById('composerWorkspaceChip')],
+      [document.getElementById('composerModelDropdown'), modelChip],
+      [document.getElementById('composerReasoningDropdown'), document.getElementById('composerReasoningChip')],
+    ];
+    dropdownPairs.forEach(([dropdown, trigger]) => {
+      if (dropdown && dropdown.parentElement !== controls) controls.appendChild(dropdown);
+      if (dropdown && trigger && !dropdown.dataset.biggySettingsObserver) {
+        dropdown.dataset.biggySettingsObserver = '1';
+        new MutationObserver(() => {
+          const isOpen = dropdown.classList.contains('open') || !dropdown.hidden;
+          if (isOpen) positionHermesSettingsDropdown(dropdown, trigger);
+        }).observe(dropdown, { attributes: true, attributeFilter: ['hidden', 'class'] });
+      }
+    });
+    if (!controls.dataset.biggyDropdownPositioning) {
+      controls.dataset.biggyDropdownPositioning = '1';
+      controls.addEventListener('click', (event) => {
+        const trigger = event.target.closest('#composerWorkspaceChip, #composerModelChip, #composerReasoningChip');
+        if (!trigger) return;
+        const dropdownId = trigger.id === 'composerWorkspaceChip'
+          ? 'composerWsDropdown'
+          : trigger.id === 'composerModelChip'
+            ? 'composerModelDropdown'
+            : 'composerReasoningDropdown';
+        setTimeout(() => {
+          const dropdown = document.getElementById(dropdownId);
+          const isOpen = dropdown && (dropdown.classList.contains('open') || !dropdown.hidden);
+          if (isOpen) positionHermesSettingsDropdown(dropdown, trigger);
+        }, 0);
+      });
+    }
+    return controls;
   }
 
   function ensureHermesSecondaryHost(mainChat) {
@@ -916,6 +1016,7 @@
       if (panelNode && panelNode.parentElement !== page) page.appendChild(panelNode);
       const mainNode = mainId ? document.getElementById(mainId) : null;
       if (mainNode && mainNode.parentElement !== page) page.appendChild(mainNode);
+      if (panel === 'settings') installHermesSettingsControls(page);
     });
     return host;
   }
@@ -970,12 +1071,6 @@
           return;
         }
         closeHermesSecondaryPanel();
-        // Settings deliberately retains Hermes' native main-pane behavior;
-        // it is not mounted into or restyled by the cockpit overlay.
-        if (panel === 'settings') {
-          if (typeof window.switchPanel === 'function') await window.switchPanel(panel);
-          return;
-        }
         if (typeof window.switchPanel === 'function') await window.switchPanel(panel);
       });
       strip.appendChild(button);

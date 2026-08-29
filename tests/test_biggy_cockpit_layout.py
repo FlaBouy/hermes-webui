@@ -87,10 +87,19 @@ def test_prompt_and_pa_deck_use_the_rendered_main_chat_width_on_every_monitor():
     assert "new MutationObserver(scheduleBiggySharedCenterline)" in BRAND
 
 
-def test_send_and_biggy_voice_return_to_half_height_prompt():
+def test_prompt_actions_return_to_half_height_prompt_in_requested_order():
     assert "function installPromptInlineControls()" in BRAND
+    assert "controls.appendChild(attach)" in BRAND
+    assert "controls.appendChild(savedPrompts)" in BRAND
+    assert "controls.appendChild(dictate)" in BRAND
     assert "controls.appendChild(voice)" in BRAND
     assert "controls.appendChild(send)" in BRAND
+    prompt_controls = BRAND[BRAND.index("function installPromptInlineControls"):BRAND.index("const FLEET_STATUS_PATH")]
+    assert prompt_controls.index("controls.appendChild(attach)") < prompt_controls.index("controls.appendChild(savedPrompts)")
+    assert prompt_controls.index("controls.appendChild(savedPrompts)") < prompt_controls.index("controls.appendChild(dictate)")
+    assert prompt_controls.index("controls.appendChild(dictate)") < prompt_controls.index("controls.appendChild(voice)")
+    assert prompt_controls.index("controls.appendChild(voice)") < prompt_controls.index("controls.appendChild(send)")
+    assert "box.appendChild(savedPromptsPopup)" in prompt_controls
     assert "installPromptInlineControls();" in BRAND
     assert ".biggy-prompt-inline-controls{" in BRAND_CSS
     assert "flex-direction:row;flex-wrap:nowrap" in BRAND_CSS
@@ -185,6 +194,7 @@ def test_hermes_secondary_panels_share_one_centered_starfield_overlay():
         ("profiles", "mainProfiles"),
         ("insights", "mainInsights"),
         ("logs", "mainLogs"),
+        ("settings", "mainSettings"),
     ):
         assert f"{panel}: '{main_id}'" in BRAND
     assert "todos: null" in BRAND
@@ -194,12 +204,32 @@ def test_hermes_secondary_panels_share_one_centered_starfield_overlay():
     assert "host.id = 'biggyHermesSecondaryHost'" in BRAND
     assert "page.dataset.hermesPanel = panel" in BRAND
     assert "await window.switchPanel(panel)" in BRAND
-    assert "panel === 'settings'" in BRAND
+    strip = BRAND[BRAND.index("function installHermesStrip"):BRAND.index("function installPaRailToggle")]
+    assert "panel === 'settings'" not in strip
     assert ".biggy-hermes-secondary-host{" in BRAND_CSS
     assert "width:var(--biggy-bottom-deck-width)" in BRAND_CSS
     assert ".biggy-hermes-secondary-scroll{" in BRAND_CSS
     assert "overflow-y:auto" in BRAND_CSS
     assert "flex-direction:column" in BRAND_CSS
+
+
+def test_settings_overlay_keeps_native_hermes_items_and_hosts_session_controls():
+    assert "function installHermesSettingsControls(page)" in BRAND
+    settings = BRAND[BRAND.index("function installHermesSettingsControls"):BRAND.index("function ensureHermesSecondaryHost")]
+    for node_id in (
+        "profileChipWrap",
+        "composerWorkspaceGroup",
+        "composerModelChip",
+        "composerReasoningWrap",
+        "composerWsDropdown",
+        "composerModelDropdown",
+        "composerReasoningDropdown",
+    ):
+        assert node_id in settings
+    assert "page.insertBefore(controls, page.firstChild)" in settings
+    assert "installHermesSettingsControls(page)" in BRAND[BRAND.index("function ensureHermesSecondaryHost"):BRAND.index("async function openHermesSecondaryPanel")]
+    assert ".biggy-hermes-settings-controls{" in BRAND_CSS
+    assert '.biggy-hermes-secondary-page[data-hermes-panel="settings"]' in BRAND_CSS
 
 
 def test_hermes_secondary_overlay_tracks_the_rendered_lower_rail_width():
