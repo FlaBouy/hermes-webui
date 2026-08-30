@@ -83,6 +83,15 @@ def test_starfield_is_shell_owned_when_rag_graph_is_not_loaded():
 def test_prompt_and_pa_deck_match_bottom_rail_without_overlap():
     assert "--biggy-bottom-deck-width:min(856px,calc(100% - 48px))" in BRAND_CSS
     assert "padding:10px 84px 66px" in BRAND_CSS
+
+
+def test_session_controls_move_to_settings_without_reparenting_native_nodes():
+    settings = BRAND[BRAND.index("function installSettingsSessionControls"):BRAND.index("function installPaRailToggle")]
+    for source in ("composerWorkspaceChip", "composerModelChip", "composerReasoningChip"):
+        assert source in settings
+    assert "nativeControl.click()" in settings
+    assert "#mainChat.biggy-brand-iwo .composer-ws-wrap" in BRAND_CSS
+    assert ".biggy-settings-session-controls" in BRAND_CSS
     assert "width:var(--biggy-bottom-deck-width);margin:0 auto" in BRAND_CSS
     assert "width:var(--biggy-bottom-deck-width);max-width:calc(100% - 48px)" in BRAND_CSS
     assert "function syncBiggySharedCenterline()" in BRAND

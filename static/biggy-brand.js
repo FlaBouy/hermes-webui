@@ -926,6 +926,46 @@
     return strip;
   }
 
+  function installSettingsSessionControls() {
+    const settings = document.getElementById('mainSettings');
+    if (!settings) return null;
+    let panel = settings.querySelector('#biggySettingsSessionControls');
+    if (!panel) {
+      panel = el('section', 'biggy-settings-session-controls');
+      panel.id = 'biggySettingsSessionControls';
+      panel.setAttribute('aria-label', 'Biggy session controls');
+      panel.innerHTML = '<h3>SESSION CONTROLS</h3><p>Workspace, model, and reasoning stay native to Hermes.</p>';
+      const controls = el('div', 'biggy-settings-session-control-row');
+      panel.appendChild(controls);
+      settings.insertBefore(panel, settings.firstChild);
+    }
+    const controls = panel.querySelector('.biggy-settings-session-control-row');
+    const makeProxy = (sourceId, proxyId, label) => {
+      const source = document.getElementById(sourceId);
+      if (!source || controls.querySelector(`#${proxyId}`)) return;
+      const proxy = source.cloneNode(true);
+      proxy.id = proxyId;
+      proxy.removeAttribute('style');
+      proxy.removeAttribute('onclick');
+      proxy.className = 'biggy-settings-session-control';
+      proxy.setAttribute('aria-label', label);
+      proxy.title = label;
+      proxy.addEventListener('click', (event) => {
+        event.preventDefault();
+        const nativeControl = document.getElementById(sourceId);
+        if (nativeControl && !nativeControl.disabled) nativeControl.click();
+      });
+      controls.appendChild(proxy);
+      const sync = () => { proxy.disabled = !!source.disabled; proxy.innerHTML = source.innerHTML; };
+      sync();
+      new MutationObserver(sync).observe(source, { attributes: true, childList: true, subtree: true });
+    };
+    makeProxy('composerWorkspaceChip', 'biggySettingsWorkspaceProxy', 'Change workspace');
+    makeProxy('composerModelChip', 'biggySettingsModelProxy', 'Change model');
+    makeProxy('composerReasoningChip', 'biggySettingsEffortProxy', 'Change reasoning effort');
+    return panel;
+  }
+
   function installPaRailToggle(mainChat) {
     const composer = document.getElementById('composerWrap');
     const box = document.getElementById('composerBox');
@@ -6223,6 +6263,7 @@
     installComposerBranding();
     installFleetStrip();
     installHermesStrip(mainChat);
+    installSettingsSessionControls();
     installBiggyDeckLayoutObserver(mainChat);
     scheduleBiggySharedCenterline();
     setTimeout(scheduleBiggySharedCenterline, 350);

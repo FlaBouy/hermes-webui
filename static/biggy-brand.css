@@ -257,6 +257,18 @@ body.biggy-brand:has(main.main[data-biggy-hermes-panel="todos"]) .layout > .side
 #mainChat.biggy-brand-iwo .composer-flyout,
 #mainChat.biggy-brand-iwo .composer-selection-chips{pointer-events:auto}
 #mainChat.biggy-brand-iwo #profileChipWrap{display:none!important}
+/* Session configuration belongs in the Settings pane, not in the compact
+   flight prompt. The source controls remain in Hermes' DOM for their native
+   dropdown handlers; Settings uses click-relay mirrors. */
+#mainChat.biggy-brand-iwo .composer-ws-wrap,
+#mainChat.biggy-brand-iwo .composer-model-wrap,
+#mainChat.biggy-brand-iwo #composerReasoningWrap{display:none!important}
+.biggy-settings-session-controls{margin:0 0 14px;padding:12px;border:1px solid rgba(78,204,163,.26);border-radius:7px;background:rgba(5,10,14,.7);color:#bfe6d4}
+.biggy-settings-session-controls h3{margin:0;color:#75e5b8;font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.11em}
+.biggy-settings-session-controls p{margin:5px 0 9px;color:#8da4b8;font:11px/1.35 ui-sans-serif,system-ui,sans-serif}
+.biggy-settings-session-control-row{display:flex;gap:7px;flex-wrap:wrap}
+.biggy-settings-session-control{display:inline-flex!important;align-items:center;gap:6px;min-height:30px;border:1px solid rgba(78,204,163,.4)!important;border-radius:5px!important;background:rgba(7,27,23,.82)!important;color:#bfe6d4!important;padding:5px 8px!important;cursor:pointer}
+.biggy-settings-session-control:hover{border-color:#62dbff!important;color:#e5fbf2!important}
 .biggy-prompt-inline-controls{
   position:absolute;right:4px;top:auto;bottom:4px;z-index:8;transform:none;
   display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:3px;pointer-events:auto
