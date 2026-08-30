@@ -365,6 +365,28 @@ def _read_active_profile_file() -> str:
     return 'default'
 
 
+def _read_startup_profile() -> str:
+    """Resolve an optional WebUI startup profile without restricting profiles.
+
+    Deployments such as Biggy need to start in a named coordinator profile while
+    retaining the normal Hermes profile-management and task-dispatch plane.
+    This is intentionally separate from isolated-profile mode, which limits a
+    WebUI instance to one profile.
+    """
+    configured = os.getenv('HERMES_WEBUI_STARTUP_PROFILE', '').strip()
+    if configured:
+        if configured == 'default':
+            return configured
+        if _PROFILE_ID_RE.fullmatch(configured):
+            candidate = _DEFAULT_HERMES_HOME / 'profiles' / configured
+            if candidate.is_dir():
+                return configured
+        logger.warning(
+            "Ignoring unavailable HERMES_WEBUI_STARTUP_PROFILE %r", configured
+        )
+    return _read_active_profile_file()
+
+
 # ── Public API ──────────────────────────────────────────────────────────────
 
 # ── Root-profile resolution (#1612) ────────────────────────────────────────
@@ -1589,7 +1611,7 @@ def init_profile_state() -> None:
         _active_profile = _isolated_profile_name()
         home = Path(_INITIAL_HERMES_HOME).expanduser()
     else:
-        _active_profile = _read_active_profile_file()
+        _active_profile = _read_startup_profile()
         home = get_active_hermes_home()
     _set_hermes_home(home)
     install_cron_scheduler_profile_isolation()
@@ -2153,52 +2175,6 @@ def list_profiles_api() -> list:
     return [{**p, 'is_active': p['name'] == active} for p in rows]
 
 
-def list_worker_profiles_api() -> list[dict]:
-    """Return the read-only Hermes worker roster for an isolated Biggy glass.
-
-    Biggy deliberately runs as one isolated profile, so the normal profiles
-    endpoint must not expose profile switching or cross-profile writes.  The
-    operator still needs to see the locally configured worker pool.  A worker
-    is identified from its own profile-scoped role skill (``<name>-*``), not a
-    duplicated hard-coded roster.  Only safe display metadata is returned.
-    """
-    rows: list[dict] = []
-    profiles_root = _profiles_root()
-    if not profiles_root.is_dir():
-        return rows
-    for profile_dir in sorted(profiles_root.iterdir()):
-        name = profile_dir.name
-        if not profile_dir.is_dir() or name in {"biggy", "smedley"}:
-            continue
-        if not _PROFILE_ID_RE.fullmatch(name):
-            continue
-        try:
-            skill_names = sorted(
-                item.name for item in (profile_dir / "skills").iterdir()
-                if item.is_dir() and not item.name.startswith(".")
-            )
-        except OSError:
-            continue
-        role_skills = [skill for skill in skill_names if skill.startswith(f"{name}-")]
-        if not role_skills:
-            continue
-        try:
-            config = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8")) or {}
-        except (OSError, yaml.YAMLError):
-            config = {}
-        model = config.get("model") if isinstance(config, dict) else {}
-        model = model if isinstance(model, dict) else {}
-        rows.append({
-            "name": name,
-            "model": str(model.get("default") or ""),
-            "provider": str(model.get("provider") or ""),
-            "skills": role_skills,
-            "skill_count": len(skill_names),
-            "read_only": True,
-        })
-    return rows
-
-
 def _profile_visible_from_meta(profile_path: Path) -> bool:
     """Return False only for an explicit boolean ``visible: false`` in profile.yaml."""
     try:
@@ -2670,6 +2646,75 @@ def create_profile_api(name: str, clone_from: str = None,
         'enabled_skills': 0,
         'total_skills': 0,
     }
+
+
+def update_profile_api(
+    name: str,
+    *,
+    base_url: str | None = None,
+    api_key: str | None = None,
+    default_model: str | None = None,
+    model_provider: str | None = None,
+    additional_secret: dict | None = None,
+) -> dict:
+    """Update profile-scoped runtime capabilities without exposing secrets.
+
+    Credentials are written only to the selected profile's ``.env``.  Model
+    and endpoint settings live in that profile's config, so Kanban-dispatched
+    workers receive their own approved runtime configuration.
+    """
+    if _is_isolated_profile_mode():
+        raise PermissionError("Profile updates are not allowed in isolated profile mode.")
+    if _is_root_profile(name):
+        profile_path = _DEFAULT_HERMES_HOME
+    else:
+        _validate_profile_name(name)
+        profile_path = _resolve_named_profile_home(name)
+    if not profile_path.is_dir():
+        raise FileNotFoundError(f"Profile '{name}' does not exist.")
+
+    base_url = _clean_profile_config_value(base_url, "base_url")
+    default_model, model_provider = _split_webui_provider_model_value(
+        default_model, model_provider
+    )
+    if base_url and not base_url.startswith(("http://", "https://")):
+        raise ValueError("base_url must start with http:// or https://")
+    _validate_profile_model_selection(default_model, model_provider)
+
+    if base_url:
+        _write_endpoint_to_config(profile_path, base_url=base_url)
+    if api_key:
+        _write_api_key_to_dotenv(
+            profile_path,
+            api_key=str(api_key).strip(),
+            model_provider=model_provider,
+        )
+    if additional_secret:
+        secret_name = str(additional_secret.get("name") or "").strip()
+        secret_value = str(additional_secret.get("value") or "").strip()
+        if not re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", secret_name):
+            raise ValueError("Additional credential name is invalid")
+        if secret_name in _PROTECTED_ENV_KEYS:
+            raise ValueError("That environment variable is reserved by the WebUI")
+        if not secret_value:
+            raise ValueError("Additional credential value is required")
+        _upsert_dotenv_line(profile_path / ".env", secret_name, secret_value)
+        try:
+            (profile_path / ".env").chmod(0o600)
+        except OSError:
+            logger.debug("Failed to chmod profile .env after credential update")
+    if default_model or model_provider:
+        _write_model_defaults_to_config(
+            profile_path,
+            default_model=default_model,
+            model_provider=model_provider,
+        )
+
+    _invalidate_list_profiles_cache()
+    for profile in list_profiles_api():
+        if profile.get("name") == name:
+            return profile
+    raise RuntimeError(f"Updated profile '{name}' could not be reloaded.")
 
 
 def delete_profile_api(name: str) -> dict:

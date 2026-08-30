@@ -71,3 +71,58 @@ def test_profile_switch_replaces_overlapping_keys(monkeypatch, tmp_path):
     assert os.environ.get("OPENAI_API_KEY") == "secret-from-p2"
     assert os.environ.get("ONLY_P1") is None
     assert os.environ.get("ONLY_P2") == "two"
+
+
+def test_named_startup_profile_preserves_normal_profile_management(monkeypatch, tmp_path):
+    base = tmp_path / ".hermes"
+    (base / "profiles" / "biggy").mkdir(parents=True)
+
+    monkeypatch.setenv("HERMES_BASE_HOME", str(base))
+    monkeypatch.setenv("HERMES_WEBUI_STARTUP_PROFILE", "biggy")
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    monkeypatch.delenv("HERMES_WEBUI_ISOLATED_PROFILE", raising=False)
+
+    import api.profiles as profiles
+    monkeypatch.setattr(profiles, "_DEFAULT_HERMES_HOME", base)
+    monkeypatch.setattr(profiles, "_INITIAL_ISOLATED_PROFILE_OPT_IN", "")
+
+    profiles.init_profile_state()
+
+    assert profiles.get_active_profile_name() == "biggy"
+    assert Path(os.environ["HERMES_HOME"]) == base / "profiles" / "biggy"
+
+
+def test_update_profile_writes_capabilities_to_target_profile(monkeypatch, tmp_path):
+    base = tmp_path / ".hermes"
+    target = base / "profiles" / "comms"
+    target.mkdir(parents=True)
+
+    import api.profiles as profiles
+    monkeypatch.setattr(profiles, "_DEFAULT_HERMES_HOME", base)
+    monkeypatch.setattr(profiles, "_INITIAL_ISOLATED_PROFILE_OPT_IN", "")
+    monkeypatch.setattr(
+        profiles,
+        "_validate_profile_model_selection",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        profiles,
+        "list_profiles_api",
+        lambda: [{"name": "comms", "path": str(target)}],
+    )
+
+    result = profiles.update_profile_api(
+        "comms",
+        base_url="https://api.example.test",
+        api_key="profile-secret",
+        default_model="coordinator-model",
+        model_provider="test-provider",
+        additional_secret={"name": "SOCIAL_API_KEY", "value": "social-secret"},
+    )
+
+    assert result["name"] == "comms"
+    assert "profile-secret" in (target / ".env").read_text(encoding="utf-8")
+    assert "SOCIAL_API_KEY=social-secret" in (target / ".env").read_text(encoding="utf-8")
+    config = (target / "config.yaml").read_text(encoding="utf-8")
+    assert "https://api.example.test" in config
+    assert "coordinator-model" in config

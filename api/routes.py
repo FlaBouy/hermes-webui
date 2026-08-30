@@ -14211,10 +14211,6 @@ def handle_get(handler, parsed) -> bool:
         return _handle_memory_read(handler, parsed)
 
     # ── Profile API (GET) ──
-    if parsed.path == "/api/biggy/worker-profiles":
-        from api import profiles as profiles_api
-        return j(handler, {"workers": profiles_api.list_worker_profiles_api()})
-
     if parsed.path == "/api/profiles":
         from api import profiles as profiles_api
         diag = RequestDiagnostics.maybe_start("GET", parsed.path, logger=logger, print_fn=getattr(handler, '_safe_webui_print', None))
@@ -16496,6 +16492,34 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, _sanitize_error(e), 403)
         except (ValueError, FileExistsError, RuntimeError) as e:
             return bad(handler, str(e))
+
+    if parsed.path == "/api/profile/update":
+        name = str(body.get("name", "")).strip()
+        if not name:
+            return bad(handler, "name is required")
+        base_url = body.get("base_url")
+        api_key = body.get("api_key")
+        default_model = body.get("default_model")
+        model_provider = body.get("model_provider")
+        additional_secret = body.get("additional_secret")
+        if additional_secret is not None and not isinstance(additional_secret, dict):
+            return bad(handler, "additional_secret must be an object")
+        try:
+            from api.profiles import update_profile_api
+
+            result = update_profile_api(
+                name,
+                base_url=str(base_url).strip() if base_url else None,
+                api_key=str(api_key).strip() if api_key else None,
+                default_model=str(default_model).strip() if default_model else None,
+                model_provider=str(model_provider).strip() if model_provider else None,
+                additional_secret=additional_secret,
+            )
+            return j(handler, {"ok": True, "profile": result})
+        except PermissionError as e:
+            return bad(handler, _sanitize_error(e), 403)
+        except (ValueError, FileNotFoundError, RuntimeError) as e:
+            return bad(handler, _sanitize_error(e))
 
     if parsed.path == "/api/profile/delete":
         name = body.get("name", "").strip()

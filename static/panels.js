@@ -6704,17 +6704,163 @@ function _renderProfileDetail(p, activeName){
   rows.push(`<div class="detail-row"><div class="detail-row-label">API key</div><div class="detail-row-value">${p.has_env ? esc(t('profile_api_keys_configured')) : '<span style="color:var(--muted)">Not configured</span>'}</div></div>`);
   if (p.total_skills && p.total_skills > 0) rows.push(`<div class="detail-row"><div class="detail-row-label">Skills</div><div class="detail-row-value">${esc(t('profile_skill_count', p.total_skills).replace(String(p.total_skills), `${p.enabled_skills} / ${p.total_skills}`))}</div></div>`);
   if (p.default_workspace) rows.push(`<div class="detail-row"><div class="detail-row-label">Default space</div><div class="detail-row-value"><code>${esc(p.default_workspace)}</code></div></div>`);
+  const capabilityActions = `
+    <div class="detail-card" style="margin-top:12px">
+      <div class="detail-card-title">Capabilities</div>
+      <div class="detail-row"><div class="detail-row-label">Credentials</div><div class="detail-row-value">Profile-scoped API credentials are stored in this profile's environment.</div></div>
+      <div class="detail-row"><div class="detail-row-label">Skills</div><div class="detail-row-value">${p.total_skills ? `${esc(String(p.enabled_skills || 0))} enabled of ${esc(String(p.total_skills))}` : 'No skills detected'}</div></div>
+      <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button type="button" class="btn" onclick="openProfileCapabilityForm()">Configure profile</button>
+        <button type="button" class="btn" onclick="openProfileSkills('${esc(p.name)}')">Manage skills</button>
+      </div>
+    </div>`;
   body.innerHTML = `
     <div class="main-view-content">
       <div class="detail-card">
         <div class="detail-card-title">Profile</div>
         ${rows.join('')}
       </div>
+      ${capabilityActions}
     </div>`;
   body.style.display = '';
   if (empty) empty.style.display = 'none';
   _profileMode = 'read';
   _setProfileHeaderButtons('read', p, activeName);
+}
+
+function openProfileSkills(name){
+  if (!name) return;
+  const open = async () => {
+    if (name !== S.activeProfile) {
+      const switched = await switchToProfile(name);
+      if (!switched) return;
+    }
+    await switchPanel('skills');
+  };
+  open().catch(e => showToast((t('error_prefix') || 'Error: ') + e.message));
+}
+
+function openProfileCapabilityForm(){
+  if (!_currentProfileDetail) return;
+  const p = _currentProfileDetail;
+  const title = $('profileDetailTitle');
+  const body = $('profileDetailBody');
+  const empty = $('profileDetailEmpty');
+  if (!title || !body) return;
+  title.textContent = `${p.name} · Capabilities`;
+  body.innerHTML = `
+    <div class="main-view-content">
+      <form class="detail-form" onsubmit="event.preventDefault(); saveProfileCapabilities();">
+        <div class="detail-form-row">
+          <label for="profileCapabilityModel">Model / provider</label>
+          <select id="profileCapabilityModel"></select>
+        </div>
+        <div class="detail-form-row">
+          <label for="profileCapabilityBaseUrl">Base URL</label>
+          <input type="text" id="profileCapabilityBaseUrl" value="${esc(p.base_url || '')}" placeholder="Optional, e.g. http://localhost:11434" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="detail-form-row">
+          <label for="profileCapabilityApiKey">Provider API key</label>
+          <input type="password" id="profileCapabilityApiKey" placeholder="Leave blank to retain the existing credential" autocomplete="new-password">
+          <div class="detail-form-hint">Credentials remain profile-scoped and are never displayed after saving.</div>
+        </div>
+        <div class="detail-form-row">
+          <label for="profileCapabilitySecretName">Additional credential name</label>
+          <input type="text" id="profileCapabilitySecretName" placeholder="Optional, e.g. SOCIAL_API_KEY" autocomplete="off" autocapitalize="characters" spellcheck="false">
+          <input type="password" id="profileCapabilitySecretValue" placeholder="Credential value" autocomplete="new-password" style="margin-top:7px">
+          <div class="detail-form-hint">Use this for a role-specific service credential. It is saved only to this profile.</div>
+        </div>
+        <div id="profileCapabilityError" class="detail-form-error" style="display:none"></div>
+        <div style="display:flex;gap:8px;margin-top:12px"><button type="submit" class="btn primary">Save capabilities</button><button type="button" class="btn" onclick="openProfileDetail('${esc(p.name)}')">Cancel</button></div>
+      </form>
+    </div>`;
+  body.style.display = '';
+  if (empty) empty.style.display = 'none';
+  _profileMode = 'capabilities';
+  _setProfileHeaderButtons('help');
+  _populateProfileCapabilityModelSelect(p);
+}
+
+async function _populateProfileCapabilityModelSelect(p){
+  const sel = $('profileCapabilityModel');
+  if (!sel) return;
+  await _populateProfileFormModelSelectInto(sel, p.model || '', p.provider || '');
+}
+
+async function _populateProfileFormModelSelectInto(sel, selectedModel = '', selectedProvider = ''){
+  sel.innerHTML = `<option value="">Retain current model / provider</option>`;
+  try {
+    const data = await api('/api/models');
+    const groups = (Array.isArray(data && data.groups) && data.groups.length) ? data.groups : [];
+    for (const g of groups) {
+      const og = document.createElement('optgroup');
+      og.label = g.provider || g.provider_id || 'Configured';
+      if (g.provider_id) og.dataset.provider = g.provider_id;
+      for (const m of [...(Array.isArray(g.models) ? g.models : []), ...(Array.isArray(g.extra_models) ? g.extra_models : [])]) {
+        if (!m || !m.id) continue;
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.label || m.id;
+        og.appendChild(opt);
+      }
+      if (og.children.length) sel.appendChild(og);
+    }
+    if (selectedModel && typeof _applyModelToDropdown === 'function') {
+      _applyModelToDropdown(selectedModel, sel, selectedProvider || null);
+    }
+  } catch (e) {
+    console.warn('Failed to load profile model picker:', e.message);
+  }
+}
+
+async function saveProfileCapabilities(){
+  if (!_currentProfileDetail) return;
+  const p = _currentProfileDetail;
+  const modelEl = $('profileCapabilityModel');
+  const baseEl = $('profileCapabilityBaseUrl');
+  const apiKeyEl = $('profileCapabilityApiKey');
+  const secretNameEl = $('profileCapabilitySecretName');
+  const secretValueEl = $('profileCapabilitySecretValue');
+  const errEl = $('profileCapabilityError');
+  if (!errEl) return;
+  const baseUrl = (baseEl?.value || '').trim();
+  const apiKey = (apiKeyEl?.value || '').trim();
+  const secretName = (secretNameEl?.value || '').trim();
+  const secretValue = (secretValueEl?.value || '').trim();
+  if (baseUrl && !/^https?:\/\//.test(baseUrl)) {
+    errEl.textContent = 'Base URL must begin with http:// or https://.';
+    errEl.style.display = '';
+    return;
+  }
+  if ((secretName && !secretValue) || (!secretName && secretValue)) {
+    errEl.textContent = 'Provide both an additional credential name and value.';
+    errEl.style.display = '';
+    return;
+  }
+  if (secretName && !/^[A-Z_][A-Z0-9_]{0,127}$/.test(secretName)) {
+    errEl.textContent = 'Credential names use uppercase letters, numbers, and underscores.';
+    errEl.style.display = '';
+    return;
+  }
+  try {
+    const payload = { name: p.name, base_url: baseUrl, api_key: apiKey };
+    if (secretName) payload.additional_secret = { name: secretName, value: secretValue };
+    const selectedModel = (modelEl?.value || '').trim();
+    if (selectedModel) {
+      const modelState = (typeof _modelStateForSelect === 'function')
+        ? _modelStateForSelect(modelEl, selectedModel)
+        : { model: selectedModel, model_provider: null };
+      if (modelState.model) payload.default_model = modelState.model;
+      if (modelState.model_provider) payload.model_provider = modelState.model_provider;
+    }
+    await api('/api/profile/update', { method: 'POST', body: JSON.stringify(payload) });
+    await loadProfilesPanel();
+    openProfileDetail(p.name);
+    showToast(`Updated ${p.name} capabilities`);
+  } catch (e) {
+    errEl.textContent = e.message || 'Could not update profile capabilities.';
+    errEl.style.display = '';
+  }
 }
 
 function _setProfileHeaderButtons(mode, p, activeName){

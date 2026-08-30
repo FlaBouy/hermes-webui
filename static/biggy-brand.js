@@ -923,7 +923,6 @@
       // A second tap on the active utility panel returns the operator to chat.
       const next = current === panel && panel !== 'chat' ? 'chat' : panel;
       if (typeof window.switchPanel === 'function') await window.switchPanel(next);
-      if (next === 'profiles') await renderBiggyWorkerRoster();
       if (main) {
         if (next === 'chat') delete main.dataset.biggyHermesPanel;
         else main.dataset.biggyHermesPanel = next;
@@ -967,40 +966,6 @@
     strip.appendChild(tools);
     layout.appendChild(strip);
     return strip;
-  }
-
-  async function renderBiggyWorkerRoster() {
-    const panel = document.getElementById('profilesPanel');
-    if (!panel) return;
-    panel.querySelector('.biggy-worker-roster')?.remove();
-    let workers = [];
-    try {
-      const payload = await jsonGet('/api/biggy/worker-profiles');
-      workers = Array.isArray(payload && payload.workers) ? payload.workers : [];
-    } catch (_) {
-      return;
-    }
-    if (!workers.length) return;
-    const roster = el('section', 'biggy-worker-roster');
-    roster.setAttribute('aria-label', 'Hermes worker roster');
-    const heading = el('div', 'biggy-worker-roster-heading');
-    heading.textContent = `HERMES WORKERS · ${workers.length} READY`;
-    roster.appendChild(heading);
-    const list = el('div', 'biggy-worker-roster-list');
-    workers.forEach((worker) => {
-      const card = el('article', 'biggy-worker-roster-card');
-      const name = el('strong', 'biggy-worker-roster-name');
-      name.textContent = String(worker.name || 'worker').toUpperCase();
-      const detail = el('span', 'biggy-worker-roster-detail');
-      const roleSkills = Array.isArray(worker.skills) ? worker.skills : [];
-      const model = String(worker.model || '').trim();
-      detail.textContent = `${roleSkills.join(' · ')}${model ? ` · ${model}` : ''}`;
-      card.append(name, detail);
-      list.appendChild(card);
-    });
-    roster.appendChild(list);
-    // The native Biggy profile remains available below this read-only roster.
-    panel.prepend(roster);
   }
 
   let smedleyToolsLoadPromise = null;
