@@ -3214,40 +3214,84 @@
     canvas.className = 'biggy-static-starfield';
     canvas.setAttribute('aria-hidden', 'true');
     canvas.setAttribute('data-testid', 'biggy-static-starfield');
-    // Deterministic pseudo-random points give every viewport one continuous
-    // field rather than a repeating CSS tile.  The canvas is enlarged for a
-    // compositor-only drift animation: it carries the live starfield feeling
-    // at boot without loading the RAG graph, its WebGL renderer, or physics.
+    // This deliberately replaces the old repeating CSS tile with a V6-like
+    // atmosphere: 1,800 points on
+    // a spherical shell (r=900..2500), viewed through the same slow orbital
+    // motion.  It is a small 2D projection only -- no ForceGraph/WebGL or
+    // graph simulation is created until the operator actually selects RAG:
+    // the composition is present without loading the RAG graph at landing.
+    // Keeping the atmosphere in the same visual family avoids the landing
+    // page feeling like it switches to a different universe on first RAG use.
+    let stars = [];
+    let frame = 0;
+    let lastPaint = 0;
+    let width = 0;
+    let height = 0;
+    let pixelRatio = 1;
+    const randomFrom = (seedState) => {
+      seedState.value = (seedState.value * 1664525 + 1013904223) >>> 0;
+      return seedState.value / 4294967296;
+    };
     const draw = () => {
       if (!canvas.isConnected) return;
       const rect = mainChat.getBoundingClientRect();
-      const overscan = 1.24;
-      const width = Math.max(1, Math.round(rect.width * overscan));
-      const height = Math.max(1, Math.round(rect.height * overscan));
-      const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+      width = Math.max(1, Math.round(rect.width));
+      height = Math.max(1, Math.round(rect.height));
+      pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
       canvas.width = Math.round(width * pixelRatio);
       canvas.height = Math.round(height * pixelRatio);
       const context = canvas.getContext('2d');
       if (!context) return;
       context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      const seedState = { value: ((width * 73856093) ^ (height * 19349663) ^ 0x6d2b79f5) >>> 0 };
+      stars = Array.from({ length: 1800 }, () => {
+        const radius = 900 + randomFrom(seedState) * 1600;
+        const theta = randomFrom(seedState) * Math.PI * 2;
+        const phi = Math.acos(2 * randomFrom(seedState) - 1);
+        return {
+          x: radius * Math.sin(phi) * Math.cos(theta),
+          y: radius * Math.sin(phi) * Math.sin(theta),
+          z: radius * Math.cos(phi),
+        };
+      });
+      paint(performance.now(), true);
+    };
+    const paint = (now, force) => {
+      if (!canvas.isConnected) return;
+      // Thirty frames/sec is plenty for the V6-scale orbit and is materially
+      // lighter than bringing the RAG WebGL scene alive at landing.
+      if (!force && now - lastPaint < 33) {
+        frame = requestAnimationFrame(paint);
+        return;
+      }
+      lastPaint = now;
+      const context = canvas.getContext('2d');
+      if (!context || !width || !height) return;
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
       context.clearRect(0, 0, width, height);
-      let seed = ((width * 73856093) ^ (height * 19349663) ^ 0x6d2b79f5) >>> 0;
-      const random = () => {
-        seed = (seed * 1664525 + 1013904223) >>> 0;
-        return seed / 4294967296;
-      };
-      const count = Math.max(420, Math.min(1500, Math.round((width * height) / 1850)));
-      for (let index = 0; index < count; index += 1) {
-        const x = random() * width;
-        const y = random() * height;
-        const kind = random();
-        const radius = kind > 0.97 ? 1.15 : kind > 0.82 ? 0.78 : 0.5;
-        const alpha = kind > 0.97 ? 0.95 : 0.38 + random() * 0.42;
-        const hue = kind > 0.985 ? '184,224,255' : kind > 0.95 ? '180,160,255' : '218,239,255';
-        context.fillStyle = `rgba(${hue},${alpha})`;
-        context.beginPath();
-        context.arc(x, y, radius, 0, Math.PI * 2);
-        context.fill();
+      // OrbitControls uses a restrained autoRotateSpeed=.5.  This is the
+      // equivalent visual rate, not the previous fast flat-canvas spin.
+      const yaw = now * 0.0000012;
+      const cos = Math.cos(yaw);
+      const sin = Math.sin(yaw);
+      const focal = Math.min(width, height) * 0.70;
+      const cameraZ = 2400;
+      for (const star of stars) {
+        const x = star.x * cos - star.z * sin;
+        const z = star.x * sin + star.z * cos;
+        const depth = cameraZ - z;
+        if (depth <= 180) continue;
+        const scale = focal / depth;
+        const sx = width / 2 + x * scale;
+        const sy = height / 2 - star.y * scale;
+        if (sx < -3 || sx > width + 3 || sy < -3 || sy > height + 3) continue;
+        const size = Math.max(0.42, Math.min(1.9, 1.9 * scale * 3.4));
+        const alpha = Math.max(0.24, Math.min(1, 0.52 + scale * 0.8));
+        context.fillStyle = `rgba(181,202,255,${alpha})`;
+        context.fillRect(sx, sy, size, size);
+      }
+      if (!window.matchMedia || !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        frame = requestAnimationFrame(paint);
       }
     };
     mainChat.insertBefore(canvas, mainChat.firstChild);
@@ -3383,9 +3427,7 @@
       `<button id="biggyPtt" type="button" data-testid="biggy-ptt" title="Foot-pedal PTT status">● PTT</button>` +
       `<button id="biggyAudioRoute" type="button" data-testid="biggy-audio-route" title="Cycle Room / Headset / Mute audio">ROOM</button>` +
       `</div>` +
-      `<div class="biggy-brand-status" aria-label="A.R.G.U.S. model">` +
-      `<div id="j-brain"><span id="j-brain-chip" data-testid="biggy-argus-model">—</span></div>` +
-      `</div>`;
+      `<div class="biggy-brand-status" aria-label="A.R.G.U.S. controls"></div>`;
     return header;
   }
 
@@ -3430,7 +3472,10 @@
       `</g>` +
       `</svg>` +
       `</div>` +
-      `<div id="j-state" data-testid="biggy-argus-state"><span class="dot"></span><span id="j-state-txt">OFFLINE</span></div>`;
+      `<div id="j-state-panel" data-testid="biggy-argus-readout">` +
+      `<div id="j-brain"><span id="j-brain-chip" data-testid="biggy-argus-model">—</span></div>` +
+      `<div id="j-state" data-testid="biggy-argus-state"><span class="dot"></span><span id="j-state-txt">OFFLINE</span></div>` +
+      `</div>`;
     return dock;
   }
 

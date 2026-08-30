@@ -75,8 +75,11 @@ def test_starfield_is_shell_owned_when_rag_graph_is_not_loaded():
     assert "data-testid', 'biggy-static-starfield'" in starfield
     assert "repeating CSS tile" in starfield
     assert "without loading the RAG graph" in starfield
+    assert "Array.from({ length: 1800 }" in starfield
+    assert "const yaw = now" in starfield
+    assert "requestAnimationFrame(paint)" in starfield
     assert ".biggy-static-starfield{" in BRAND_CSS
-    assert "animation:biggy-static-starfield-drift 84s linear infinite" in BRAND_CSS
+    assert "animation:biggy-static-starfield-drift 84s linear infinite" not in BRAND_CSS
     shell = BRAND[BRAND.index("function applyShell()"):BRAND.index("async function tryStart()")]
     assert "clearBiggyV6World(mainChat);\n    installStaticStarfield(mainChat);" in shell
 
