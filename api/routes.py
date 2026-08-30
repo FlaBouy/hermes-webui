@@ -17546,9 +17546,29 @@ _STATIC_CACHE_LOCK = threading.Lock()
 
 
 def _serve_static(handler, parsed):
-    static_root = api_config.get_static_root().resolve()
-    # Strip the leading '/static/' prefix, then resolve and sandbox
-    rel = parsed.path[len("/static/") :]
+    # Biggy's Tools rail loads the same Smedley calculator runtime without
+    # enabling the complete Smedley skin.  Keep that tiny, explicit shared
+    # asset surface under /static so it remains available to an authenticated
+    # Biggy session even when the Smedley extension itself is not active.
+    # Do not turn this into a general extension-file bypass.
+    shared_prefix = "/static/smedley-tools/"
+    shared_assets = {
+        "voltage-drop-sizing.js",
+        "smedley-electrical-results.js",
+        "smedley-live-tools.v0.2.5.js",
+        "smedley-engineering.v0.2.5.js",
+        "smedley-electrical-results.css",
+        "smedley-engineering.v0.2.5.css",
+    }
+    if parsed.path.startswith(shared_prefix):
+        rel = parsed.path[len(shared_prefix) :]
+        if rel not in shared_assets:
+            return j(handler, {"error": "not found"}, status=404)
+        static_root = (Path(__file__).resolve().parent.parent / "extensions" / "smedley-engineering").resolve()
+    else:
+        static_root = api_config.get_static_root().resolve()
+        # Strip the leading '/static/' prefix, then resolve and sandbox
+        rel = parsed.path[len("/static/") :]
     static_file = (static_root / rel).resolve()
     try:
         static_file.relative_to(static_root)

@@ -34,7 +34,7 @@ def test_filter_stays_functional_but_is_removed_from_right_rail():
 
 def test_orb_is_bottom_docked_and_cockpit_and_fleet_share_top_center():
     assert ".biggy-argus-reactor{" in BRAND_CSS
-    assert "bottom:calc(100% - 92px)" in BRAND_CSS
+    assert "width:204px;height:280px" in BRAND_CSS
     assert ".biggy-top-rail-group{" in BRAND_CSS
     assert "position:absolute;left:50%;top:20px" in BRAND_CSS
     assert "group.prepend(strip)" in BRAND
@@ -76,7 +76,7 @@ def test_starfield_is_shell_owned_when_rag_graph_is_not_loaded():
     assert "repeating CSS tile" in starfield
     assert "without loading the RAG graph" in starfield
     assert "Array.from({ length: 1800 }" in starfield
-    assert "const yaw = now" in starfield
+    assert "const yaw = -now" in starfield
     assert "requestAnimationFrame(paint)" in starfield
     assert ".biggy-static-starfield{" in BRAND_CSS
     assert "animation:biggy-static-starfield-drift 84s linear infinite" not in BRAND_CSS
@@ -85,8 +85,8 @@ def test_starfield_is_shell_owned_when_rag_graph_is_not_loaded():
 
 
 def test_prompt_and_pa_deck_match_bottom_rail_without_overlap():
-    assert "--biggy-bottom-deck-width:min(980px,calc(100% - 48px))" in BRAND_CSS
     assert "padding:10px 84px 54px" in BRAND_CSS
+    assert "width:auto!important;max-width:calc(100% - 48px)" in BRAND_CSS
 
 
 def test_tools_rail_reuses_the_smedley_engineering_runtime():
@@ -96,6 +96,8 @@ def test_tools_rail_reuses_the_smedley_engineering_runtime():
     assert "SmedleyEngineeringTools" in strip
     assert "smedley-engineering.v0.2.5.js" in BRAND
     assert "biggy-tools-rail" in BRAND_CSS
+    assert "#mainChat.biggy-brand-iwo > .smedley-engineering-modal-backdrop" in BRAND_CSS
+    assert "inset:72px 0 400px;align-items:flex-start;padding:16px" in BRAND_CSS
 
 
 def test_session_controls_move_to_settings_without_reparenting_native_nodes():
@@ -115,22 +117,18 @@ def test_session_controls_move_to_settings_without_reparenting_native_nodes():
     assert "#mainChat.biggy-brand-iwo .composer-ws-wrap" in BRAND_CSS
     assert ".biggy-settings-session-controls" in BRAND_CSS
     assert "--biggy-settings-menu-left" in BRAND_CSS
-    assert "width:var(--biggy-bottom-deck-width)!important;margin:0 auto" in BRAND_CSS
-    assert "width:calc(var(--biggy-bottom-deck-width) + 60px)!important;max-width:calc(100% - 48px)" in BRAND_CSS
     assert "function syncBiggySharedCenterline()" in BRAND
     assert "const masterX = axisRect.left + (axisRect.width / 2)" in BRAND
     assert "placeOnMaster(document.getElementById('biggyTopRailGroup'))" in BRAND
-    assert "placeOnMaster(document.getElementById('biggyArgusReactor'))" in BRAND
+    assert "reactor.style.top = `${Math.round(axisRect.top - parentRect.top - reactor.offsetHeight - 8)}px`" in BRAND
     assert "biggy-home-centerline-sync" in BRAND
 
 
-def test_prompt_and_pa_deck_use_the_rendered_main_chat_width_on_every_monitor():
+def test_prompt_and_pa_deck_use_the_intrinsic_hermes_rail_width_on_every_monitor():
     sync = BRAND[BRAND.index("function syncBiggySharedCenterline"):BRAND.index("function scheduleBiggySharedCenterline")]
-    assert "const mainRect = mainChat.getBoundingClientRect()" in sync
-    assert "const horizontalInset = window.matchMedia('(max-width: 900px)').matches ? 24 : 168" in sync
-    assert "const deckWidth = Math.max(0, Math.min(856, mainRect.width - horizontalInset))" in sync
-    assert "deck.style.width = `${deckWidth}px`" in sync
-    assert "hermesStrip.style.width = `${deckWidth}px`" in sync
+    assert "hermesStrip.style.removeProperty('width')" in sync
+    assert "const railWidth = hermesStrip ? Math.round(hermesStrip.getBoundingClientRect().width) : 0" in sync
+    assert "deck.style.setProperty('width', `${railWidth}px`)" in sync
     assert "new MutationObserver(scheduleBiggySharedCenterline)" in BRAND
 
 

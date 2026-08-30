@@ -42,14 +42,14 @@
   // used by the Smedley engineering surface.
   const SMEDLEY_TOOL_ASSETS = Object.freeze({
     styles: Object.freeze([
-      '/extensions/smedley-engineering/smedley-electrical-results.css',
-      '/extensions/smedley-engineering/smedley-engineering.v0.2.5.css',
+      `/static/smedley-tools/smedley-electrical-results.css?v=${BUILD_ID}`,
+      `/static/smedley-tools/smedley-engineering.v0.2.5.css?v=${BUILD_ID}`,
     ]),
     scripts: Object.freeze([
-      '/extensions/smedley-engineering/voltage-drop-sizing.js',
-      '/extensions/smedley-engineering/smedley-electrical-results.js',
-      '/extensions/smedley-engineering/smedley-live-tools.v0.2.5.js',
-      '/extensions/smedley-engineering/smedley-engineering.v0.2.5.js',
+      `/static/smedley-tools/voltage-drop-sizing.js?v=${BUILD_ID}`,
+      `/static/smedley-tools/smedley-electrical-results.js?v=${BUILD_ID}`,
+      `/static/smedley-tools/smedley-live-tools.v0.2.5.js?v=${BUILD_ID}`,
+      `/static/smedley-tools/smedley-engineering.v0.2.5.js?v=${BUILD_ID}`,
     ]),
   });
   const ORB_STATES = Object.freeze([
@@ -803,17 +803,14 @@
     const deck = document.getElementById('biggyPromptDeck');
     const mainChat = document.getElementById('mainChat');
     if (!prompt || !mainChat) return;
-    // mainChat is the common visual viewport on both Smedley and TD. Resolve
-    // one pixel width from it, then give that exact width to both bottom
-    // surfaces; percentage custom properties resolve against different
-    // containing blocks and drift on TD's aspect ratio.
-    const mainRect = mainChat.getBoundingClientRect();
-    const horizontalInset = window.matchMedia('(max-width: 900px)').matches ? 24 : 168;
-    const deckWidth = Math.max(0, Math.min(856, mainRect.width - horizontalInset));
     const hermesStrip = document.getElementById('biggyHermesStrip');
-    if (deckWidth) {
-      if (deck) deck.style.width = `${deckWidth}px`;
-      if (hermesStrip) hermesStrip.style.width = `${deckWidth}px`;
+    // Hermes owns the rail's natural, calculated width. Measure that actual
+    // rendered surface and give the PA + prompt deck the same pixel width.
+    // Do not impose a width on the rail; that changes its button geometry.
+    if (hermesStrip) hermesStrip.style.removeProperty('width');
+    const railWidth = hermesStrip ? Math.round(hermesStrip.getBoundingClientRect().width) : 0;
+    if (deck && railWidth) {
+      deck.style.setProperty('width', `${railWidth}px`);
     }
     const axisRect = (deck || prompt).getBoundingClientRect();
     const masterX = axisRect.left + (axisRect.width / 2);
@@ -823,7 +820,15 @@
       node.style.left = `${masterX - parentRect.left}px`;
     };
     placeOnMaster(document.getElementById('biggyTopRailGroup'));
-    placeOnMaster(document.getElementById('biggyArgusReactor'));
+    // The reactor/readout is one docked unit: center it over the same prompt
+    // axis and place its bottom edge immediately above the prompt deck.
+    const reactor = document.getElementById('biggyArgusReactor');
+    if (reactor && reactor.offsetParent) {
+      const parentRect = reactor.offsetParent.getBoundingClientRect();
+      reactor.style.left = `${masterX - parentRect.left}px`;
+      reactor.style.top = `${Math.round(axisRect.top - parentRect.top - reactor.offsetHeight - 8)}px`;
+      reactor.style.bottom = 'auto';
+    }
     const frame = document.getElementById('biggyV6World');
     if (frame && frame.contentWindow) {
       try {
@@ -3374,7 +3379,9 @@
       context.clearRect(0, 0, width, height);
       // Match the V6 viewport's visible slow drift without creating its WebGL
       // graph at landing.  The former rate was effectively static to the eye.
-      const yaw = now * 0.000033;
+      // Same orbital direction as the lazy-loaded RAG world. The landing
+      // field stays lightweight, but it must not reverse when RAG opens.
+      const yaw = -now * 0.000033;
       const cos = Math.cos(yaw);
       const sin = Math.sin(yaw);
       const focal = Math.min(width, height) * 0.70;
