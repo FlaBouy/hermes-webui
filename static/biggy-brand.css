@@ -233,7 +233,7 @@ body.biggy-brand:has(main.main[data-biggy-hermes-panel="todos"]) .layout > .side
    Reserve its 48px width plus breathing room only inside the composer: Hermes
    still owns dynamic layout changes when either real sidebar opens/closes. */
 #mainChat.biggy-brand-iwo .composer-wrap{
-  background:transparent;padding:10px 84px 66px;pointer-events:auto
+  background:transparent;padding:10px 84px 54px;pointer-events:auto
 }
 #mainChat.biggy-brand-iwo .composer-wrap::before{display:none}
 #mainChat.biggy-brand-iwo .biggy-prompt-deck{
@@ -251,8 +251,12 @@ body.biggy-brand:has(main.main[data-biggy-hermes-panel="todos"]) .layout > .side
   border-color:rgba(78,204,163,.25);box-shadow:0 8px 24px rgba(0,0,0,.24)
 }
 #mainChat.biggy-brand-iwo #composerBox textarea#msg{
-  box-sizing:border-box;min-height:34px;height:36px;max-height:92px;padding:7px 82px 7px 90px;line-height:1.35
+  box-sizing:border-box;min-height:34px;height:36px;max-height:92px;padding:7px 166px 7px 12px;line-height:1.35;text-align:left
 }
+/* The visible prompt actions are the five right-side click relays.  Hermes'
+   source footer remains in the DOM for those native handlers, but must not
+   consume a second layout row beneath the entry field. */
+#mainChat.biggy-brand-iwo #composerBox .composer-footer{display:none!important}
 #mainChat.biggy-brand-iwo #composerBox,
 #mainChat.biggy-brand-iwo .composer-flyout,
 #mainChat.biggy-brand-iwo .composer-selection-chips{pointer-events:auto}
@@ -281,13 +285,26 @@ body.biggy-brand main.main[data-biggy-hermes-panel="settings"] #mainSettings but
 body.biggy-brand main.main[data-biggy-hermes-panel="settings"] #mainSettings button.active{
   border-color:#62dbff!important;background:rgba(11,42,36,.9)!important;color:#e5fbf2!important;
 }
+body.biggy-brand main.main[data-biggy-hermes-panel="settings"] #mainSettings button:disabled{
+  opacity:.48!important;cursor:not-allowed!important
+}
 /* Workspace and effort keep their native menus, but when called from Settings
    they are positioned inside the Settings overlay rather than above the hidden
    prompt. */
 body.biggy-brand:has(#mainSettings[data-biggy-settings-menu="composerWsDropdown"]) #composerWsDropdown,
+body.biggy-brand:has(#mainSettings[data-biggy-settings-menu="composerModelDropdown"]) #composerModelDropdown,
 body.biggy-brand:has(#mainSettings[data-biggy-settings-menu="composerReasoningDropdown"]) #composerReasoningDropdown{
-  position:fixed!important;left:calc(50% - 416px)!important;top:165px!important;bottom:auto!important;
+  position:absolute!important;left:var(--biggy-settings-menu-left,0px)!important;top:var(--biggy-settings-menu-top,0px)!important;bottom:auto!important;
   z-index:110!important;max-height:calc(100vh - 460px)!important;overflow:auto!important;
+}
+/* Native selectors live under the compact prompt, below the centered Settings
+   panel in the normal stack.  While one is open from Session Controls, stage
+   that same native menu in this body-level portal so it is visibly on top.
+   It is restored to Hermes' original parent as soon as it closes. */
+.biggy-settings-menu-portal{position:static!important;z-index:140!important}
+.biggy-settings-menu-portal>.biggy-settings-staged-menu{
+  position:fixed!important;left:var(--biggy-settings-menu-left,0px)!important;top:var(--biggy-settings-menu-top,0px)!important;
+  bottom:auto!important;z-index:141!important
 }
 .biggy-prompt-inline-controls{
   position:absolute;right:4px;top:auto;bottom:4px;z-index:8;transform:none;
@@ -295,7 +312,7 @@ body.biggy-brand:has(#mainSettings[data-biggy-settings-menu="composerReasoningDr
 }
 .biggy-prompt-inline-left{
   position:absolute;left:4px;top:auto;bottom:4px;z-index:8;
-  display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:3px;pointer-events:auto
+  display:none!important
 }
 .biggy-prompt-inline-controls button,
 .biggy-prompt-inline-left button{

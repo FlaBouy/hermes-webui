@@ -82,18 +82,26 @@ def test_starfield_is_shell_owned_when_rag_graph_is_not_loaded():
 
 def test_prompt_and_pa_deck_match_bottom_rail_without_overlap():
     assert "--biggy-bottom-deck-width:min(856px,calc(100% - 48px))" in BRAND_CSS
-    assert "padding:10px 84px 66px" in BRAND_CSS
+    assert "padding:10px 84px 54px" in BRAND_CSS
 
 
 def test_session_controls_move_to_settings_without_reparenting_native_nodes():
     settings = BRAND[BRAND.index("function installSettingsSessionControls"):BRAND.index("function installPaRailToggle")]
     for source in ("composerWorkspaceChip", "composerModelChip", "composerReasoningChip"):
         assert source in settings
-    assert "nativeControl.click()" in settings
-    assert "settingsModelChip" in settings
+    assert "window.toggleComposerWsDropdown" in settings
+    assert "nativeControl.disabled = false" in settings
+    assert "document.getElementById('composerModelChip')?.click()" in settings
+    assert "window.toggleReasoningDropdown" in settings
+    assert "proxy.disabled = false" in settings
+    assert "event.stopPropagation()" in settings
+    assert "placeNativeMenuInSettings" in settings
+    assert "--biggy-settings-menu-top" in settings
+    assert "composerModelDropdown" in settings
     assert "biggySettingsMenu" in settings
     assert "#mainChat.biggy-brand-iwo .composer-ws-wrap" in BRAND_CSS
     assert ".biggy-settings-session-controls" in BRAND_CSS
+    assert "--biggy-settings-menu-left" in BRAND_CSS
     assert "width:var(--biggy-bottom-deck-width);margin:0 auto" in BRAND_CSS
     assert "width:var(--biggy-bottom-deck-width);max-width:calc(100% - 48px)" in BRAND_CSS
     assert "function syncBiggySharedCenterline()" in BRAND
@@ -126,12 +134,36 @@ def test_send_and_biggy_voice_return_to_half_height_prompt():
     assert "width:28px;height:28px" in BRAND_CSS
 
 
+def test_prompt_actions_share_the_right_hand_control_group_and_leave_text_left_aligned():
+    prompt = BRAND[BRAND.index("function installPromptInlineControls()"):BRAND.index("const FLEET_STATUS_PATH")]
+    for source in ("btnAttach", "btnSavedPrompts", "btnMic", "btnGptVoice", "btnSend"):
+        assert f"makeProxy('{source}'" in prompt
+    assert "'biggyPromptAttachProxy', right" in prompt
+    assert "'biggyPromptSavedPromptsProxy', right" in prompt
+    assert "'biggyPromptDictateProxy', right" in prompt
+    assert "padding:7px 166px 7px 12px" in BRAND_CSS
+    assert "#mainChat.biggy-brand-iwo #composerBox .composer-footer{display:none!important}" in BRAND_CSS
+    assert ".biggy-prompt-inline-left{\n  position:absolute" in BRAND_CSS
+    assert "display:none!important" in BRAND_CSS[BRAND_CSS.index(".biggy-prompt-inline-left{"):BRAND_CSS.index(".biggy-prompt-inline-controls button,")]
+
+
 def test_prompt_controls_are_native_click_proxies_not_reparented_nodes():
     prompt = BRAND[BRAND.index("function installPromptInlineControls()"):BRAND.index("const FLEET_STATUS_PATH")]
     assert "nativeControl.click()" in prompt
     assert "source.cloneNode(true)" in prompt
     assert "controls.appendChild(voice)" not in prompt
     assert "#mainChat.biggy-brand-iwo .composer-footer #btnGptVoice" in BRAND_CSS
+
+
+def test_session_dropdowns_stage_above_the_settings_overlay_and_restore_after_close():
+    settings = BRAND[BRAND.index("function installSettingsSessionControls"):BRAND.index("function installPaRailToggle")]
+    assert "biggySettingsMenuPortal" in settings
+    assert "menu._biggySettingsMenuHome" in settings
+    assert "home.parent.insertBefore(menu" in settings
+    assert "biggy-settings-staged-menu" in settings
+    assert "menu.style.setProperty('position', 'fixed', 'important')" in settings
+    assert ".biggy-settings-menu-portal>.biggy-settings-staged-menu" in BRAND_CSS
+    assert "z-index:141!important" in BRAND_CSS
 
 
 def test_expanded_biggy_voice_keeps_inline_actions_in_the_prompt_row():

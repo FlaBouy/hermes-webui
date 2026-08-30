@@ -581,8 +581,11 @@
       }
       return host;
     };
+    // Keep every compact prompt control in one right-anchored group.  That
+    // leaves the message field genuinely left aligned and keeps the composer
+    // at its flight-deck height even while Biggy Voice expands.
     const left = makeHost('biggyPromptInlineLeft', 'biggy-prompt-inline-left', 'Prompt controls');
-    const right = makeHost('biggyPromptInlineControls', 'biggy-prompt-inline-controls', 'Prompt voice and send controls');
+    const right = makeHost('biggyPromptInlineControls', 'biggy-prompt-inline-controls', 'Prompt controls');
     const makeProxy = (sourceId, proxyId, host, label) => {
       const source = document.getElementById(sourceId);
       if (!source || host.querySelector(`#${proxyId}`)) return;
@@ -606,9 +609,9 @@
       sync();
       new MutationObserver(sync).observe(source, { attributes: true, attributeFilter: ['disabled', 'aria-pressed', 'class', 'style'] });
     };
-    makeProxy('btnAttach', 'biggyPromptAttachProxy', left, 'Attach files');
-    makeProxy('btnSavedPrompts', 'biggyPromptSavedPromptsProxy', left, 'Saved prompts');
-    makeProxy('btnMic', 'biggyPromptDictateProxy', left, 'Dictate');
+    makeProxy('btnAttach', 'biggyPromptAttachProxy', right, 'Attach files');
+    makeProxy('btnSavedPrompts', 'biggyPromptSavedPromptsProxy', right, 'Saved prompts');
+    makeProxy('btnMic', 'biggyPromptDictateProxy', right, 'Dictate');
     makeProxy('btnGptVoice', 'biggyPromptVoiceProxy', right, 'Biggy Voice');
     makeProxy('btnSend', 'biggyPromptSendProxy', right, 'Send message');
     return { left, right };
@@ -940,7 +943,55 @@
       settings.insertBefore(panel, settings.firstChild);
     }
     const controls = panel.querySelector('.biggy-settings-session-control-row');
-    const makeProxy = (sourceId, proxyId, label, menuId, nativeId) => {
+    const placeNativeMenuInSettings = (menuId) => {
+      const place = () => {
+        const menu = document.getElementById(menuId);
+        const panelRect = panel.getBoundingClientRect();
+        if (!menu || !panelRect.width) return;
+        let portal = document.getElementById('biggySettingsMenuPortal');
+        if (!portal) {
+          portal = el('div', 'biggy-settings-menu-portal');
+          portal.id = 'biggySettingsMenuPortal';
+          document.body.appendChild(portal);
+        }
+        if (!menu._biggySettingsMenuHome) {
+          menu._biggySettingsMenuHome = { parent: menu.parentElement, nextSibling: menu.nextSibling };
+          const restore = () => {
+            if (menu.classList.contains('open')) return;
+            const home = menu._biggySettingsMenuHome;
+            if (home?.parent?.isConnected) home.parent.insertBefore(menu, home.nextSibling || null);
+            delete menu._biggySettingsMenuHome;
+            delete menu.dataset.biggySettingsMenuStaged;
+            menu.classList.remove('biggy-settings-staged-menu');
+            menu.style.removeProperty('position');
+            menu.style.removeProperty('z-index');
+            menu.style.removeProperty('--biggy-settings-menu-top');
+            menu.style.removeProperty('--biggy-settings-menu-left');
+            if (!portal.childElementCount) portal.remove();
+            observer.disconnect();
+          };
+          const observer = new MutationObserver(() => {
+            if (menu.dataset.biggySettingsMenuStaged === 'open') window.setTimeout(restore, 0);
+          });
+          observer.observe(menu, { attributes: true, attributeFilter: ['class'] });
+        }
+        if (menu.parentElement !== portal) portal.appendChild(menu);
+        menu.classList.add('biggy-settings-staged-menu');
+        // The regular cockpit selector targets each menu ID and is therefore
+        // more specific than a class rule.  Pin this staged copy inline so it
+        // cannot fall below the Settings overlay through that earlier rule.
+        menu.style.setProperty('position', 'fixed', 'important');
+        menu.style.setProperty('z-index', '141', 'important');
+        if (menu.classList.contains('open')) menu.dataset.biggySettingsMenuStaged = 'open';
+        menu.style.setProperty('--biggy-settings-menu-top', `${Math.round(panelRect.bottom + 8)}px`);
+        menu.style.setProperty('--biggy-settings-menu-left', `${Math.round(panelRect.left)}px`);
+      };
+      place();
+      window.requestAnimationFrame(place);
+      window.setTimeout(place, 80);
+      window.setTimeout(place, 240);
+    };
+    const makeProxy = (sourceId, proxyId, label, menuId, action) => {
       const source = document.getElementById(sourceId);
       if (!source || controls.querySelector(`#${proxyId}`)) return;
       const proxy = source.cloneNode(true);
@@ -952,20 +1003,44 @@
       proxy.title = label;
       proxy.addEventListener('click', (event) => {
         event.preventDefault();
+        // The native handlers open synchronously.  Do not allow this mirror's
+        // own bubbling click to reach Hermes' document-level outside-click
+        // closer immediately afterward.
+        event.stopPropagation();
         settings.dataset.biggySettingsMenu = menuId || '';
-        const nativeControl = document.getElementById(nativeId || sourceId);
-        if (nativeControl && !nativeControl.disabled) nativeControl.click();
+        // These call the Hermes handlers directly.  The composer copies are
+        // intentionally hidden in cockpit mode, so clicking a hidden source
+        // can leave its menu at stale prompt coordinates or do nothing.
+        if (typeof action === 'function') action();
+        if (menuId) placeNativeMenuInSettings(menuId);
       });
       controls.appendChild(proxy);
-      const sync = () => { proxy.disabled = !!source.disabled; proxy.innerHTML = source.innerHTML; };
+      const sync = () => { proxy.disabled = false; proxy.innerHTML = source.innerHTML; };
       sync();
       new MutationObserver(sync).observe(source, { attributes: true, childList: true, subtree: true });
     };
-    makeProxy('composerWorkspaceChip', 'biggySettingsWorkspaceProxy', 'Change workspace', 'composerWsDropdown');
-    // Settings has its own native model picker; use it so model choices never
-    // fall back to the hidden composer coordinates.
-    makeProxy('composerModelChip', 'biggySettingsModelProxy', 'Change model', 'settingsModelDropdown', 'settingsModelChip');
-    makeProxy('composerReasoningChip', 'biggySettingsEffortProxy', 'Change reasoning effort', 'composerReasoningDropdown');
+    makeProxy('composerWorkspaceChip', 'biggySettingsWorkspaceProxy', 'Change workspace', 'composerWsDropdown', () => {
+      const nativeControl = document.getElementById('composerWorkspaceChip');
+      if (!nativeControl) return;
+      // Hermes disables the compact composer chip when no conversation is
+      // focused.  Its workspace menu itself is valid session configuration,
+      // so expose it through Settings and restore the original disabled state
+      // immediately after the native handler has passed its guard.
+      const wasDisabled = nativeControl.disabled;
+      nativeControl.disabled = false;
+      if (typeof window.toggleComposerWsDropdown === 'function') window.toggleComposerWsDropdown();
+      else nativeControl.click();
+      nativeControl.disabled = wasDisabled;
+    });
+    // Use the composer model picker: it is the live session control and its
+    // menu can be re-anchored into this Settings surface.
+    makeProxy('composerModelChip', 'biggySettingsModelProxy', 'Change model', 'composerModelDropdown', () => {
+      document.getElementById('composerModelChip')?.click();
+    });
+    makeProxy('composerReasoningChip', 'biggySettingsEffortProxy', 'Change reasoning effort', 'composerReasoningDropdown', () => {
+      if (typeof window.toggleReasoningDropdown === 'function') window.toggleReasoningDropdown();
+      else document.getElementById('composerReasoningChip')?.click();
+    });
     return panel;
   }
 
