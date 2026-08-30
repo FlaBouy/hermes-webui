@@ -70,6 +70,13 @@ def test_rag_button_toggles_panel_without_reinstalling_conversation_stack():
     assert ".biggy-argus-conversation-lane" not in BRAND_CSS
 
 
+def test_starfield_is_shell_owned_when_rag_graph_is_not_loaded():
+    shell_rule = BRAND_CSS[BRAND_CSS.index("#mainChat.biggy-brand-iwo{"):BRAND_CSS.index("#mainChat.biggy-brand-iwo .messages-shell")]
+    assert "The starfield belongs to the cockpit shell" in shell_rule
+    assert "background-image:" in shell_rule
+    assert "radial-gradient" in shell_rule
+
+
 def test_prompt_and_pa_deck_match_bottom_rail_without_overlap():
     assert "--biggy-bottom-deck-width:min(856px,calc(100% - 48px))" in BRAND_CSS
     assert "padding:10px 84px 66px" in BRAND_CSS
