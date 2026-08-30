@@ -4,12 +4,15 @@
   window.__smedleyEngineeringLoaded = true;
 
   const RAG_PROXY = '/api/extensions/smedley-engineering/sidecar';
-  const GUI_ID='smedley';
+  const GUI_ID=window.__HERMES_GUI_ID__==='biggy'?'biggy':'smedley';
+  const TOOLS_ONLY_EMBED=GUI_ID==='biggy';
   const PTT_INSTANCE='smedley';
-  window.__HERMES_GUI_ID__=GUI_ID;
+  // Biggy intentionally locks its own GUI identity.  The shared calculator
+  // runtime must not try to replace it when loaded from the Tools rail.
+  if(!TOOLS_ONLY_EMBED)window.__HERMES_GUI_ID__=GUI_ID;
   // Independent of Biggy. Owner-ACK / Approvals UI stays off until Smedley owns that surface.
   const FEATURES=Object.freeze({approvalsEnabled:false,diagnosticsEnabledDefault:false,guiId:GUI_ID,profileId:'smedley'});
-  window.__SMEDLEY_FEATURES__=FEATURES;
+  if(!TOOLS_ONLY_EMBED)window.__SMEDLEY_FEATURES__=FEATURES;
   const CONDUCTORS = ['14','12','10','8','6','4','3','2','1','1/0','2/0','3/0','4/0','250','300','350','400','500','600','750','1000'];
   const TOOLS = [
     ['voltage-drop','Voltage Drop','standard'],['feeder-size','Feeder Size','standard'],
@@ -1573,5 +1576,18 @@
     },true);
   }
   function init(){installBrandingObserver();installGuiDiagnostics();installDirtyHashRefreshGuard();const layout=document.querySelector('.layout');const main=document.querySelector('main.main');const mainChat=document.getElementById('mainChat');const rightPanel=document.querySelector('.rightpanel');if(!layout||!main||!mainChat)return;installComposerBranding();installSmedleyVoiceOutput();installCorpusLinkFix();installDocumentIntentRouting();warmModelsOnOpen();const left=makeLeftRail(),right=makeRightRail();layout.insertBefore(left,main);layout.insertBefore(right,rightPanel||null);mainChat.classList.add('smedley-engineering-iwo');mainChat.insertBefore(makeHeader(left,right),mainChat.firstChild);mainChat.appendChild(makeToolsDock());installOperatorChip();const msgInner=document.getElementById('msgInner');if(msgInner){removeHermesCenterPlaceholders();new MutationObserver(removeHermesCenterPlaceholders).observe(msgInner,{childList:true,subtree:true});}const sync=()=>{const shown=getComputedStyle(mainChat).display!=='none';left.hidden=!shown;right.hidden=!shown;if(!shown){left.classList.remove('open');right.classList.remove('open');}};new MutationObserver(sync).observe(mainChat,{attributes:true,attributeFilter:['class','style','hidden']});sync();}
-  if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+  // Biggy uses this exact calculator runtime through its Tools rail.  Its own
+  // cockpit owns the surrounding layout, so expose the real tool entry points
+  // but do not build Smedley's rails, panes, or composer a second time.
+  window.SmedleyEngineeringTools=Object.freeze({
+    tools:TOOLS.map(([id,label,group])=>Object.freeze({id,label,group})),
+    open(toolId){
+      const tool=TOOLS.find(([id])=>id===String(toolId||''));
+      if(!tool)throw new Error(`Unknown Smedley engineering tool: ${toolId}`);
+      return openTool(tool);
+    },
+  });
+  if(!TOOLS_ONLY_EMBED){
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init,{once:true});else init();
+  }
 })();

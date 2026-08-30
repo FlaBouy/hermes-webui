@@ -14,7 +14,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260829-rag-ingest-38';
+  const BUILD_ID = '20260830-tools-rail-39';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -37,6 +37,21 @@
     ['logs', 'LOGS'],
     ['settings', 'SETTINGS'],
   ]);
+  // The Tools rail is deliberately a launcher, not a second calculator
+  // implementation.  These are the same Smedley assets and sidecar contract
+  // used by the Smedley engineering surface.
+  const SMEDLEY_TOOL_ASSETS = Object.freeze({
+    styles: Object.freeze([
+      '/extensions/smedley-engineering/smedley-electrical-results.css',
+      '/extensions/smedley-engineering/smedley-engineering.v0.2.5.css',
+    ]),
+    scripts: Object.freeze([
+      '/extensions/smedley-engineering/voltage-drop-sizing.js',
+      '/extensions/smedley-engineering/smedley-electrical-results.js',
+      '/extensions/smedley-engineering/smedley-live-tools.v0.2.5.js',
+      '/extensions/smedley-engineering/smedley-engineering.v0.2.5.js',
+    ]),
+  });
   const ORB_STATES = Object.freeze([
     'offline', 'online', 'thinking', 'speaking', 'tool-running', 'error',
   ]);
@@ -896,6 +911,9 @@
     strip.innerHTML = '<span class="biggy-fleet-strip-label">HERMES</span>';
     const selectPanel = async (panel, button) => {
       const main = document.querySelector('main.main');
+      const toolsRail = document.getElementById('biggyToolsRail');
+      if (toolsRail) toolsRail.hidden = true;
+      strip.querySelector('.biggy-hermes-tools')?.classList.remove('active');
       const current = main && main.dataset.biggyHermesPanel;
       // A second tap on the active utility panel returns the operator to chat.
       const next = current === panel && panel !== 'chat' ? 'chat' : panel;
@@ -925,8 +943,93 @@
       });
       strip.appendChild(button);
     });
+    const tools = el('button', 'biggy-fleet-machine biggy-hermes-panel biggy-hermes-tools is-online');
+    tools.type = 'button';
+    tools.dataset.panel = 'tools';
+    tools.setAttribute('aria-pressed', 'false');
+    tools.title = 'Open Smedley engineering tools';
+    tools.innerHTML = '<span class="biggy-fleet-state" aria-hidden="true"></span><span>TOOLS</span>';
+    tools.addEventListener('click', async (event) => {
+      event.preventDefault();
+      const rail = ensureBiggyToolsRail();
+      const open = rail.hidden;
+      rail.hidden = !open;
+      tools.classList.toggle('active', open);
+      tools.setAttribute('aria-pressed', open ? 'true' : 'false');
+      if (open) await populateBiggyToolsRail(rail);
+    });
+    strip.appendChild(tools);
     layout.appendChild(strip);
     return strip;
+  }
+
+  let smedleyToolsLoadPromise = null;
+
+  function loadBiggySharedAsset(kind, url) {
+    const selector = `${kind}[data-biggy-shared-asset="${url}"]`;
+    const existing = document.querySelector(selector);
+    if (existing?.dataset.biggySharedReady === 'true') return Promise.resolve();
+    return new Promise((resolve, reject) => {
+      const node = existing || document.createElement(kind);
+      const finish = () => { node.dataset.biggySharedReady = 'true'; resolve(); };
+      node.addEventListener('load', finish, { once: true });
+      node.addEventListener('error', () => reject(new Error(`Could not load ${url}`)), { once: true });
+      if (existing) return;
+      node.dataset.biggySharedAsset = url;
+      if (kind === 'link') { node.rel = 'stylesheet'; node.href = url; }
+      else { node.src = url; node.async = false; }
+      document.head.appendChild(node);
+    });
+  }
+
+  function ensureSharedSmedleyTools() {
+    if (window.SmedleyEngineeringTools) return Promise.resolve(window.SmedleyEngineeringTools);
+    if (!smedleyToolsLoadPromise) {
+      smedleyToolsLoadPromise = (async () => {
+        await Promise.all(SMEDLEY_TOOL_ASSETS.styles.map((url) => loadBiggySharedAsset('link', url)));
+        for (const url of SMEDLEY_TOOL_ASSETS.scripts) await loadBiggySharedAsset('script', url);
+        if (!window.SmedleyEngineeringTools) throw new Error('Smedley engineering tools did not initialize');
+        return window.SmedleyEngineeringTools;
+      })().catch((error) => { smedleyToolsLoadPromise = null; throw error; });
+    }
+    return smedleyToolsLoadPromise;
+  }
+
+  function ensureBiggyToolsRail() {
+    let rail = document.getElementById('biggyToolsRail');
+    if (rail) return rail;
+    const layout = document.querySelector('.layout');
+    rail = el('aside', 'biggy-tools-rail');
+    rail.id = 'biggyToolsRail';
+    rail.hidden = true;
+    rail.setAttribute('aria-label', 'Smedley engineering tools');
+    rail.innerHTML = '<h2 class="biggy-tools-rail-title">ENGINEERING TOOLS</h2><div class="biggy-tools-rail-body"><span>Loading tools…</span></div>';
+    layout?.appendChild(rail);
+    return rail;
+  }
+
+  async function populateBiggyToolsRail(rail) {
+    const body = rail.querySelector('.biggy-tools-rail-body');
+    try {
+      const runtime = await ensureSharedSmedleyTools();
+      if (!rail.isConnected) return;
+      body.replaceChildren();
+      const groups = [['standard', 'GENERIC CIRCUIT TOOLS'], ['motor', 'MOTOR & STARTER TOOLS']];
+      groups.forEach(([key, label]) => {
+        const group = el('section', 'biggy-tools-group');
+        group.innerHTML = `<h3>${label}</h3>`;
+        runtime.tools.filter((tool) => tool.group === key).forEach((tool) => {
+          const button = el('button', 'biggy-fleet-machine biggy-tool-launch is-online');
+          button.type = 'button';
+          button.textContent = tool.label;
+          button.addEventListener('click', () => runtime.open(tool.id));
+          group.appendChild(button);
+        });
+        body.appendChild(group);
+      });
+    } catch (error) {
+      body.textContent = `Tools unavailable: ${error.message}`;
+    }
   }
 
   function installSettingsSessionControls() {
@@ -3269,21 +3372,26 @@
       if (!context || !width || !height) return;
       context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
       context.clearRect(0, 0, width, height);
-      // OrbitControls uses a restrained autoRotateSpeed=.5.  This is the
-      // equivalent visual rate, not the previous fast flat-canvas spin.
-      const yaw = now * 0.0000012;
+      // Match the V6 viewport's visible slow drift without creating its WebGL
+      // graph at landing.  The former rate was effectively static to the eye.
+      const yaw = now * 0.000033;
       const cos = Math.cos(yaw);
       const sin = Math.sin(yaw);
       const focal = Math.min(width, height) * 0.70;
       const cameraZ = 2400;
       for (const star of stars) {
-        const x = star.x * cos - star.z * sin;
-        const z = star.x * sin + star.z * cos;
+        // Same asymmetric X/Y/Z scale as the RAG world source field, so the
+        // boot atmosphere and lazy-loaded world read as one cockpit view.
+        const sourceX = star.x * 1.55;
+        const sourceY = star.y * 1.35;
+        const sourceZ = star.z * 1.2;
+        const x = sourceX * cos - sourceZ * sin;
+        const z = sourceX * sin + sourceZ * cos;
         const depth = cameraZ - z;
         if (depth <= 180) continue;
         const scale = focal / depth;
         const sx = width / 2 + x * scale;
-        const sy = height / 2 - star.y * scale;
+        const sy = height / 2 - sourceY * scale;
         if (sx < -3 || sx > width + 3 || sy < -3 || sy > height + 3) continue;
         const size = Math.max(0.42, Math.min(1.9, 1.9 * scale * 3.4));
         const alpha = Math.max(0.24, Math.min(1, 0.52 + scale * 0.8));

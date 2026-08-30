@@ -34,7 +34,7 @@ def test_filter_stays_functional_but_is_removed_from_right_rail():
 
 def test_orb_is_bottom_docked_and_cockpit_and_fleet_share_top_center():
     assert ".biggy-argus-reactor{" in BRAND_CSS
-    assert "bottom:calc(100% - 72px)" in BRAND_CSS
+    assert "bottom:calc(100% - 92px)" in BRAND_CSS
     assert ".biggy-top-rail-group{" in BRAND_CSS
     assert "position:absolute;left:50%;top:20px" in BRAND_CSS
     assert "group.prepend(strip)" in BRAND
@@ -85,8 +85,17 @@ def test_starfield_is_shell_owned_when_rag_graph_is_not_loaded():
 
 
 def test_prompt_and_pa_deck_match_bottom_rail_without_overlap():
-    assert "--biggy-bottom-deck-width:min(856px,calc(100% - 48px))" in BRAND_CSS
+    assert "--biggy-bottom-deck-width:min(980px,calc(100% - 48px))" in BRAND_CSS
     assert "padding:10px 84px 54px" in BRAND_CSS
+
+
+def test_tools_rail_reuses_the_smedley_engineering_runtime():
+    strip = BRAND[BRAND.index("function installHermesStrip"):BRAND.index("function installSettingsSessionControls")]
+    assert "biggy-hermes-tools" in strip
+    assert "ensureSharedSmedleyTools" in strip
+    assert "SmedleyEngineeringTools" in strip
+    assert "smedley-engineering.v0.2.5.js" in BRAND
+    assert "biggy-tools-rail" in BRAND_CSS
 
 
 def test_session_controls_move_to_settings_without_reparenting_native_nodes():
@@ -106,8 +115,8 @@ def test_session_controls_move_to_settings_without_reparenting_native_nodes():
     assert "#mainChat.biggy-brand-iwo .composer-ws-wrap" in BRAND_CSS
     assert ".biggy-settings-session-controls" in BRAND_CSS
     assert "--biggy-settings-menu-left" in BRAND_CSS
-    assert "width:var(--biggy-bottom-deck-width);margin:0 auto" in BRAND_CSS
-    assert "width:var(--biggy-bottom-deck-width);max-width:calc(100% - 48px)" in BRAND_CSS
+    assert "width:var(--biggy-bottom-deck-width)!important;margin:0 auto" in BRAND_CSS
+    assert "width:calc(var(--biggy-bottom-deck-width) + 60px)!important;max-width:calc(100% - 48px)" in BRAND_CSS
     assert "function syncBiggySharedCenterline()" in BRAND
     assert "const masterX = axisRect.left + (axisRect.width / 2)" in BRAND
     assert "placeOnMaster(document.getElementById('biggyTopRailGroup'))" in BRAND
