@@ -2022,7 +2022,7 @@ def _build_profile_rows_fast() -> list | None:
         # the directory is literally ".hermes" — match that exactly.
         rows.append(_row(default_home, 'default', True))
 
-    profiles_root = _profiles_root()
+    profiles_root = _get_profiles_root()
     if profiles_root.is_dir():
         for entry in sorted(profiles_root.iterdir()):
             if not entry.is_dir():
