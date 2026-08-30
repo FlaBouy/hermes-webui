@@ -215,15 +215,7 @@ body.biggy-brand:has(main.main[data-biggy-hermes-panel="todos"]) .layout > .side
   position:relative;
   /* The starfield belongs to the cockpit shell, not the optional RAG iframe.
      This stays visible at boot and costs no WebGL work on tablet clients. */
-  background-color:#04050a;
-  background-image:
-    radial-gradient(circle at 13% 22%,rgba(221,247,255,.95) 0 1px,transparent 1.4px),
-    radial-gradient(circle at 72% 41%,rgba(128,212,255,.88) 0 1px,transparent 1.35px),
-    radial-gradient(circle at 37% 78%,rgba(255,255,255,.9) 0 .8px,transparent 1.25px),
-    radial-gradient(circle at 88% 12%,rgba(177,153,255,.72) 0 .8px,transparent 1.2px),
-    radial-gradient(circle at 48% 54%,rgba(220,244,255,.7) 0 .7px,transparent 1.1px);
-  background-size:97px 113px,137px 151px,71px 83px,173px 191px,53px 61px;
-  background-position:0 0,23px 41px,11px 29px,59px 17px,37px 47px;
+  background:#04050a;
   /* One owned composition stack: the iframe is only the galaxy layer;
      Biggy controls every interaction/presentation layer above it. */
   --biggy-layer-galaxy:0;
@@ -381,6 +373,10 @@ body.biggy-brand:has(main.main[data-biggy-hermes-panel="todos"]) .layout > .side
   position:absolute;inset:0;width:100%;height:100%;
   border:0;z-index:var(--biggy-layer-galaxy);background:#04050a;
   pointer-events:auto;
+}
+.biggy-static-starfield{
+  position:absolute;inset:0;width:100%;height:100%;z-index:var(--biggy-layer-galaxy);
+  pointer-events:none;
 }
 .biggy-v6-world-fallback{
   position:absolute;inset:0;width:100%;height:100%;z-index:var(--biggy-layer-galaxy);

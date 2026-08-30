@@ -71,10 +71,11 @@ def test_rag_button_toggles_panel_without_reinstalling_conversation_stack():
 
 
 def test_starfield_is_shell_owned_when_rag_graph_is_not_loaded():
-    shell_rule = BRAND_CSS[BRAND_CSS.index("#mainChat.biggy-brand-iwo{"):BRAND_CSS.index("#mainChat.biggy-brand-iwo .messages-shell")]
-    assert "The starfield belongs to the cockpit shell" in shell_rule
-    assert "background-image:" in shell_rule
-    assert "radial-gradient" in shell_rule
+    starfield = BRAND[BRAND.index("function installStaticStarfield"):BRAND.index("function installBiggyV6World")]
+    assert "data-testid', 'biggy-static-starfield'" in starfield
+    assert "repeating CSS tile" in starfield
+    assert "zero WebGL allocation" in starfield
+    assert ".biggy-static-starfield{" in BRAND_CSS
 
 
 def test_prompt_and_pa_deck_match_bottom_rail_without_overlap():

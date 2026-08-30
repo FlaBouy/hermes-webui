@@ -3070,11 +3070,57 @@
       .forEach((node) => node.remove());
   }
 
+  function installStaticStarfield(mainChat) {
+    if (!mainChat || mainChat.querySelector('.biggy-static-starfield')) return;
+    const canvas = document.createElement('canvas');
+    canvas.className = 'biggy-static-starfield';
+    canvas.setAttribute('aria-hidden', 'true');
+    canvas.setAttribute('data-testid', 'biggy-static-starfield');
+    // Deterministic pseudo-random points give every viewport one continuous
+    // field rather than a repeating CSS tile.  It is intentionally a static
+    // 2D canvas: zero graph layout, zero WebGL allocation, zero boot animation.
+    const draw = () => {
+      if (!canvas.isConnected) return;
+      const rect = mainChat.getBoundingClientRect();
+      const width = Math.max(1, Math.round(rect.width));
+      const height = Math.max(1, Math.round(rect.height));
+      const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
+      canvas.width = Math.round(width * pixelRatio);
+      canvas.height = Math.round(height * pixelRatio);
+      const context = canvas.getContext('2d');
+      if (!context) return;
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+      context.clearRect(0, 0, width, height);
+      let seed = ((width * 73856093) ^ (height * 19349663) ^ 0x6d2b79f5) >>> 0;
+      const random = () => {
+        seed = (seed * 1664525 + 1013904223) >>> 0;
+        return seed / 4294967296;
+      };
+      const count = Math.max(420, Math.min(1500, Math.round((width * height) / 1850)));
+      for (let index = 0; index < count; index += 1) {
+        const x = random() * width;
+        const y = random() * height;
+        const kind = random();
+        const radius = kind > 0.97 ? 1.15 : kind > 0.82 ? 0.78 : 0.5;
+        const alpha = kind > 0.97 ? 0.95 : 0.38 + random() * 0.42;
+        const hue = kind > 0.985 ? '184,224,255' : kind > 0.95 ? '180,160,255' : '218,239,255';
+        context.fillStyle = `rgba(${hue},${alpha})`;
+        context.beginPath();
+        context.arc(x, y, radius, 0, Math.PI * 2);
+        context.fill();
+      }
+    };
+    mainChat.insertBefore(canvas, mainChat.firstChild);
+    draw();
+    window.addEventListener('resize', draw, { passive: true });
+  }
+
   function installBiggyV6World(mainChat) {
     if (!mainChat) return;
     ragWorldReady = false;
     pendingRagTrace = null;
     clearBiggyV6World(mainChat);
+    installStaticStarfield(mainChat);
 
     const fallback = el('div', 'biggy-v6-world-fallback');
     fallback.dataset.biggyLayer = 'galaxy-fallback';
