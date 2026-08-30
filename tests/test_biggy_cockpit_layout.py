@@ -90,6 +90,8 @@ def test_session_controls_move_to_settings_without_reparenting_native_nodes():
     for source in ("composerWorkspaceChip", "composerModelChip", "composerReasoningChip"):
         assert source in settings
     assert "nativeControl.click()" in settings
+    assert "settingsModelChip" in settings
+    assert "biggySettingsMenu" in settings
     assert "#mainChat.biggy-brand-iwo .composer-ws-wrap" in BRAND_CSS
     assert ".biggy-settings-session-controls" in BRAND_CSS
     assert "width:var(--biggy-bottom-deck-width);margin:0 auto" in BRAND_CSS

@@ -940,7 +940,7 @@
       settings.insertBefore(panel, settings.firstChild);
     }
     const controls = panel.querySelector('.biggy-settings-session-control-row');
-    const makeProxy = (sourceId, proxyId, label) => {
+    const makeProxy = (sourceId, proxyId, label, menuId, nativeId) => {
       const source = document.getElementById(sourceId);
       if (!source || controls.querySelector(`#${proxyId}`)) return;
       const proxy = source.cloneNode(true);
@@ -952,7 +952,8 @@
       proxy.title = label;
       proxy.addEventListener('click', (event) => {
         event.preventDefault();
-        const nativeControl = document.getElementById(sourceId);
+        settings.dataset.biggySettingsMenu = menuId || '';
+        const nativeControl = document.getElementById(nativeId || sourceId);
         if (nativeControl && !nativeControl.disabled) nativeControl.click();
       });
       controls.appendChild(proxy);
@@ -960,9 +961,11 @@
       sync();
       new MutationObserver(sync).observe(source, { attributes: true, childList: true, subtree: true });
     };
-    makeProxy('composerWorkspaceChip', 'biggySettingsWorkspaceProxy', 'Change workspace');
-    makeProxy('composerModelChip', 'biggySettingsModelProxy', 'Change model');
-    makeProxy('composerReasoningChip', 'biggySettingsEffortProxy', 'Change reasoning effort');
+    makeProxy('composerWorkspaceChip', 'biggySettingsWorkspaceProxy', 'Change workspace', 'composerWsDropdown');
+    // Settings has its own native model picker; use it so model choices never
+    // fall back to the hidden composer coordinates.
+    makeProxy('composerModelChip', 'biggySettingsModelProxy', 'Change model', 'settingsModelDropdown', 'settingsModelChip');
+    makeProxy('composerReasoningChip', 'biggySettingsEffortProxy', 'Change reasoning effort', 'composerReasoningDropdown');
     return panel;
   }
 

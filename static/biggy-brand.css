@@ -269,6 +269,26 @@ body.biggy-brand:has(main.main[data-biggy-hermes-panel="todos"]) .layout > .side
 .biggy-settings-session-control-row{display:flex;gap:7px;flex-wrap:wrap}
 .biggy-settings-session-control{display:inline-flex!important;align-items:center;gap:6px;min-height:30px;border:1px solid rgba(78,204,163,.4)!important;border-radius:5px!important;background:rgba(7,27,23,.82)!important;color:#bfe6d4!important;padding:5px 8px!important;cursor:pointer}
 .biggy-settings-session-control:hover{border-color:#62dbff!important;color:#e5fbf2!important}
+/* Settings is a cockpit surface: native actions share the rail button geometry
+   instead of the mixed stock rounded controls. */
+body.biggy-brand main.main[data-biggy-hermes-panel="settings"] #mainSettings button{
+  border:1px solid rgba(78,204,163,.38)!important;border-radius:5px!important;
+  background:rgba(7,27,23,.82)!important;color:#bfe6d4!important;
+  font:700 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace!important;
+  letter-spacing:.035em!important;box-shadow:none!important;
+}
+body.biggy-brand main.main[data-biggy-hermes-panel="settings"] #mainSettings button:hover,
+body.biggy-brand main.main[data-biggy-hermes-panel="settings"] #mainSettings button.active{
+  border-color:#62dbff!important;background:rgba(11,42,36,.9)!important;color:#e5fbf2!important;
+}
+/* Workspace and effort keep their native menus, but when called from Settings
+   they are positioned inside the Settings overlay rather than above the hidden
+   prompt. */
+body.biggy-brand:has(#mainSettings[data-biggy-settings-menu="composerWsDropdown"]) #composerWsDropdown,
+body.biggy-brand:has(#mainSettings[data-biggy-settings-menu="composerReasoningDropdown"]) #composerReasoningDropdown{
+  position:fixed!important;left:calc(50% - 416px)!important;top:165px!important;bottom:auto!important;
+  z-index:110!important;max-height:calc(100vh - 460px)!important;overflow:auto!important;
+}
 .biggy-prompt-inline-controls{
   position:absolute;right:4px;top:auto;bottom:4px;z-index:8;transform:none;
   display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:3px;pointer-events:auto
