@@ -1025,9 +1025,9 @@
       + '<div class="biggy-projects-grid"><section class="biggy-projects-intake"><h2>NEW REVIEW</h2>'
       + '<label>PROJECT NAME<input id="biggyProjectReviewName" type="text" maxlength="128" placeholder="e.g. Auburn MCC modernization" autocomplete="off"></label>'
       + '<label>REVIEW TYPE<select id="biggyProjectReviewType"><option value="internal-design">Internal design review</option><option value="customer-approval">Customer approval</option><option value="engineering-approval">Engineering approval</option><option value="standards-compliance">Standards & compliance</option><option value="claude-migration">Claude review migration</option></select></label>'
-      + '<label>PLANT SPECIFICATION LOCATION<div class="biggy-project-location"><input id="biggyProjectPlantSpecs" type="text" maxlength="512" placeholder="RAG folder, network path, or document identifier"><button type="button" class="biggy-project-location-browse" data-biggy-location-target="biggyProjectPlantSpecs">BROWSE</button></div></label>'
-      + '<label>CODE BOOK / STANDARD LOCATION<div class="biggy-project-location"><input id="biggyProjectCodeBooks" type="text" maxlength="512" placeholder="NEC, NFPA, customer standards, or document identifier"><button type="button" class="biggy-project-location-browse" data-biggy-location-target="biggyProjectCodeBooks">BROWSE</button></div></label>'
-      + '<label>DESIGN PACKAGE LOCATION<div class="biggy-project-location"><input id="biggyProjectDesignPackage" type="text" maxlength="512" placeholder="Drawings, studies, calculations, or document identifier"><button type="button" class="biggy-project-location-browse" data-biggy-location-target="biggyProjectDesignPackage">BROWSE</button></div></label>'
+      + '<label>PLANT SPECIFICATION LOCATION<div class="biggy-project-location"><input id="biggyProjectPlantSpecs" type="text" maxlength="512" placeholder="RAG folder, network path, or document identifier"><button type="button" class="biggy-project-location-browse" data-biggy-location-target="biggyProjectPlantSpecs">BROWSE</button><span class="biggy-project-location-menu" hidden><button type="button" data-biggy-location-pick="folder">FOLDER</button><button type="button" data-biggy-location-pick="file">FILE</button></span></div></label>'
+      + '<label>CODE BOOK / STANDARD LOCATION<div class="biggy-project-location"><input id="biggyProjectCodeBooks" type="text" maxlength="512" placeholder="NEC, NFPA, customer standards, or document identifier"><button type="button" class="biggy-project-location-browse" data-biggy-location-target="biggyProjectCodeBooks">BROWSE</button><span class="biggy-project-location-menu" hidden><button type="button" data-biggy-location-pick="folder">FOLDER</button><button type="button" data-biggy-location-pick="file">FILE</button></span></div></label>'
+      + '<label>DESIGN PACKAGE LOCATION<div class="biggy-project-location"><input id="biggyProjectDesignPackage" type="text" maxlength="512" placeholder="Drawings, studies, calculations, or document identifier"><button type="button" class="biggy-project-location-browse" data-biggy-location-target="biggyProjectDesignPackage">BROWSE</button><span class="biggy-project-location-menu" hidden><button type="button" data-biggy-location-pick="folder">FOLDER</button><button type="button" data-biggy-location-pick="file">FILE</button></span></div></label>'
       + '<label>REVIEW SCOPE<textarea id="biggyProjectReviewScope" rows="3" maxlength="2000" placeholder="Describe the decisions, risks, approvals, and checks Smedley should review."></textarea></label>'
       + '<button id="biggyProjectCreate" class="biggy-fleet-machine is-online" type="button"><span class="biggy-fleet-state"></span><span>CREATE PROJECT REVIEW</span></button><p id="biggyProjectReviewStatus" class="biggy-projects-status" aria-live="polite"></p></section>'
       + '<section class="biggy-projects-library"><div class="biggy-projects-library-header"><h2>REVIEW LIBRARY</h2><button id="biggyProjectRefresh" class="biggy-fleet-machine is-online" type="button"><span class="biggy-fleet-state"></span><span>REFRESH</span></button></div><div id="biggyProjectReviewList" class="biggy-project-review-list"><p>Loading project reviews…</p></div></section></div>'
@@ -1134,17 +1134,23 @@
         }
       }
     };
-    const chooseLocation = async (targetId) => {
+    const chooseLocation = async (targetId, kind) => {
       const input = pane.querySelector(`#${targetId}`);
       if (!input) return;
       // The desktop Chromium picker preserves its native directory tree.  Web
       // security intentionally does not expose absolute host paths, so retain
       // the selected folder or file name as the portable review identifier.
       try {
-        if (window.showDirectoryPicker) {
+        if (kind === 'folder' && window.showDirectoryPicker) {
           const directory = await window.showDirectoryPicker({ mode: 'read' });
           input.value = `Folder: ${directory.name}`;
           setStatus(`Selected folder for ${input.closest('label')?.firstChild?.textContent?.trim() || 'review source'}.`);
+          return;
+        }
+        if (kind === 'file' && window.showOpenFilePicker) {
+          const [file] = await window.showOpenFilePicker({ multiple: false });
+          input.value = `File: ${file.name}`;
+          setStatus(`Selected ${file.name}.`);
           return;
         }
       } catch (error) {
@@ -1152,12 +1158,13 @@
       }
       const picker = document.createElement('input');
       picker.type = 'file';
+      if (kind === 'folder') picker.setAttribute('webkitdirectory', '');
       picker.multiple = false;
       picker.addEventListener('change', () => {
         const file = picker.files?.[0];
         if (!file) return;
-        input.value = `File: ${file.name}`;
-        setStatus(`Selected ${file.name}.`);
+        input.value = kind === 'folder' ? `Folder: ${file.webkitRelativePath.split('/')[0] || file.name}` : `File: ${file.name}`;
+        setStatus(`Selected ${input.value}.`);
       }, { once: true });
       picker.click();
     };
@@ -1177,7 +1184,16 @@
         dialog.querySelector('#biggyProjectDialogSend').disabled = false;
       }
     });
-    pane.querySelectorAll('[data-biggy-location-target]').forEach((button) => button.addEventListener('click', () => chooseLocation(button.dataset.biggyLocationTarget)));
+    pane.querySelectorAll('[data-biggy-location-target]').forEach((button) => button.addEventListener('click', () => {
+      const menu = button.parentElement?.querySelector('.biggy-project-location-menu');
+      if (!menu) return;
+      pane.querySelectorAll('.biggy-project-location-menu').forEach((node) => { if (node !== menu) node.hidden = true; });
+      menu.hidden = !menu.hidden;
+      menu.querySelectorAll('[data-biggy-location-pick]').forEach((choice) => choice.onclick = () => {
+        menu.hidden = true;
+        chooseLocation(button.dataset.biggyLocationTarget, choice.dataset.biggyLocationPick);
+      });
+    }));
     pane.querySelector('#biggyProjectRefresh').addEventListener('click', () => render());
     pane.querySelector('#biggyProjectCreate').addEventListener('click', async () => {
       const name = pane.querySelector('#biggyProjectReviewName').value.trim();
