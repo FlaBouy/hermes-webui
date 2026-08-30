@@ -3195,13 +3195,15 @@
     canvas.setAttribute('aria-hidden', 'true');
     canvas.setAttribute('data-testid', 'biggy-static-starfield');
     // Deterministic pseudo-random points give every viewport one continuous
-    // field rather than a repeating CSS tile.  It is intentionally a static
-    // 2D canvas: zero graph layout, zero WebGL allocation, zero boot animation.
+    // field rather than a repeating CSS tile.  The canvas is enlarged for a
+    // compositor-only drift animation: it carries the live starfield feeling
+    // at boot without loading the RAG graph, its WebGL renderer, or physics.
     const draw = () => {
       if (!canvas.isConnected) return;
       const rect = mainChat.getBoundingClientRect();
-      const width = Math.max(1, Math.round(rect.width));
-      const height = Math.max(1, Math.round(rect.height));
+      const overscan = 1.24;
+      const width = Math.max(1, Math.round(rect.width * overscan));
+      const height = Math.max(1, Math.round(rect.height * overscan));
       const pixelRatio = Math.min(window.devicePixelRatio || 1, 1.5);
       canvas.width = Math.round(width * pixelRatio);
       canvas.height = Math.round(height * pixelRatio);

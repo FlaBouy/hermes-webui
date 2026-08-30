@@ -424,9 +424,12 @@ body.biggy-brand:has(#mainSettings[data-biggy-settings-menu="composerReasoningDr
   pointer-events:auto;
 }
 .biggy-static-starfield{
-  position:absolute;inset:0;width:100%;height:100%;z-index:var(--biggy-layer-galaxy);
-  pointer-events:none;
+  position:absolute;inset:-12%;width:124%;height:124%;z-index:var(--biggy-layer-galaxy);
+  pointer-events:none;transform-origin:50% 50%;will-change:transform;
+  animation:biggy-static-starfield-drift 84s linear infinite;
 }
+@keyframes biggy-static-starfield-drift{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.biggy-static-starfield{animation:none}}
 .biggy-v6-world-fallback{
   position:absolute;inset:0;width:100%;height:100%;z-index:var(--biggy-layer-galaxy);
   display:none;align-items:center;justify-content:center;
