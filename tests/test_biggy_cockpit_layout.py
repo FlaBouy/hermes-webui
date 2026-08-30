@@ -201,6 +201,16 @@ def test_native_hermes_main_views_present_as_centered_cockpit_overlays():
     assert "body.biggy-brand main.main>#mainChat.biggy-brand-iwo" in BRAND_CSS
 
 
+def test_requested_hermes_utility_panes_keep_native_list_and_detail_surfaces():
+    """Cockpit utility overlays must expose the full stock interaction model."""
+    for panel in ("tasks", "skills", "memory", "workspaces", "profiles", "todos"):
+        assert f'[data-biggy-hermes-panel="{panel}"]' in BRAND_CSS
+    assert ".layout > .sidebar > .panel-view.active" in BRAND_CSS
+    assert "node relocation" in BRAND_CSS
+    # ToDos has a native sidebar surface only; it must use the complete overlay.
+    assert '[data-biggy-hermes-panel="todos"]) .layout > .sidebar > .panel-view.active' in BRAND_CSS
+
+
 def test_server_owned_speech_cannot_start_a_second_browser_reader():
     policy = BRAND[BRAND.index("function installSmedleyAudioPolicy"):BRAND.index("function isBiggyInstance")]
     assert "newestAssistant.ptt_owned_tts" in policy

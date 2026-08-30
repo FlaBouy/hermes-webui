@@ -25,6 +25,78 @@ body.biggy-brand main.main>.main-view:not(#mainChat){
   background:rgba(5,10,14,.94);box-shadow:0 16px 42px rgba(0,0,0,.48);
   pointer-events:auto;
 }
+/* Hermes utility sections are natively split into a sidebar list and a detail
+   view.  The cockpit keeps both original surfaces alive and lays them out as
+   one centered two-pane overlay.  This is deliberately CSS positioning, not
+   node relocation: list actions, lazy loaders, and detail editors retain their
+   stock event ownership. */
+body.biggy-brand:has(main.main:is(
+  [data-biggy-hermes-panel="tasks"],
+  [data-biggy-hermes-panel="skills"],
+  [data-biggy-hermes-panel="memory"],
+  [data-biggy-hermes-panel="workspaces"],
+  [data-biggy-hermes-panel="profiles"],
+  [data-biggy-hermes-panel="todos"]
+)) .layout > .sidebar{
+  position:absolute!important;left:50%!important;top:88px!important;bottom:268px!important;
+  width:min(856px,calc(100% - 48px))!important;height:auto!important;min-height:0!important;
+  transform:translateX(-50%)!important;clip-path:none!important;opacity:1!important;
+  overflow:visible!important;pointer-events:none!important;z-index:82!important;
+  background:transparent!important;border:0!important;box-shadow:none!important;
+}
+body.biggy-brand:has(main.main:is(
+  [data-biggy-hermes-panel="tasks"],
+  [data-biggy-hermes-panel="skills"],
+  [data-biggy-hermes-panel="memory"],
+  [data-biggy-hermes-panel="workspaces"],
+  [data-biggy-hermes-panel="profiles"],
+  [data-biggy-hermes-panel="todos"]
+)) .layout > .sidebar > .sidebar-nav,
+body.biggy-brand:has(main.main:is(
+  [data-biggy-hermes-panel="tasks"],
+  [data-biggy-hermes-panel="skills"],
+  [data-biggy-hermes-panel="memory"],
+  [data-biggy-hermes-panel="workspaces"],
+  [data-biggy-hermes-panel="profiles"],
+  [data-biggy-hermes-panel="todos"]
+)) .layout > .sidebar > .mobile-sidebar-close{display:none!important}
+body.biggy-brand:has(main.main:is(
+  [data-biggy-hermes-panel="tasks"],
+  [data-biggy-hermes-panel="skills"],
+  [data-biggy-hermes-panel="memory"],
+  [data-biggy-hermes-panel="workspaces"],
+  [data-biggy-hermes-panel="profiles"],
+  [data-biggy-hermes-panel="todos"]
+)) .layout > .sidebar > .panel-view{display:none!important}
+body.biggy-brand:has(main.main:is(
+  [data-biggy-hermes-panel="tasks"],
+  [data-biggy-hermes-panel="skills"],
+  [data-biggy-hermes-panel="memory"],
+  [data-biggy-hermes-panel="workspaces"],
+  [data-biggy-hermes-panel="profiles"]
+)) .layout > .sidebar > .panel-view.active{
+  display:flex!important;position:absolute!important;inset:0 auto 0 0!important;
+  width:300px!important;box-sizing:border-box;overflow:hidden!important;
+  border:1px solid rgba(78,204,163,.25)!important;border-radius:8px 0 0 8px!important;
+  background:rgba(5,10,14,.94)!important;box-shadow:0 16px 42px rgba(0,0,0,.48)!important;
+  pointer-events:auto!important;
+}
+body.biggy-brand main.main:is(
+  [data-biggy-hermes-panel="tasks"],
+  [data-biggy-hermes-panel="skills"],
+  [data-biggy-hermes-panel="memory"],
+  [data-biggy-hermes-panel="workspaces"],
+  [data-biggy-hermes-panel="profiles"]
+) > .main-view:not(#mainChat){
+  left:calc(50% + 150px);width:min(556px,calc(100% - 348px));
+  border-radius:0 8px 8px 0;
+}
+body.biggy-brand:has(main.main[data-biggy-hermes-panel="todos"]) .layout > .sidebar > .panel-view.active{
+  display:flex!important;position:absolute!important;inset:0!important;width:100%!important;
+  box-sizing:border-box;overflow:hidden!important;border:1px solid rgba(78,204,163,.25)!important;
+  border-radius:8px!important;background:rgba(5,10,14,.94)!important;
+  box-shadow:0 16px 42px rgba(0,0,0,.48)!important;pointer-events:auto!important;
+}
 
 .biggy-brand-header{
   position:relative;z-index:var(--biggy-layer-workspace, 6);overflow:visible;
@@ -267,6 +339,28 @@ body.biggy-brand main.main>.main-view:not(#mainChat){
   #mainChat.biggy-brand-iwo .composer-wrap{padding-left:12px;padding-right:12px}
   #mainChat.biggy-brand-iwo .biggy-prompt-deck{width:var(--biggy-bottom-deck-width)}
   body.biggy-brand main.main>.main-view:not(#mainChat){left:12px;right:12px;top:72px;bottom:248px;width:auto;transform:none}
+  body.biggy-brand:has(main.main:is(
+    [data-biggy-hermes-panel="tasks"],
+    [data-biggy-hermes-panel="skills"],
+    [data-biggy-hermes-panel="memory"],
+    [data-biggy-hermes-panel="workspaces"],
+    [data-biggy-hermes-panel="profiles"],
+    [data-biggy-hermes-panel="todos"]
+  )) .layout > .sidebar{left:12px!important;right:12px!important;top:72px!important;bottom:248px!important;width:auto!important;transform:none!important}
+  body.biggy-brand:has(main.main:is(
+    [data-biggy-hermes-panel="tasks"],
+    [data-biggy-hermes-panel="skills"],
+    [data-biggy-hermes-panel="memory"],
+    [data-biggy-hermes-panel="workspaces"],
+    [data-biggy-hermes-panel="profiles"]
+  )) .layout > .sidebar > .panel-view.active{width:38%!important;border-radius:8px 0 0 8px!important}
+  body.biggy-brand main.main:is(
+    [data-biggy-hermes-panel="tasks"],
+    [data-biggy-hermes-panel="skills"],
+    [data-biggy-hermes-panel="memory"],
+    [data-biggy-hermes-panel="workspaces"],
+    [data-biggy-hermes-panel="profiles"]
+  ) > .main-view:not(#mainChat){left:calc(12px + 38%);right:12px;top:72px;bottom:248px;width:auto;transform:none;border-radius:0 8px 8px 0}
 }
 
 /* A.R.G.U.S. 3D graph/galaxy — occupies the full center canvas behind the
