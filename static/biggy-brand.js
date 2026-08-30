@@ -569,20 +569,49 @@
 
   function installPromptInlineControls() {
     const box = document.getElementById('composerBox');
-    const voice = document.getElementById('btnGptVoice');
-    const send = document.getElementById('btnSend');
     if (!box) return null;
-    let controls = document.getElementById('biggyPromptInlineControls');
-    if (!controls) {
-      controls = el('div', 'biggy-prompt-inline-controls');
-      controls.id = 'biggyPromptInlineControls';
-      controls.setAttribute('aria-label', 'Prompt voice and send controls');
-      controls.setAttribute('data-testid', 'biggy-prompt-inline-controls');
-      box.appendChild(controls);
-    }
-    if (voice && voice.parentElement !== controls) controls.appendChild(voice);
-    if (send && send.parentElement !== controls) controls.appendChild(send);
-    return controls;
+    const makeHost = (id, className, label) => {
+      let host = document.getElementById(id);
+      if (!host) {
+        host = el('div', className);
+        host.id = id;
+        host.setAttribute('aria-label', label);
+        host.setAttribute('data-testid', id);
+        box.appendChild(host);
+      }
+      return host;
+    };
+    const left = makeHost('biggyPromptInlineLeft', 'biggy-prompt-inline-left', 'Prompt controls');
+    const right = makeHost('biggyPromptInlineControls', 'biggy-prompt-inline-controls', 'Prompt voice and send controls');
+    const makeProxy = (sourceId, proxyId, host, label) => {
+      const source = document.getElementById(sourceId);
+      if (!source || host.querySelector(`#${proxyId}`)) return;
+      const proxy = source.cloneNode(true);
+      proxy.id = proxyId;
+      proxy.removeAttribute('style');
+      proxy.removeAttribute('onclick');
+      proxy.setAttribute('aria-label', label || source.getAttribute('aria-label') || source.title || sourceId);
+      proxy.dataset.biggyNativeControl = sourceId;
+      proxy.addEventListener('click', (event) => {
+        event.preventDefault();
+        const nativeControl = document.getElementById(sourceId);
+        if (nativeControl && !nativeControl.disabled) nativeControl.click();
+      });
+      host.appendChild(proxy);
+      const sync = () => {
+        proxy.disabled = !!source.disabled;
+        proxy.setAttribute('aria-pressed', source.getAttribute('aria-pressed') || 'false');
+        proxy.classList.toggle('is-active', source.getAttribute('aria-pressed') === 'true');
+      };
+      sync();
+      new MutationObserver(sync).observe(source, { attributes: true, attributeFilter: ['disabled', 'aria-pressed', 'class', 'style'] });
+    };
+    makeProxy('btnAttach', 'biggyPromptAttachProxy', left, 'Attach files');
+    makeProxy('btnSavedPrompts', 'biggyPromptSavedPromptsProxy', left, 'Saved prompts');
+    makeProxy('btnMic', 'biggyPromptDictateProxy', left, 'Dictate');
+    makeProxy('btnGptVoice', 'biggyPromptVoiceProxy', right, 'Biggy Voice');
+    makeProxy('btnSend', 'biggyPromptSendProxy', right, 'Send message');
+    return { left, right };
   }
 
   const FLEET_STATUS_PATH = '/api/biggy/fleet/status';

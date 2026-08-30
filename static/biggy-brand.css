@@ -177,7 +177,7 @@ body.biggy-brand main.main>.main-view:not(#mainChat){
   border-color:rgba(78,204,163,.25);box-shadow:0 8px 24px rgba(0,0,0,.24)
 }
 #mainChat.biggy-brand-iwo #composerBox textarea#msg{
-  box-sizing:border-box;min-height:34px;height:36px;max-height:92px;padding:7px 78px 7px 14px;line-height:1.35
+  box-sizing:border-box;min-height:34px;height:36px;max-height:92px;padding:7px 82px 7px 90px;line-height:1.35
 }
 #mainChat.biggy-brand-iwo #composerBox,
 #mainChat.biggy-brand-iwo .composer-flyout,
@@ -187,11 +187,23 @@ body.biggy-brand main.main>.main-view:not(#mainChat){
   position:absolute;right:4px;top:auto;bottom:4px;z-index:8;transform:none;
   display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:3px;pointer-events:auto
 }
-.biggy-prompt-inline-controls #btnGptVoice,
-.biggy-prompt-inline-controls #btnSend{
+.biggy-prompt-inline-left{
+  position:absolute;left:4px;top:auto;bottom:4px;z-index:8;
+  display:flex;flex-direction:row;flex-wrap:nowrap;align-items:center;gap:3px;pointer-events:auto
+}
+.biggy-prompt-inline-controls button,
+.biggy-prompt-inline-left button{
   box-sizing:border-box;width:28px;height:28px;min-width:28px;min-height:28px;
   margin:0;padding:5px;border-radius:5px
 }
+/* Hermes keeps the original elements and event ownership. The cockpit copies
+   relay direct clicks to those originals, so renderer refreshes cannot strand
+   an interactive control in a detached custom container. */
+#mainChat.biggy-brand-iwo .composer-footer #btnAttach,
+#mainChat.biggy-brand-iwo .composer-footer #btnSavedPrompts,
+#mainChat.biggy-brand-iwo .composer-footer #btnMic,
+#mainChat.biggy-brand-iwo .composer-footer #btnGptVoice,
+#mainChat.biggy-brand-iwo .composer-footer #btnSend{display:none!important}
 .biggy-composer-controls{display:flex;align-items:center;gap:7px;flex:0 0 auto;margin-left:6px;pointer-events:auto}
 .biggy-top-rail-group{
   position:absolute;left:50%;top:20px;z-index:118;transform:translateX(-50%);

@@ -89,8 +89,10 @@ def test_prompt_and_pa_deck_use_the_rendered_main_chat_width_on_every_monitor():
 
 def test_send_and_biggy_voice_return_to_half_height_prompt():
     assert "function installPromptInlineControls()" in BRAND
-    assert "controls.appendChild(voice)" in BRAND
-    assert "controls.appendChild(send)" in BRAND
+    assert "makeProxy('btnGptVoice', 'biggyPromptVoiceProxy'" in BRAND
+    assert "makeProxy('btnSend', 'biggyPromptSendProxy'" in BRAND
+    assert "controls.appendChild(voice)" not in BRAND
+    assert "controls.appendChild(send)" not in BRAND
     assert "installPromptInlineControls();" in BRAND
     assert ".biggy-prompt-inline-controls{" in BRAND_CSS
     assert "flex-direction:row;flex-wrap:nowrap" in BRAND_CSS
@@ -98,8 +100,16 @@ def test_send_and_biggy_voice_return_to_half_height_prompt():
     assert "width:28px;height:28px" in BRAND_CSS
 
 
+def test_prompt_controls_are_native_click_proxies_not_reparented_nodes():
+    prompt = BRAND[BRAND.index("function installPromptInlineControls()"):BRAND.index("const FLEET_STATUS_PATH")]
+    assert "nativeControl.click()" in prompt
+    assert "source.cloneNode(true)" in prompt
+    assert "controls.appendChild(voice)" not in prompt
+    assert "#mainChat.biggy-brand-iwo .composer-footer #btnGptVoice" in BRAND_CSS
+
+
 def test_expanded_biggy_voice_keeps_inline_actions_in_the_prompt_row():
-    controls = BRAND_CSS[BRAND_CSS.index(".biggy-prompt-inline-controls{"):BRAND_CSS.index(".biggy-prompt-inline-controls #btnGptVoice")]
+    controls = BRAND_CSS[BRAND_CSS.index(".biggy-prompt-inline-controls{"):BRAND_CSS.index(".biggy-prompt-inline-left{")]
     assert "top:auto;bottom:4px" in controls
     assert "transform:none" in controls
     assert "top:50%" not in controls
