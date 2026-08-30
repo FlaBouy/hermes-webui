@@ -6,7 +6,11 @@ body.biggy-brand > .app-titlebar{display:none!important}
    space away from the galaxy. */
 body.biggy-brand .layout > .rail,
 body.biggy-brand .layout > .sidebar,
-body.biggy-brand .app-titlebar-hamburger{display:none!important}
+body.biggy-brand .app-titlebar-hamburger{
+  position:absolute!important;width:1px!important;height:1px!important;
+  overflow:hidden!important;clip-path:inset(50%)!important;opacity:0!important;
+  pointer-events:none!important
+}
 body.biggy-brand .layout{position:relative;width:100vw;height:100vh;overflow:hidden}
 body.biggy-brand main.main{width:100%;height:100%;background:transparent}
 
@@ -142,7 +146,7 @@ body.biggy-brand main.main{width:100%;height:100%;background:transparent}
    Reserve its 48px width plus breathing room only inside the composer: Hermes
    still owns dynamic layout changes when either real sidebar opens/closes. */
 #mainChat.biggy-brand-iwo .composer-wrap{
-  background:transparent;padding:10px 84px 52px;pointer-events:none
+  background:transparent;padding:10px 84px 52px;pointer-events:auto
 }
 #mainChat.biggy-brand-iwo .composer-wrap::before{display:none}
 #mainChat.biggy-brand-iwo #composerBox{width:50%;max-width:900px;margin-left:auto;margin-right:auto}
@@ -175,22 +179,6 @@ body.biggy-brand main.main{width:100%;height:100%;background:transparent}
 .biggy-hermes-strip .biggy-fleet-machine.active{
   color:#f0c14b;border-color:rgba(240,193,75,.55);background:rgba(42,31,7,.92)
 }
-.biggy-hermes-todos-host{
-  position:absolute;left:24px;bottom:150px;z-index:var(--biggy-layer-workspace,6);
-  width:min(440px,calc(100% - 48px));max-height:min(62vh,640px);overflow:auto;
-  border:1px solid rgba(98,219,255,.34);border-radius:8px;
-  background:rgba(5,10,16,.94);box-shadow:0 18px 42px rgba(0,0,0,.48);
-  pointer-events:auto
-}
-.biggy-hermes-todos-host[hidden]{display:none!important}
-.biggy-hermes-todos-host>header{
-  position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;
-  padding:9px 12px;border-bottom:1px solid rgba(98,219,255,.24);
-  background:rgba(5,10,16,.97);color:#8fdfff;
-  font:800 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em
-}
-.biggy-hermes-todos-host>header button{border:0;background:transparent;color:#9fb0bc;font-size:20px;cursor:pointer}
-.biggy-hermes-todos-host>#panelTodos{display:block;min-height:280px}
 .biggy-fleet-strip-label{
   color:#6f8794;font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
   letter-spacing:.14em;padding:0 4px 0 2px;

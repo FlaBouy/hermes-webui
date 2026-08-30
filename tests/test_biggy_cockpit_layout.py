@@ -90,6 +90,15 @@ def test_hermes_controls_replace_left_navigation_beneath_prompt():
         assert f"['{panel}'," in BRAND
 
 
+def test_cockpit_rail_keeps_native_hermes_panels_and_composer_interactive():
+    """Cockpit launchers must not take ownership of Hermes-rendered nodes."""
+    rail = BRAND[BRAND.index("function installHermesStrip(mainChat)"):BRAND.index("function ensureArgusConversationLane")]
+    assert "window.switchPanel(panel)" in rail
+    assert "appendChild(todos)" not in rail
+    composer_rule = BRAND_CSS[BRAND_CSS.index("#mainChat.biggy-brand-iwo .composer-wrap{"):BRAND_CSS.index("#mainChat.biggy-brand-iwo .composer-wrap::before")]
+    assert "pointer-events:auto" in composer_rule
+
+
 def test_server_owned_speech_cannot_start_a_second_browser_reader():
     policy = BRAND[BRAND.index("function installSmedleyAudioPolicy"):BRAND.index("function isBiggyInstance")]
     assert "newestAssistant.ptt_owned_tts" in policy

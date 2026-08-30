@@ -806,25 +806,6 @@
     return strip;
   }
 
-  function installHermesTodosHost(mainChat) {
-    const todos = document.getElementById('panelTodos');
-    if (!mainChat || !todos) return null;
-    let host = mainChat.querySelector('#biggyHermesTodosHost');
-    if (!host) {
-      host = el('section', 'biggy-hermes-todos-host');
-      host.id = 'biggyHermesTodosHost';
-      host.hidden = true;
-      host.innerHTML = '<header><span>HERMES // TODOS</span><button type="button" aria-label="Close todos">&times;</button></header>';
-      host.querySelector('button').addEventListener('click', () => {
-        host.hidden = true;
-        if (typeof window.switchPanel === 'function') window.switchPanel('chat');
-      });
-      mainChat.appendChild(host);
-    }
-    if (todos.parentElement !== host) host.appendChild(todos);
-    return host;
-  }
-
   function installHermesStrip(mainChat) {
     const composer = document.getElementById('composerWrap');
     const layout = document.querySelector('.layout');
@@ -835,7 +816,6 @@
     strip.setAttribute('aria-label', 'Hermes interface controls');
     strip.setAttribute('data-testid', 'biggy-hermes-strip');
     strip.innerHTML = '<span class="biggy-fleet-strip-label">HERMES</span>';
-    const todosHost = installHermesTodosHost(mainChat);
     HERMES_RAIL_PANELS.forEach(([panel, label]) => {
       const button = el('button', 'biggy-fleet-machine biggy-hermes-panel is-online');
       button.type = 'button';
@@ -844,7 +824,8 @@
       button.innerHTML = `<span class="biggy-fleet-state" aria-hidden="true"></span><span>${label}</span>`;
       button.addEventListener('click', async (event) => {
         event.preventDefault();
-        if (todosHost) todosHost.hidden = panel !== 'todos';
+        // The native panel stays where Hermes owns it.  Moving panel nodes
+        // breaks the app's renderer and leaves later rail clicks inert.
         if (typeof window.switchPanel === 'function') await window.switchPanel(panel);
       });
       strip.appendChild(button);
