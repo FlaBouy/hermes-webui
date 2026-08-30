@@ -193,8 +193,8 @@ def test_pa_button_owns_closed_by_default_right_rail():
 
 
 def test_rag_overview_clears_top_rails_on_desktop_and_tablet():
-    assert "left:24px;top:76px" in BRAND_CSS
-    assert ".biggy-argus-rag-overview{left:12px;top:64px" in BRAND_CSS
+    assert "left:24px;top:66px" in BRAND_CSS
+    assert ".biggy-argus-rag-overview{left:12px;top:56px" in BRAND_CSS
 
 
 def test_rag_overview_preserves_radar_and_adds_four_level_ingest_controls():
