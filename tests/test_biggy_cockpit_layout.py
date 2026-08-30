@@ -290,6 +290,11 @@ def test_galaxy_canvas_remains_full_screen_while_home_camera_controls_framing():
 def test_rag_reveal_restores_home_camera_and_boot_does_not_restore_stale_cards():
     assert "{ type: 'biggy-rag-home' }" in BRAND
     assert "data.type === 'biggy-rag-home'" in ARGUS_WORLD
+    assert "biggy-rag-home-applied" in BRAND
+    assert "parent.postMessage({ type: 'biggy-rag-home-applied'" in ARGUS_WORLD
+    assert "iframe.dataset.ragStage = '1'" in BRAND
+    assert '.biggy-v6-world[data-rag-stage="1"]{opacity:0!important}' in BRAND_CSS
+    assert "frame.removeAttribute('data-rag-stage')" in BRAND
     assert "primeOnly = false" in BRAND
     assert "if (primeOnly) return false" in BRAND
     assert "force: true, primeOnly: true" in BRAND

@@ -796,7 +796,13 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     }
     if (data.type === 'biggy-galaxy-filter-focus') applyDirectoryFilter(data.path);
     if (data.type === 'biggy-rag-visibility') setRagGalaxyVisible(data.visible);
-    if (data.type === 'biggy-rag-home') resetLandingCamera();
+    if (data.type === 'biggy-rag-home') {
+      // The parent keeps a freshly mounted world transparent until this
+      // acknowledgement.  That makes the first visible RAG frame identical
+      // to the HOME reset instead of exposing V6's interim wide camera.
+      const applied = resetLandingCamera();
+      parent.postMessage({ type: 'biggy-rag-home-applied', applied }, location.origin);
+    }
     if (data.type === 'biggy-argus-state') setArgusActivityState(data.state);
     if (data.type === 'biggy-home-centerline-sync') applyHomeViewOffset(graph());
     if (data.type === 'biggy-world-pause') {

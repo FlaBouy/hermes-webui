@@ -423,6 +423,7 @@ body.biggy-brand:has(#mainSettings[data-biggy-settings-menu="composerReasoningDr
   border:0;z-index:var(--biggy-layer-galaxy);background:#04050a;
   pointer-events:auto;
 }
+.biggy-v6-world[data-rag-stage="1"]{opacity:0!important}
 .biggy-static-starfield{
   position:absolute;inset:-12%;width:124%;height:124%;z-index:var(--biggy-layer-galaxy);
   pointer-events:none;transform-origin:50% 50%;will-change:transform;

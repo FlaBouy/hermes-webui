@@ -2417,6 +2417,18 @@
         const frame = document.getElementById('biggyV6World');
         if (data.type === 'biggy-rag-world-ready') {
           ragWorldReady = true;
+          if (frame && frame.contentWindow) {
+            try {
+              const visible = frame.dataset.ragVisible === '1';
+              frame.contentWindow.postMessage(
+                { type: 'biggy-rag-visibility', visible },
+                window.location.origin,
+              );
+              if (visible && frame.dataset.ragHomePending === '1') {
+                frame.contentWindow.postMessage({ type: 'biggy-rag-home' }, window.location.origin);
+              }
+            } catch (_) {}
+          }
           if (pendingRagTrace && frame && frame.contentWindow) {
             const trace = pendingRagTrace;
             pendingRagTrace = null;
@@ -2425,6 +2437,13 @@
               window.location.origin,
             );
           }
+          return;
+        }
+        if (data.type === 'biggy-rag-home-applied' && frame) {
+          // The fresh iframe stays invisible over the boot starfield until
+          // its camera is at the exact same HOME baseline as the cockpit.
+          frame.removeAttribute('data-rag-stage');
+          delete frame.dataset.ragHomePending;
           return;
         }
         if (data.type === 'biggy-rag-trace-applied' && frame) {
@@ -2504,14 +2523,15 @@
     if (frame) {
       const wasVisible = frame.dataset.ragVisible === '1';
       frame.dataset.ragVisible = next ? '1' : '0';
+      if (next && !wasVisible) frame.dataset.ragHomePending = '1';
       try {
-        if (frame.contentWindow) frame.contentWindow.postMessage(
+        if (frame.contentWindow && ragWorldReady) frame.contentWindow.postMessage(
           { type: 'biggy-rag-visibility', visible: next },
           window.location.origin,
         );
         // A deliberate RAG reveal always begins from the complete HOME view.
         // Filters and evidence traces may move the camera after this baseline.
-        if (next && !wasVisible) frame.contentWindow.postMessage(
+        if (next && !wasVisible && ragWorldReady) frame.contentWindow.postMessage(
           { type: 'biggy-rag-home' },
           window.location.origin,
         );
@@ -3257,6 +3277,10 @@
     const iframe = el('iframe', 'biggy-v6-world');
     iframe.dataset.biggyLayer = 'galaxy';
     iframe.id = 'biggyV6World';
+    // Keep the newly mounted WebGL world behind the animated boot field until
+    // it confirms the exact HOME camera.  This prevents the native wide/close
+    // first frame from flashing before the RAG panel settles.
+    iframe.dataset.ragStage = '1';
     iframe.setAttribute('data-testid', 'biggy-v6-world');
     iframe.setAttribute('title', 'A.R.G.U.S. \u2014 3D memory graph');
     iframe.setAttribute('referrerpolicy', 'no-referrer');
