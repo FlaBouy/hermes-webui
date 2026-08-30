@@ -76,6 +76,8 @@ def test_starfield_is_shell_owned_when_rag_graph_is_not_loaded():
     assert "repeating CSS tile" in starfield
     assert "zero WebGL allocation" in starfield
     assert ".biggy-static-starfield{" in BRAND_CSS
+    shell = BRAND[BRAND.index("function applyShell()"):BRAND.index("async function tryStart()")]
+    assert "clearBiggyV6World(mainChat);\n    installStaticStarfield(mainChat);" in shell
 
 
 def test_prompt_and_pa_deck_match_bottom_rail_without_overlap():

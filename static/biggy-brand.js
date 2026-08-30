@@ -6199,6 +6199,7 @@
     // path that instantiates the graph, so a closed RAG state cannot flash a
     // spinning Galaxy or consume the tablet's WebGL budget during boot.
     clearBiggyV6World(mainChat);
+    installStaticStarfield(mainChat);
     ensureArgusRagOverview(mainChat);
     const header = makeHeader();
     mainChat.insertBefore(header, mainChat.firstChild);
