@@ -14211,6 +14211,10 @@ def handle_get(handler, parsed) -> bool:
         return _handle_memory_read(handler, parsed)
 
     # ── Profile API (GET) ──
+    if parsed.path == "/api/biggy/worker-profiles":
+        from api import profiles as profiles_api
+        return j(handler, {"workers": profiles_api.list_worker_profiles_api()})
+
     if parsed.path == "/api/profiles":
         from api import profiles as profiles_api
         diag = RequestDiagnostics.maybe_start("GET", parsed.path, logger=logger, print_fn=getattr(handler, '_safe_webui_print', None))

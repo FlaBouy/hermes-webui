@@ -2022,7 +2022,7 @@ def _build_profile_rows_fast() -> list | None:
         # the directory is literally ".hermes" — match that exactly.
         rows.append(_row(default_home, 'default', True))
 
-    profiles_root = _get_profiles_root()
+    profiles_root = _profiles_root()
     if profiles_root.is_dir():
         for entry in sorted(profiles_root.iterdir()):
             if not entry.is_dir():
@@ -2151,6 +2151,52 @@ def list_profiles_api() -> list:
 
     active = get_active_profile_name()
     return [{**p, 'is_active': p['name'] == active} for p in rows]
+
+
+def list_worker_profiles_api() -> list[dict]:
+    """Return the read-only Hermes worker roster for an isolated Biggy glass.
+
+    Biggy deliberately runs as one isolated profile, so the normal profiles
+    endpoint must not expose profile switching or cross-profile writes.  The
+    operator still needs to see the locally configured worker pool.  A worker
+    is identified from its own profile-scoped role skill (``<name>-*``), not a
+    duplicated hard-coded roster.  Only safe display metadata is returned.
+    """
+    rows: list[dict] = []
+    profiles_root = _profiles_root()
+    if not profiles_root.is_dir():
+        return rows
+    for profile_dir in sorted(profiles_root.iterdir()):
+        name = profile_dir.name
+        if not profile_dir.is_dir() or name in {"biggy", "smedley"}:
+            continue
+        if not _PROFILE_ID_RE.fullmatch(name):
+            continue
+        try:
+            skill_names = sorted(
+                item.name for item in (profile_dir / "skills").iterdir()
+                if item.is_dir() and not item.name.startswith(".")
+            )
+        except OSError:
+            continue
+        role_skills = [skill for skill in skill_names if skill.startswith(f"{name}-")]
+        if not role_skills:
+            continue
+        try:
+            config = yaml.safe_load((profile_dir / "config.yaml").read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            config = {}
+        model = config.get("model") if isinstance(config, dict) else {}
+        model = model if isinstance(model, dict) else {}
+        rows.append({
+            "name": name,
+            "model": str(model.get("default") or ""),
+            "provider": str(model.get("provider") or ""),
+            "skills": role_skills,
+            "skill_count": len(skill_names),
+            "read_only": True,
+        })
+    return rows
 
 
 def _profile_visible_from_meta(profile_path: Path) -> bool:

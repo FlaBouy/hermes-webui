@@ -253,6 +253,16 @@ def test_hermes_controls_replace_left_navigation_beneath_prompt():
         assert f"['{panel}'," in BRAND
 
 
+def test_profiles_overlay_includes_the_read_only_hermes_worker_roster():
+    strip = BRAND[BRAND.index("function installHermesStrip"):BRAND.index("function installSettingsSessionControls")]
+    assert "if (next === 'profiles') await renderBiggyWorkerRoster()" in strip
+    roster = BRAND[BRAND.index("async function renderBiggyWorkerRoster"):BRAND.index("function ensureBiggyToolsRail")]
+    assert "'/api/biggy/worker-profiles'" in roster
+    assert "HERMES WORKERS" in roster
+    assert "native Biggy profile remains available" in roster
+    assert ".biggy-worker-roster{" in BRAND_CSS
+
+
 def test_cockpit_rail_keeps_native_hermes_panels_and_composer_interactive():
     """Cockpit launchers must not take ownership of Hermes-rendered nodes."""
     rail = BRAND[BRAND.index("function installHermesStrip(mainChat)"):BRAND.index("function ensureArgusConversationLane")]
