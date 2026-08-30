@@ -2362,6 +2362,13 @@
     const overview = ensureArgusRagOverview(host);
     const control = button || document.getElementById('biggyCockpitRag');
     const next = visible !== false;
+    // The graph is intentionally not part of the boot path.  Constructing the
+    // iframe starts the WebGL module and lays out the full corpus, which was
+    // both a visible one-frame Galaxy flash and needless startup work when RAG
+    // was closed.  Launch it only on an explicit RAG reveal.
+    if (next && host && !document.getElementById('biggyV6World')) {
+      installBiggyV6World(host);
+    }
     if (overview) overview.hidden = !next;
     if (host) host.classList.toggle('biggy-rag-panel-off', !next);
     if (control) {
@@ -3057,12 +3064,17 @@
     }
   }
 
+  function clearBiggyV6World(mainChat) {
+    if (!mainChat) return;
+    mainChat.querySelectorAll('.biggy-v6-world, .biggy-v6-world-fallback')
+      .forEach((node) => node.remove());
+  }
+
   function installBiggyV6World(mainChat) {
     if (!mainChat) return;
     ragWorldReady = false;
     pendingRagTrace = null;
-    mainChat.querySelectorAll('.biggy-v6-world, .biggy-v6-world-fallback')
-      .forEach((node) => node.remove());
+    clearBiggyV6World(mainChat);
 
     const fallback = el('div', 'biggy-v6-world-fallback');
     fallback.dataset.biggyLayer = 'galaxy-fallback';
@@ -6137,7 +6149,10 @@
     }
     conversationLaneRenderQueued = false;
     pttInstalled = false;
-    installBiggyV6World(mainChat);
+    // Keep first paint to the starfield.  The RAG control is the only code
+    // path that instantiates the graph, so a closed RAG state cannot flash a
+    // spinning Galaxy or consume the tablet's WebGL budget during boot.
+    clearBiggyV6World(mainChat);
     ensureArgusRagOverview(mainChat);
     const header = makeHeader();
     mainChat.insertBefore(header, mainChat.firstChild);

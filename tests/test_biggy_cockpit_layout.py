@@ -60,7 +60,12 @@ def test_rag_button_toggles_panel_without_reinstalling_conversation_stack():
     assert ".biggy-argus-rag-overview[hidden]{display:none}" in BRAND_CSS
     assert "setArgusRagPanelVisible(false, rag, false)" in cockpit
     assert "biggy-rag-visibility" in BRAND
+    visibility = BRAND[BRAND.index("function setArgusRagPanelVisible"):BRAND.index("function installArgusConversationLane")]
+    assert "if (next && host && !document.getElementById('biggyV6World'))" in visibility
+    assert "installBiggyV6World(host)" in visibility
     shell = BRAND[BRAND.index("function applyShell()"):BRAND.index("async function tryStart()")]
+    assert "clearBiggyV6World(mainChat)" in shell
+    assert "installBiggyV6World(mainChat)" not in shell
     assert "installArgusConversationLane(mainChat)" not in shell
     assert ".biggy-argus-conversation-lane" not in BRAND_CSS
 
