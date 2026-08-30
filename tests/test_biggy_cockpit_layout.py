@@ -100,6 +100,27 @@ def test_tools_rail_reuses_the_smedley_engineering_runtime():
     assert "inset:72px 0 400px;align-items:flex-start;padding:16px" in BRAND_CSS
 
 
+def test_smedley_project_reviews_use_native_projects_rag_ingest_and_kanban_dispatch():
+    tools = BRAND[BRAND.index("function ensureBiggyProjectsPane"):BRAND.index("function installSettingsSessionControls")]
+    assert "PROJECT REVIEWS" in tools
+    assert "SMEDLEY // PROJECT REVIEWS" in tools
+    assert "PLANT SPECIFICATION LOCATION" in tools
+    assert "CODE BOOK / STANDARD LOCATION" in tools
+    assert "DESIGN PACKAGE LOCATION" in tools
+    assert "data-biggy-location-target" in tools
+    assert "claude-migration" in tools
+    assert "'/api/biggy/projects/reviews'" in tools
+    assert "'/library-folders'" in tools
+    assert "/ingest-upload?folder=" in tools
+    assert "assignee: 'smedley'" in tools
+    assert "'/api/kanban/tasks'" in tools
+    assert "OPEN SMEDLEY DIALOG" in tools
+    assert "'/api/biggy/projects/reviews/dialog'" in tools
+    assert ".biggy-projects-pane{" in BRAND_CSS
+    assert "height:min(540px,calc(100vh - 430px))" in BRAND_CSS
+    assert ".biggy-project-dialog{" in BRAND_CSS
+
+
 def test_session_controls_move_to_settings_without_reparenting_native_nodes():
     settings = BRAND[BRAND.index("function installSettingsSessionControls"):BRAND.index("function installPaRailToggle")]
     for source in ("composerWorkspaceChip", "composerModelChip", "composerReasoningChip"):

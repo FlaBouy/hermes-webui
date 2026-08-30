@@ -13796,6 +13796,41 @@ def handle_get(handler, parsed) -> bool:
             "other_profile_count": other_profile_count,
         })
 
+    if parsed.path == "/api/biggy/projects/reviews":
+        # Biggy is the fleet coordinator. Project-review records remain normal
+        # Hermes projects, with review metadata attached for the Smedley review
+        # workspace; this avoids a second project database.
+        projects = [
+            project for project in load_projects()
+            if _profiles_match(project.get("profile"), "biggy")
+            and isinstance(project.get("review"), dict)
+            and str(project.get("review", {}).get("review_owner") or "") == "smedley"
+        ]
+        projects.sort(key=lambda project: float(project.get("created_at") or 0), reverse=True)
+        return j(handler, {"projects": projects, "review_owner": "smedley"})
+
+    if parsed.path == "/api/biggy/projects/reviews/dialog":
+        project_id = str((parse_qs(parsed.query).get("project_id") or [""])[0]).strip()
+        project = next((item for item in load_projects()
+                        if str(item.get("project_id") or "") == project_id
+                        and _profiles_match(item.get("profile"), "biggy")
+                        and str((item.get("review") or {}).get("review_owner") or "") == "smedley"), None)
+        if project is None:
+            return bad(handler, "project review not found", 404)
+        review = project.get("review") or {}
+        session_id = str(review.get("session_id") or "").strip()
+        if not session_id:
+            return j(handler, {"project": project, "dialog": None})
+        try:
+            session = get_session(session_id)
+        except KeyError:
+            return j(handler, {"project": project, "dialog": None})
+        return j(handler, {"project": project, "dialog": {
+            "session_id": session.session_id,
+            "messages": list(getattr(session, "messages", None) or []),
+            "is_streaming": bool(getattr(session, "is_streaming", False) or getattr(session, "active_stream_id", None)),
+        }})
+
     if parsed.path == "/api/prompts":
         return j(handler, {"prompts": _load_saved_prompts()})
 
@@ -16994,6 +17029,107 @@ def handle_post(handler, parsed) -> bool:
         return j(handler, {"ok": True, "session": s.compact()})
 
     # ── Project CRUD (POST) ──
+    if parsed.path == "/api/biggy/projects/reviews":
+        name = str(body.get("name") or "").strip()[:128]
+        if not name:
+            return bad(handler, "name required")
+        review_type = str(body.get("review_type") or "internal-design").strip()
+        allowed_types = {
+            "internal-design", "customer-approval", "engineering-approval",
+            "standards-compliance", "claude-migration",
+        }
+        if review_type not in allowed_types:
+            return bad(handler, "invalid review type")
+        raw_sources = body.get("sources") if isinstance(body.get("sources"), dict) else {}
+        sources = {}
+        for key in ("plant_specifications", "code_books", "design_package"):
+            value = str(raw_sources.get(key) or "").strip()
+            if "\x00" in value or len(value) > 512:
+                return bad(handler, f"invalid {key}")
+            sources[key] = value
+        scope = str(body.get("scope") or "").strip()
+        if "\x00" in scope or len(scope) > 2000:
+            return bad(handler, "invalid review scope")
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:72] or "project-review"
+        project_id = uuid.uuid4().hex[:12]
+        project = {
+            "project_id": project_id,
+            "name": name,
+            "color": "#34d399",
+            "profile": "biggy",
+            "created_at": time.time(),
+            "review": {
+                "review_owner": "smedley",
+                "review_type": review_type,
+                "state": "intake",
+                "rag_folder": f"Project Reviews/{slug}-{project_id[:6]}",
+                "sources": sources,
+                "scope": scope,
+            },
+        }
+        projects = load_projects()
+        projects.append(project)
+        save_projects(projects)
+        return j(handler, {"ok": True, "project": project})
+
+    if parsed.path == "/api/biggy/projects/reviews/dialog":
+        project_id = str(body.get("project_id") or "").strip()
+        message = str(body.get("message") or "").strip()
+        projects = load_projects()
+        project = next((item for item in projects
+                        if str(item.get("project_id") or "") == project_id
+                        and _profiles_match(item.get("profile"), "biggy")
+                        and str((item.get("review") or {}).get("review_owner") or "") == "smedley"), None)
+        if project is None:
+            return bad(handler, "project review not found", 404)
+        review = project.setdefault("review", {})
+        session_id = str(review.get("session_id") or "").strip()
+        session = None
+        if session_id:
+            try:
+                session = get_session(session_id)
+            except KeyError:
+                session_id = ""
+        if not session_id:
+            session = new_session(profile="smedley", project_id=project_id)
+            session.title = f"Smedley review — {project.get('name') or 'project'}"
+            review["session_id"] = session.session_id
+            review["state"] = "in_review"
+            session.save()
+            save_projects(projects)
+            session_id = session.session_id
+        if message:
+            if len(message) > 8000:
+                return bad(handler, "review message exceeds 8000 characters")
+            context = ""
+            if not getattr(session, "messages", None):
+                sources = review.get("sources") if isinstance(review.get("sources"), dict) else {}
+                context = (
+                    "You are Smedley, Senior Engineer reporting to Biggy. Conduct a continuing "
+                    "electrical design review with the owner. Keep recommendations grounded in the "
+                    "project review library and state assumptions, code/standard basis, risks, and "
+                    "approval implications.\n\n"
+                    f"Project: {project.get('name') or 'Project review'}\n"
+                    f"Review type: {review.get('review_type') or 'internal-design'}\n"
+                    f"RAG folder: {review.get('rag_folder') or 'not yet assigned'}\n"
+                    f"Plant specifications: {sources.get('plant_specifications') or 'not provided'}\n"
+                    f"Code books / standards: {sources.get('code_books') or 'not provided'}\n"
+                    f"Design package: {sources.get('design_package') or 'not provided'}\n"
+                    f"Review scope: {review.get('scope') or 'Perform governance, compliance, and design error review.'}\n\n"
+                )
+            result = start_session_turn(session_id, context + "Owner message: " + message, source="project_review")
+            if int(result.get("_status", 200) or 200) >= 400:
+                return bad(handler, str(result.get("error") or "Smedley review could not start"), int(result.get("_status") or 500))
+        try:
+            session = get_session(session_id)
+        except KeyError:
+            return bad(handler, "review dialog unavailable", 404)
+        return j(handler, {"ok": True, "project": project, "dialog": {
+            "session_id": session.session_id,
+            "messages": list(getattr(session, "messages", None) or []),
+            "is_streaming": bool(getattr(session, "is_streaming", False) or getattr(session, "active_stream_id", None)),
+        }})
+
     if parsed.path == "/api/projects/create":
         try:
             require(body, "name")

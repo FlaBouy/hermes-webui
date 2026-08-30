@@ -1013,6 +1013,249 @@
     return rail;
   }
 
+  function ensureBiggyProjectsPane() {
+    let pane = document.getElementById('biggyProjectsPane');
+    if (pane) return pane;
+    const layout = document.querySelector('.layout');
+    pane = el('section', 'biggy-projects-pane');
+    pane.id = 'biggyProjectsPane';
+    pane.hidden = true;
+    pane.setAttribute('aria-label', 'Smedley project reviews');
+    pane.innerHTML = '<header class="biggy-projects-header"><div><span>SMEDLEY // PROJECT REVIEWS</span><small>GOVERNANCE · COMPLIANCE · DESIGN ASSURANCE</small></div><button type="button" data-biggy-projects-close aria-label="Close project reviews">×</button></header>'
+      + '<div class="biggy-projects-grid"><section class="biggy-projects-intake"><h2>NEW REVIEW</h2>'
+      + '<label>PROJECT NAME<input id="biggyProjectReviewName" type="text" maxlength="128" placeholder="e.g. Auburn MCC modernization" autocomplete="off"></label>'
+      + '<label>REVIEW TYPE<select id="biggyProjectReviewType"><option value="internal-design">Internal design review</option><option value="customer-approval">Customer approval</option><option value="engineering-approval">Engineering approval</option><option value="standards-compliance">Standards & compliance</option><option value="claude-migration">Claude review migration</option></select></label>'
+      + '<label>PLANT SPECIFICATION LOCATION<div class="biggy-project-location"><input id="biggyProjectPlantSpecs" type="text" maxlength="512" placeholder="RAG folder, network path, or document identifier"><button type="button" class="biggy-project-location-browse" data-biggy-location-target="biggyProjectPlantSpecs">BROWSE</button></div></label>'
+      + '<label>CODE BOOK / STANDARD LOCATION<div class="biggy-project-location"><input id="biggyProjectCodeBooks" type="text" maxlength="512" placeholder="NEC, NFPA, customer standards, or document identifier"><button type="button" class="biggy-project-location-browse" data-biggy-location-target="biggyProjectCodeBooks">BROWSE</button></div></label>'
+      + '<label>DESIGN PACKAGE LOCATION<div class="biggy-project-location"><input id="biggyProjectDesignPackage" type="text" maxlength="512" placeholder="Drawings, studies, calculations, or document identifier"><button type="button" class="biggy-project-location-browse" data-biggy-location-target="biggyProjectDesignPackage">BROWSE</button></div></label>'
+      + '<label>REVIEW SCOPE<textarea id="biggyProjectReviewScope" rows="3" maxlength="2000" placeholder="Describe the decisions, risks, approvals, and checks Smedley should review."></textarea></label>'
+      + '<button id="biggyProjectCreate" class="biggy-fleet-machine is-online" type="button"><span class="biggy-fleet-state"></span><span>CREATE PROJECT REVIEW</span></button><p id="biggyProjectReviewStatus" class="biggy-projects-status" aria-live="polite"></p></section>'
+      + '<section class="biggy-projects-library"><div class="biggy-projects-library-header"><h2>REVIEW LIBRARY</h2><button id="biggyProjectRefresh" class="biggy-fleet-machine is-online" type="button"><span class="biggy-fleet-state"></span><span>REFRESH</span></button></div><div id="biggyProjectReviewList" class="biggy-project-review-list"><p>Loading project reviews…</p></div></section></div>'
+      + '<footer class="biggy-projects-footer"><div><b>RAG PATH</b><span id="biggyProjectSelectedPath">Select or create a project review to ingest documents.</span></div><label class="biggy-project-upload">INGEST REVIEW DOCUMENT<input id="biggyProjectReviewFile" type="file" hidden></label><button id="biggyProjectOpenDialog" class="biggy-fleet-machine is-online" type="button" disabled><span class="biggy-fleet-state"></span><span>OPEN SMEDLEY DIALOG</span></button><button id="biggyProjectDispatchReview" class="biggy-fleet-machine is-online" type="button" disabled><span class="biggy-fleet-state"></span><span>ADD TO REVIEW QUEUE</span></button><button id="biggyProjectOpenTools" class="biggy-fleet-machine is-online" type="button"><span class="biggy-fleet-state"></span><span>OPEN ELECTRICAL TOOLS</span></button></footer>';
+    layout?.appendChild(pane);
+    const dialog = el('section', 'biggy-project-dialog');
+    dialog.id = 'biggyProjectReviewDialog';
+    dialog.hidden = true;
+    dialog.setAttribute('aria-label', 'Smedley project review dialog');
+    dialog.innerHTML = '<header class="biggy-projects-header"><div><span id="biggyProjectDialogTitle">SMEDLEY // REVIEW DIALOG</span><small id="biggyProjectDialogMeta">PROJECT-SCOPED REVIEW CONVERSATION</small></div><button type="button" data-biggy-project-dialog-close aria-label="Close Smedley review dialog">×</button></header><div id="biggyProjectDialogMessages" class="biggy-project-dialog-messages"></div><footer class="biggy-project-dialog-compose"><textarea id="biggyProjectDialogInput" rows="2" maxlength="8000" placeholder="Continue the review with Smedley…"></textarea><button id="biggyProjectDialogSend" class="biggy-fleet-machine is-online" type="button"><span class="biggy-fleet-state"></span><span>SEND TO SMEDLEY</span></button></footer>';
+    layout?.appendChild(dialog);
+    let selected = null;
+    const status = pane.querySelector('#biggyProjectReviewStatus');
+    const selectedPath = pane.querySelector('#biggyProjectSelectedPath');
+    const dispatch = pane.querySelector('#biggyProjectDispatchReview');
+    const openDialog = pane.querySelector('#biggyProjectOpenDialog');
+    let dialogProject = null;
+    let dialogPoll = null;
+    const setStatus = (message, bad = false) => {
+      status.textContent = message || '';
+      status.classList.toggle('is-error', !!bad);
+    };
+    const setSelected = (project) => {
+      selected = project || null;
+      const folder = String(selected?.review?.rag_folder || '');
+      selectedPath.textContent = folder || 'Select or create a project review to ingest documents.';
+      dispatch.disabled = !selected;
+      openDialog.disabled = !selected;
+      pane.querySelectorAll('[data-biggy-review-id]').forEach((node) => node.classList.toggle('active', node.dataset.biggyReviewId === String(selected?.project_id || '')));
+    };
+    const renderDialog = (payload) => {
+      const messages = Array.isArray(payload?.dialog?.messages) ? payload.dialog.messages : [];
+      const list = dialog.querySelector('#biggyProjectDialogMessages');
+      list.innerHTML = messages.length ? messages.map((message) => {
+        const role = String(message?.role || '') === 'user' ? 'owner' : 'smedley';
+        const rawContent = String(message?.content || '');
+        const ownerMarker = rawContent.lastIndexOf('Owner message:');
+        const content = (ownerMarker >= 0 ? rawContent.slice(ownerMarker) : rawContent).replace(/^Owner message:\s*/i, '');
+        return `<article class="biggy-project-dialog-message is-${role}"><b>${role === 'owner' ? 'OWNER' : 'SMEDLEY'}</b><p>${esc(content)}</p></article>`;
+      }).join('') : '<p class="biggy-project-dialog-empty">Open the review with Smedley. Your conversation and its evidence remain attached to this project.</p>';
+      list.scrollTop = list.scrollHeight;
+      const streaming = !!payload?.dialog?.is_streaming;
+      dialog.querySelector('#biggyProjectDialogSend').disabled = streaming;
+      if (dialogPoll) { clearTimeout(dialogPoll); dialogPoll = null; }
+      if (!dialog.hidden && dialogProject && streaming) {
+        dialogPoll = window.setTimeout(() => refreshDialog(), 1250);
+      }
+    };
+    const refreshDialog = async () => {
+      if (!dialogProject || dialog.hidden) return;
+      try {
+        const payload = await window.api(`/api/biggy/projects/reviews/dialog?project_id=${encodeURIComponent(dialogProject.project_id)}`, { timeoutToast: false });
+        renderDialog(payload);
+      } catch (error) {
+        dialog.querySelector('#biggyProjectDialogMessages').innerHTML = `<p class="biggy-project-dialog-empty is-error">Dialog unavailable: ${esc(String(error.message || error))}</p>`;
+      }
+    };
+    const openReviewDialog = async () => {
+      if (!selected) return;
+      dialogProject = selected;
+      pane.hidden = true;
+      dialog.hidden = false;
+      dialog.querySelector('#biggyProjectDialogTitle').textContent = `SMEDLEY // ${selected.name}`;
+      dialog.querySelector('#biggyProjectDialogMeta').textContent = `${String(selected.review?.review_type || 'project review').replace(/-/g, ' ').toUpperCase()} · ${selected.review?.rag_folder || 'RAG PATH PENDING'}`;
+      dialog.querySelector('#biggyProjectDialogMessages').innerHTML = '<p class="biggy-project-dialog-empty">Opening Smedley review dialog…</p>';
+      try {
+        const payload = await window.api('/api/biggy/projects/reviews/dialog', { method: 'POST', body: JSON.stringify({ project_id: selected.project_id }) });
+        renderDialog(payload);
+      } catch (error) {
+        dialog.querySelector('#biggyProjectDialogMessages').innerHTML = `<p class="biggy-project-dialog-empty is-error">Unable to open review: ${esc(String(error.message || error))}</p>`;
+      }
+    };
+    const render = async () => {
+      const list = pane.querySelector('#biggyProjectReviewList');
+      list.innerHTML = '<p>Loading project reviews…</p>';
+      try {
+        const payload = await window.api('/api/biggy/projects/reviews', { timeoutToast: false });
+        const projects = Array.isArray(payload?.projects) ? payload.projects : [];
+        if (!projects.length) {
+          list.innerHTML = '<p>No project reviews yet. Create the first Smedley review package above.</p>';
+          setSelected(null);
+          return;
+        }
+        list.innerHTML = projects.map((project) => {
+          const review = project.review || {};
+          const sourceCount = Object.values(review.sources || {}).filter(Boolean).length;
+          return `<button type="button" class="biggy-project-review-card" data-biggy-review-id="${esc(project.project_id)}"><b>${esc(project.name)}</b><span>${esc(String(review.review_type || 'review').replace(/-/g, ' ').toUpperCase())}</span><small>${esc(review.rag_folder || 'RAG folder pending')} · ${sourceCount} review sources</small></button>`;
+        }).join('');
+        list.querySelectorAll('[data-biggy-review-id]').forEach((button) => button.addEventListener('click', () => {
+          setSelected(projects.find((project) => project.project_id === button.dataset.biggyReviewId));
+        }));
+        setSelected(projects.find((project) => project.project_id === selected?.project_id) || projects[0]);
+      } catch (error) {
+        list.innerHTML = '<p>Project review library is unavailable.</p>';
+        setStatus(String(error.message || error), true);
+      }
+    };
+    const makeRagFolder = async (folder) => {
+      for (const name of ['Project Reviews', folder]) {
+        try {
+          await argusRagIngestJson('/library-folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+        } catch (error) {
+          if (!/exist/i.test(String(error.message || ''))) throw error;
+        }
+      }
+    };
+    const chooseLocation = async (targetId) => {
+      const input = pane.querySelector(`#${targetId}`);
+      if (!input) return;
+      // The desktop Chromium picker preserves its native directory tree.  Web
+      // security intentionally does not expose absolute host paths, so retain
+      // the selected folder or file name as the portable review identifier.
+      try {
+        if (window.showDirectoryPicker) {
+          const directory = await window.showDirectoryPicker({ mode: 'read' });
+          input.value = `Folder: ${directory.name}`;
+          setStatus(`Selected folder for ${input.closest('label')?.firstChild?.textContent?.trim() || 'review source'}.`);
+          return;
+        }
+      } catch (error) {
+        if (error?.name === 'AbortError') return;
+      }
+      const picker = document.createElement('input');
+      picker.type = 'file';
+      picker.multiple = false;
+      picker.addEventListener('change', () => {
+        const file = picker.files?.[0];
+        if (!file) return;
+        input.value = `File: ${file.name}`;
+        setStatus(`Selected ${file.name}.`);
+      }, { once: true });
+      picker.click();
+    };
+    pane.querySelector('[data-biggy-projects-close]').addEventListener('click', () => { pane.hidden = true; });
+    dialog.querySelector('[data-biggy-project-dialog-close]').addEventListener('click', () => { if (dialogPoll) clearTimeout(dialogPoll); dialog.hidden = true; });
+    dialog.querySelector('#biggyProjectDialogSend').addEventListener('click', async () => {
+      const input = dialog.querySelector('#biggyProjectDialogInput');
+      const message = input.value.trim();
+      if (!message || !dialogProject) return;
+      input.value = '';
+      dialog.querySelector('#biggyProjectDialogSend').disabled = true;
+      try {
+        const payload = await window.api('/api/biggy/projects/reviews/dialog', { method: 'POST', body: JSON.stringify({ project_id: dialogProject.project_id, message }) });
+        renderDialog(payload);
+      } catch (error) {
+        dialog.querySelector('#biggyProjectDialogMessages').insertAdjacentHTML('beforeend', `<p class="biggy-project-dialog-empty is-error">Message was not sent: ${esc(String(error.message || error))}</p>`);
+        dialog.querySelector('#biggyProjectDialogSend').disabled = false;
+      }
+    });
+    pane.querySelectorAll('[data-biggy-location-target]').forEach((button) => button.addEventListener('click', () => chooseLocation(button.dataset.biggyLocationTarget)));
+    pane.querySelector('#biggyProjectRefresh').addEventListener('click', () => render());
+    pane.querySelector('#biggyProjectCreate').addEventListener('click', async () => {
+      const name = pane.querySelector('#biggyProjectReviewName').value.trim();
+      if (!name) { setStatus('A project name is required.', true); return; }
+      const reviewType = pane.querySelector('#biggyProjectReviewType').value;
+      const sources = {
+        plant_specifications: pane.querySelector('#biggyProjectPlantSpecs').value.trim(),
+        code_books: pane.querySelector('#biggyProjectCodeBooks').value.trim(),
+        design_package: pane.querySelector('#biggyProjectDesignPackage').value.trim(),
+      };
+      const scope = pane.querySelector('#biggyProjectReviewScope').value.trim();
+      setStatus('Creating Hermes project and RAG review folder…');
+      try {
+        const payload = await window.api('/api/biggy/projects/reviews', { method: 'POST', body: JSON.stringify({ name, review_type: reviewType, sources, scope }) });
+        const project = payload?.project;
+        if (!project) throw new Error('Project review was not created.');
+        try {
+          await makeRagFolder(project.review?.rag_folder || '');
+          setStatus(`Created ${project.name}. Upload the review package, then open the Smedley dialog.`);
+        } catch (folderError) {
+          setStatus(`Created ${project.name}, but its RAG folder needs retry: ${String(folderError.message || folderError)}`, true);
+        }
+        await render();
+        setSelected(project);
+      } catch (error) {
+        setStatus(`Create failed: ${String(error.message || error)}`, true);
+      }
+    });
+    pane.querySelector('#biggyProjectReviewFile').addEventListener('change', async (event) => {
+      const file = event.target.files?.[0];
+      const folder = String(selected?.review?.rag_folder || '');
+      if (!file || !folder) { setStatus('Select a project review before ingesting a document.', true); return; }
+      setStatus(`Uploading ${file.name} to ${folder}…`);
+      try {
+        const body = new FormData(); body.append('file', file);
+        const response = await fetch(`${ARGUS_RAG_INGEST_PROXY}/ingest-upload?folder=${encodeURIComponent(folder)}`, { method: 'POST', body });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        setStatus(`Queued ${file.name} for RAG ingestion in ${folder}.`);
+      } catch (error) { setStatus(`Ingest upload failed: ${String(error.message || error)}`, true); }
+      event.target.value = '';
+    });
+    openDialog.addEventListener('click', () => openReviewDialog());
+    pane.querySelector('#biggyProjectDispatchReview').addEventListener('click', async () => {
+      if (!selected) return;
+      const review = selected.review || {};
+      const body = [`Project review: ${selected.name}`, `Type: ${review.review_type || 'internal design'}`, `RAG folder: ${review.rag_folder || 'not set'}`, `Plant specifications: ${review.sources?.plant_specifications || 'not provided'}`, `Code books / standards: ${review.sources?.code_books || 'not provided'}`, `Design package: ${review.sources?.design_package || 'not provided'}`, '', `Scope: ${review.scope || 'Perform governance, compliance, and electrical design error review.'}`].join('\n');
+      setStatus('Assigning the review to Smedley…');
+      try {
+        const payload = await window.api('/api/kanban/tasks', { method: 'POST', body: JSON.stringify({ title: `Smedley review — ${selected.name}`, body, assignee: 'smedley', priority: 2, status: 'ready' }) });
+        const taskId = payload?.task?.id || 'created task';
+        setStatus(`Smedley review assigned: ${taskId}. The native Kanban dispatcher owns execution.`);
+      } catch (error) { setStatus(`Review assignment failed: ${String(error.message || error)}`, true); }
+    });
+    pane.querySelector('#biggyProjectOpenTools').addEventListener('click', async () => {
+      const rail = ensureBiggyToolsRail();
+      rail.hidden = false;
+      await populateBiggyToolsRail(rail);
+    });
+    pane.__refresh = render;
+    return pane;
+  }
+
+  function appendBiggyProjectsLauncher(body) {
+    if (!body || body.querySelector('.biggy-projects-launcher')) return;
+    const projects = el('section', 'biggy-tools-group biggy-projects-launcher');
+    projects.innerHTML = '<h3>PROJECTS</h3>';
+    const projectButton = el('button', 'biggy-fleet-machine biggy-tool-launch is-online');
+    projectButton.type = 'button';
+    projectButton.innerHTML = '<span class="biggy-fleet-state" aria-hidden="true"></span><span>PROJECT REVIEWS</span>';
+    projectButton.addEventListener('click', async () => {
+      const pane = ensureBiggyProjectsPane();
+      pane.hidden = false;
+      await pane.__refresh();
+    });
+    projects.appendChild(projectButton);
+    body.appendChild(projects);
+  }
+
   async function populateBiggyToolsRail(rail) {
     const body = rail.querySelector('.biggy-tools-rail-body');
     try {
@@ -1034,6 +1277,8 @@
       });
     } catch (error) {
       body.textContent = `Tools unavailable: ${error.message}`;
+    } finally {
+      appendBiggyProjectsLauncher(body);
     }
   }
 

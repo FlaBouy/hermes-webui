@@ -68,3 +68,15 @@ def test_fleet_strip_is_top_rail_anchored_and_routes_are_same_origin():
     assert "<span>HOME</span>" in BIGGY_JS
     assert "Reset galaxy and clear PA cards" in BIGGY_JS
     assert 'parsed.path == "/api/biggy/fleet/status"' in ROUTES
+
+
+def test_biggy_project_reviews_are_native_projects_with_smedley_governance_metadata():
+    assert 'parsed.path == "/api/biggy/projects/reviews"' in ROUTES
+    assert '"review_owner": "smedley"' in ROUTES
+    assert '"profile": "biggy"' in ROUTES
+    assert '"rag_folder": f"Project Reviews/' in ROUTES
+    assert '"standards-compliance"' in ROUTES
+    assert 'save_projects(projects)' in ROUTES
+    assert 'parsed.path == "/api/biggy/projects/reviews/dialog"' in ROUTES
+    assert 'profile="smedley", project_id=project_id' in ROUTES
+    assert 'start_session_turn(session_id, context + "Owner message: " + message, source="project_review")' in ROUTES
