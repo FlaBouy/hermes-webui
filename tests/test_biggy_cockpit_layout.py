@@ -88,11 +88,11 @@ def test_send_and_biggy_voice_return_to_half_height_prompt():
     assert "width:28px;height:28px" in BRAND_CSS
 
 
-def test_remaining_native_prompt_controls_join_the_hermes_rail():
+def test_hermes_rail_never_reparents_native_composer_controls():
     hermes = BRAND[BRAND.index("function installHermesStrip"):BRAND.index("function installPaRailToggle")]
-    assert "const footer = document.querySelector('.composer-footer')" in hermes
-    assert "strip.appendChild(footer)" in hermes
-    assert ".biggy-hermes-strip>.composer-footer{" in BRAND_CSS
+    assert "strip.appendChild(footer)" not in hermes
+    assert "box.appendChild(footer)" not in hermes
+    assert ".biggy-hermes-strip>.composer-footer{" not in BRAND_CSS
 
 
 def test_pa_button_owns_closed_by_default_right_rail():
@@ -132,10 +132,18 @@ def test_hermes_controls_replace_left_navigation_beneath_prompt():
 def test_cockpit_rail_keeps_native_hermes_panels_and_composer_interactive():
     """Cockpit launchers must not take ownership of Hermes-rendered nodes."""
     rail = BRAND[BRAND.index("function installHermesStrip(mainChat)"):BRAND.index("function ensureArgusConversationLane")]
-    assert "window.switchPanel(panel)" in rail
+    assert "window.switchPanel(next)" in rail
+    assert "main.dataset.biggyHermesPanel" in rail
     assert "appendChild(todos)" not in rail
+    assert "appendChild(footer)" not in rail
     composer_rule = BRAND_CSS[BRAND_CSS.index("#mainChat.biggy-brand-iwo .composer-wrap{"):BRAND_CSS.index("#mainChat.biggy-brand-iwo .composer-wrap::before")]
     assert "pointer-events:auto" in composer_rule
+
+
+def test_native_hermes_main_views_present_as_centered_cockpit_overlays():
+    assert "main.main>.main-view:not(#mainChat)" in BRAND_CSS
+    assert "position:absolute;z-index:80" in BRAND_CSS
+    assert "body.biggy-brand main.main>#mainChat.biggy-brand-iwo" in BRAND_CSS
 
 
 def test_server_owned_speech_cannot_start_a_second_browser_reader():

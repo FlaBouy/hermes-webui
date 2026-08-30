@@ -829,35 +829,45 @@
   }
 
   function installHermesStrip(mainChat) {
-    const composer = document.getElementById('composerWrap');
-    const box = document.getElementById('composerBox');
     const layout = document.querySelector('.layout');
-    if (!composer || !layout) return null;
-    const footer = document.querySelector('.composer-footer');
-    // applyShell can safely run more than once. Preserve the native footer
-    // before replacing its prior Hermes host so no stock control is lost.
-    if (footer && footer.closest('.biggy-hermes-strip') && box) box.appendChild(footer);
+    if (!layout) return null;
     document.querySelectorAll('.biggy-hermes-strip').forEach((node) => node.remove());
     const strip = el('nav', 'biggy-hermes-strip');
     strip.id = 'biggyHermesStrip';
     strip.setAttribute('aria-label', 'Hermes interface controls');
     strip.setAttribute('data-testid', 'biggy-hermes-strip');
     strip.innerHTML = '<span class="biggy-fleet-strip-label">HERMES</span>';
+    const selectPanel = async (panel, button) => {
+      const main = document.querySelector('main.main');
+      const current = main && main.dataset.biggyHermesPanel;
+      // A second tap on the active utility panel returns the operator to chat.
+      const next = current === panel && panel !== 'chat' ? 'chat' : panel;
+      if (typeof window.switchPanel === 'function') await window.switchPanel(next);
+      if (main) {
+        if (next === 'chat') delete main.dataset.biggyHermesPanel;
+        else main.dataset.biggyHermesPanel = next;
+      }
+      strip.querySelectorAll('.biggy-hermes-panel').forEach((node) => {
+        const active = node === button && next !== 'chat';
+        node.classList.toggle('active', active);
+        node.setAttribute('aria-pressed', active ? 'true' : 'false');
+      });
+    };
     HERMES_RAIL_PANELS.forEach(([panel, label]) => {
       const button = el('button', 'biggy-fleet-machine biggy-hermes-panel is-online');
       button.type = 'button';
       button.dataset.panel = panel;
+      button.setAttribute('aria-pressed', 'false');
       button.title = `Open Hermes ${label.toLowerCase()}`;
       button.innerHTML = `<span class="biggy-fleet-state" aria-hidden="true"></span><span>${label}</span>`;
       button.addEventListener('click', async (event) => {
         event.preventDefault();
-        // The native panel stays where Hermes owns it.  Moving panel nodes
-        // breaks the app's renderer and leaves later rail clicks inert.
-        if (typeof window.switchPanel === 'function') await window.switchPanel(panel);
+        // Launch native Hermes panels in place. Never reparent its controls:
+        // the renderer owns those nodes and replaces them during updates.
+        await selectPanel(panel, button);
       });
       strip.appendChild(button);
     });
-    if (footer) strip.appendChild(footer);
     layout.appendChild(strip);
     return strip;
   }
