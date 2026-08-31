@@ -47,6 +47,17 @@ def test_reactor_model_badge_remains_single_line_after_bottom_dock_move():
     chip_rule = BRAND_CSS[BRAND_CSS.index("#j-brain-chip{"):BRAND_CSS.index("#j-orb svg")]
     assert "white-space:nowrap" in chip_rule
     assert "text-overflow:ellipsis" in chip_rule
+    assert "border:0" in chip_rule
+    assert "background:transparent" in chip_rule
+    assert "backdrop-filter:none" in chip_rule
+    panel_rule = BRAND_CSS[BRAND_CSS.index("#j-state-panel{"):BRAND_CSS.index("#j-state{")]
+    assert "width:204px" in panel_rule
+    assert "max-width:204px" in panel_rule
+    assert "overflow:hidden" in panel_rule
+    state_rule = BRAND_CSS[BRAND_CSS.index("#j-state{"):BRAND_CSS.index("#j-state-txt{")]
+    assert "max-width:92px" in state_rule
+    assert "white-space:nowrap" in state_rule
+    assert "overflow:hidden" in state_rule
     status_rule = BRAND_CSS[BRAND_CSS.index(".biggy-brand-status{"):BRAND_CSS.index(".biggy-brand-meta{")]
     assert "width:max-content" in status_rule
 
