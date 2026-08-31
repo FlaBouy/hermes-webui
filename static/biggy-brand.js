@@ -1423,6 +1423,33 @@
     return panel;
   }
 
+  function closeVisiblePaCards() {
+    // Closing the PA rail is a presentation action. Collapse every visible PA
+    // surface but keep its models and session evidence available for another
+    // category selection.
+    document.querySelectorAll('.biggy-travel-dock').forEach((card) => {
+      if (typeof card.__biggySetCollapsed === 'function') card.__biggySetCollapsed(true);
+      else card.classList.add('is-collapsed');
+    });
+  }
+
+  function setBiggyPaRailOpen(open, { closeCards = false } = {}) {
+    const mainChat = document.getElementById('mainChat');
+    const button = document.getElementById('biggyPaToggle');
+    if (!mainChat) return false;
+    const next = open === true;
+    mainChat.classList.toggle('biggy-pa-rail-open', next);
+    document.body.classList.toggle('biggy-pa-rail-open', next);
+    if (button) {
+      button.setAttribute('aria-expanded', next ? 'true' : 'false');
+      button.classList.toggle('is-open', next);
+      button.title = next ? 'Close personal assistant controls' : 'Open personal assistant controls';
+      button.setAttribute('aria-label', button.title);
+    }
+    if (!next && closeCards) closeVisiblePaCards();
+    return next;
+  }
+
   function installPaRailToggle(mainChat) {
     const composer = document.getElementById('composerWrap');
     const box = document.getElementById('composerBox');
@@ -1442,18 +1469,11 @@
     button.textContent = 'PA';
     button.title = 'Open personal assistant controls';
     button.setAttribute('aria-label', button.title);
-    const setOpen = (open) => {
-      const next = open === true;
-      mainChat.classList.toggle('biggy-pa-rail-open', next);
-      document.body.classList.toggle('biggy-pa-rail-open', next);
-      button.setAttribute('aria-expanded', next ? 'true' : 'false');
-      button.classList.toggle('is-open', next);
-      button.title = next ? 'Close personal assistant controls' : 'Open personal assistant controls';
-      button.setAttribute('aria-label', button.title);
-    };
+    const setOpen = (open, options = {}) => setBiggyPaRailOpen(open, options);
     button.addEventListener('click', (event) => {
       event.preventDefault();
-      setOpen(!mainChat.classList.contains('biggy-pa-rail-open'));
+      const wasOpen = mainChat.classList.contains('biggy-pa-rail-open');
+      setOpen(!wasOpen, { closeCards: wasOpen });
     });
     deck.insertBefore(button, box);
     setOpen(false);
@@ -5401,6 +5421,10 @@
       const collapseBtn = dlg.querySelector('#biggyTravelDockCollapse');
       if (collapseBtn) collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       if (!collapsed) {
+        // Any card opened from the PA categories presents its navigation rail
+        // as part of the same action, so the remaining cards are immediately
+        // available without a second PA-button click.
+        setBiggyPaRailOpen(true);
         try { if (mapInstance) mapInstance.resize(); } catch (_) {}
         scheduleTravelMapCameraFit('open');
       }

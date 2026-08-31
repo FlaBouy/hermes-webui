@@ -234,6 +234,16 @@ def test_pa_button_owns_closed_by_default_right_rail():
     assert "body.biggy-brand #btnWorkspacePanelEdgeToggle{display:none!important}" in BRAND_CSS
 
 
+def test_pa_card_open_reveals_rail_and_pa_close_collapses_cards():
+    pa = BRAND[BRAND.index("function closeVisiblePaCards"):BRAND.index("function forceChromeLabels")]
+    travel = BRAND[BRAND.index("const setCollapsed = (collapsed)"):BRAND.index("dlg.__biggySetCollapsed = setCollapsed")]
+    assert "function setBiggyPaRailOpen" in pa
+    assert "setOpen(!wasOpen, { closeCards: wasOpen })" in pa
+    assert "closeVisiblePaCards()" in pa
+    assert "card.__biggySetCollapsed(true)" in pa
+    assert "setBiggyPaRailOpen(true)" in travel
+
+
 def test_rag_overview_clears_top_rails_on_desktop_and_tablet():
     assert "left:24px;top:66px" in BRAND_CSS
     assert ".biggy-argus-rag-overview{left:12px;top:56px" in BRAND_CSS
