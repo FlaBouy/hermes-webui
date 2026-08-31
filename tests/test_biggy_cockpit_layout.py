@@ -275,6 +275,18 @@ def test_live_response_stack_is_restored_to_the_active_shell():
     assert "window.__biggyRenderArgusConversationLaneNow = renderArgusConversationLane" in BRAND
 
 
+def test_home_hides_conversation_without_deleting_session_turns():
+    reset = BRAND[BRAND.index("function resetBiggyWorkspace"):BRAND.index("function makeHomeControl")]
+    render = BRAND[BRAND.index("function renderArgusConversationLane"):BRAND.index("window.__biggyRenderArgusConversationLaneNow")]
+    assert "conversationLane.dataset.homeHidden = '1'" in reset
+    assert "conversationLane.hidden = true" in reset
+    assert "lane.dataset.homeHidden === '1'" in render
+    assert "delete lane.dataset.homeHidden" in BRAND
+    assert "composer.addEventListener('keydown'" in BRAND
+    assert "send.addEventListener('click'" in BRAND
+    assert ".messages" not in reset
+
+
 def test_hermes_controls_replace_left_navigation_beneath_prompt():
     assert "body.biggy-brand .layout > .rail" in BRAND_CSS
     assert "body.biggy-brand .layout > .sidebar" in BRAND_CSS

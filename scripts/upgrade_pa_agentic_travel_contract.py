@@ -116,6 +116,10 @@ def main() -> None:
     nodes["Assemble Named Destination"]["parameters"]["jsCode"] = assemble
 
     render = nodes["Render Travel Evidence"]["parameters"]["jsCode"]
+    render = render.replace(
+        "const spokenDestination=String(base.destinationEvidence?.query||destination)",
+        "const spokenDestination=String(destination||base.destinationEvidence?.query||base.destination)",
+    )
     if "authority:'n8n_pa_core'" not in render:
         render = render.replace(
             "map_view_model:mapView,recommendation_view_model:lodging",

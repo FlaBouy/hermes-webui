@@ -84,6 +84,7 @@ def test_n8n_terminal_travel_result_owns_the_verified_route_contract():
     assert "argus.route_acceptance.v2" in code
     assert "authority:'n8n_pa_core'" in code
     assert "calendar_window:base.calendarWindow" in code
+    assert "spokenDestination=String(destination||base.destinationEvidence?.query||base.destination)" in code
 
 
 def test_successful_executions_are_saved_for_correlation_autopsy():

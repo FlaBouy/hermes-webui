@@ -665,6 +665,16 @@
     clearRagTrace();
     markGalaxyFilterSelection('', 0);
 
+    // HOME is a presentation reset, not a transcript mutation. Hide the
+    // conversation stack at its current signature while leaving every turn
+    // in Hermes session history. A later turn changes the signature and
+    // automatically brings the lane back for the new exchange.
+    const conversationLane = document.getElementById('biggyArgusConversationLane');
+    if (conversationLane) {
+      conversationLane.dataset.homeHidden = '1';
+      conversationLane.hidden = true;
+    }
+
     const dlg = document.getElementById('biggyTravelMapDialog');
     if (dlg) {
       if (typeof dlg.__biggySetCollapsed === 'function') dlg.__biggySetCollapsed(true);
@@ -3032,12 +3042,15 @@
       return result;
     }).filter((turn) => turn.text);
     const signature = JSON.stringify(turns.map((turn) => [turn.identity.key, turn.pending, turn.text]));
-    if (lane.dataset.signature === signature) return;
+    if (lane.dataset.signature === signature) {
+      if (lane.dataset.homeHidden === '1') lane.hidden = true;
+      return;
+    }
     lane.dataset.signature = signature;
     // Measuring the composer forces a complete layout pass. Do it only when
     // the visible transcript actually changed, never on the background
     // heartbeat while the 3D canvas is rendering.
-    lane.hidden = turns.length === 0;
+    lane.hidden = turns.length === 0 || lane.dataset.homeHidden === '1';
     syncArgusConversationLaneBoundary(lane);
     const body = lane.querySelector('.biggy-argus-conversation-turns');
     if (!body) return;
@@ -3052,6 +3065,22 @@
 
   function installArgusConversationLane(mainChat) {
     const lane = ensureArgusConversationLane(mainChat);
+    const revealForNewTurn = () => {
+      if (!lane) return;
+      delete lane.dataset.homeHidden;
+    };
+    const composer = document.getElementById('msg');
+    const send = document.getElementById('btnSend');
+    if (composer && composer.dataset.biggyConversationReveal !== '1') {
+      composer.dataset.biggyConversationReveal = '1';
+      composer.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' && !event.shiftKey) revealForNewTurn();
+      });
+    }
+    if (send && send.dataset.biggyConversationReveal !== '1') {
+      send.dataset.biggyConversationReveal = '1';
+      send.addEventListener('click', revealForNewTurn);
+    }
     syncArgusConversationLaneBoundary(lane, mainChat);
     renderArgusConversationLane();
     if (conversationLaneTimer) clearInterval(conversationLaneTimer);
