@@ -347,6 +347,14 @@ def try_argus_pa_core(
         "map_view_model": result.get("map_view_model")
         if isinstance(result.get("map_view_model"), dict)
         else None,
+        # Preserve n8n's terminal acceptance decision across the adapter.
+        # Biggy is a renderer/coordinator here, not a second route authority.
+        # Dropping this field made a fully verified n8n execution look
+        # unverified at the final GUI boundary and triggered the legacy
+        # fallback even though the map and calendar evidence were complete.
+        "route_contract": result.get("route_contract")
+        if isinstance(result.get("route_contract"), dict)
+        else None,
         "lodging_view_model": result.get("lodging_view_model")
         if isinstance(result.get("lodging_view_model"), dict)
         else None,

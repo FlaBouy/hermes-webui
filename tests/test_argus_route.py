@@ -312,6 +312,87 @@ def test_argus_completed_map_request_without_map_model_uses_governed_fallback():
     assert result["primary_transport_error"] == "MISSING_REQUIRED_MAP_VIEW_MODEL"
 
 
+def test_verified_n8n_route_is_not_reparsed_or_rematerialized_by_biggy():
+    from api.routes import _run_argus_with_transport_fallback
+
+    primary = {
+        "handled": True,
+        "ok": True,
+        "map_view_model": {
+            "schema": "argus.map_view_model.v1",
+            "available": True,
+            "destination": {"label": "Jordan-Hare Stadium, Auburn, Alabama"},
+        },
+        "route_contract": {
+            "schema": "argus.route_acceptance.v2",
+            "status": "VERIFIED",
+            "authority": "n8n_pa_core",
+        },
+    }
+
+    result = _run_argus_with_transport_fallback(
+        "Map me a route to Jordan-Hare Stadium next weekend and check my calendar.",
+        pa_core_enabled=True,
+        biggy_ingress_ts=1.0,
+        correlation_id="corr-n8n-route-authority",
+        session_id="session-n8n-route-authority",
+        try_pa_core=lambda *_a, **_k: primary,
+        try_briefing=lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("no fallback")),
+        route_planner=lambda **_kwargs: (_ for _ in ()).throw(AssertionError("no second route")),
+    )
+
+    assert result is primary
+    assert result["route_contract"]["authority"] == "n8n_pa_core"
+
+
+def test_pa_core_adapter_preserves_n8n_route_authority(monkeypatch):
+    """The transport adapter must not discard n8n's terminal route contract."""
+    import api.argus_route as route
+
+    payload = {
+        "status": "COMPLETED",
+        "correlationId": "corr-adapter-contract",
+        "operationId": "op-adapter-contract",
+        "spokenText": "I mapped the verified route.",
+        "requestedTools": ["maps", "calendar_read"],
+        "map_view_model": {
+            "schema": "argus.map_view_model.v1",
+            "available": True,
+            "destination": {"label": "Jordan-Hare Stadium, Auburn, Alabama"},
+        },
+        "route_contract": {
+            "schema": "argus.route_acceptance.v2",
+            "status": "VERIFIED",
+            "authority": "n8n_pa_core",
+        },
+    }
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps(payload).encode("utf-8")
+
+    monkeypatch.setattr(route, "_pa_core_token", lambda: "test-token")
+    monkeypatch.setattr(route.urllib.request, "urlopen", lambda *_a, **_k: _Response())
+    monkeypatch.setattr("api.jarvis_pa_strategy_memory.record_outcome", lambda **_k: None)
+    monkeypatch.setattr("api.jarvis_pa_conversation_memory.record_turn", lambda *_a, **_k: None)
+
+    result = route.try_argus_pa_core(
+        "Map the route and check the calendar.",
+        correlation_id="corr-adapter-contract",
+        session_id="session-adapter-contract",
+    )
+
+    assert result["ok"] is True
+    assert result["map_view_model"]["available"] is True
+    assert result["route_contract"] == payload["route_contract"]
+
+
 def test_argus_map_request_fails_closed_when_both_transports_omit_map_model():
     from api.routes import _run_argus_with_transport_fallback
 

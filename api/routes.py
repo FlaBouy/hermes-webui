@@ -24811,13 +24811,14 @@ def _run_argus_with_transport_fallback(
     try_briefing,
     route_planner=None,
 ):
-    """Fall back on transport failure, then enforce the route acceptance gate.
+    """Fall back on transport failure and honor one route authority.
 
-    n8n remains the agentic planner and compliance orchestrator.  A successful
-    route response is nevertheless materialized from its verified endpoints by
-    the deterministic travel layer before it may reach session state or glass.
-    This prevents success prose, city-degraded destinations, and incomplete
-    view models from becoming the route-card authority.
+    n8n is the agentic planner, evidence assembler, and route-contract owner.
+    Biggy accepts a primary route only when n8n returns both the card model and
+    its VERIFIED terminal contract.  Biggy must not parse the owner's sentence
+    again and rematerialize a second route; that split authority made harmless
+    language changes produce different results.  The local deterministic gate
+    remains only for the legacy governed transport fallback.
     """
 
     def _owner_request_text(value: str) -> str:
@@ -24848,6 +24849,16 @@ def _run_argus_with_transport_fallback(
         model = result.get("map_view_model")
         return isinstance(model, dict) and model.get("available") is not False
 
+    def _has_verified_n8n_route_contract(result) -> bool:
+        if not _has_map_model(result):
+            return False
+        contract = result.get("route_contract") if isinstance(result, dict) else None
+        return bool(
+            isinstance(contract, dict)
+            and str(contract.get("status") or "").upper() == "VERIFIED"
+            and str(contract.get("authority") or "").lower() == "n8n_pa_core"
+        )
+
     def _enforce_map_contract(result):
         if not requires_map or not isinstance(result, dict) or not result.get("ok"):
             return result
@@ -24872,17 +24883,22 @@ def _run_argus_with_transport_fallback(
         correlation_id=correlation_id,
         session_id=session_id,
     )
-    if isinstance(primary, dict) and primary.get("ok") and (
-        not requires_map or _has_map_model(primary)
-    ):
-        return _enforce_map_contract(primary)
+    if isinstance(primary, dict) and primary.get("ok") and not requires_map:
+        return primary
+    if isinstance(primary, dict) and primary.get("ok") and _has_verified_n8n_route_contract(primary):
+        return primary
     if isinstance(primary, dict) and primary.get("ok") and requires_map:
-        error = "MISSING_REQUIRED_MAP_VIEW_MODEL"
+        error = (
+            "MISSING_REQUIRED_MAP_VIEW_MODEL"
+            if not _has_map_model(primary)
+            else "MISSING_VERIFIED_N8N_ROUTE_CONTRACT"
+        )
     else:
         error = str((primary or {}).get("error") or "") if isinstance(primary, dict) else "empty_result"
     if error not in {
         "JSONDecodeError", "URLError", "HTTPError", "TimeoutError", "OSError",
         "empty_result", "pa_core_auth_unavailable", "MISSING_REQUIRED_MAP_VIEW_MODEL",
+        "MISSING_VERIFIED_N8N_ROUTE_CONTRACT",
     }:
         return primary
     logger.warning(
