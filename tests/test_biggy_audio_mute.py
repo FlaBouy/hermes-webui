@@ -106,10 +106,12 @@ def test_argus_voice_has_independent_twenty_five_percent_reduction():
 
 
 def test_argus_orb_ring_motion_remains_continuous():
-    css = (ROOT / "static" / "biggy-brand.css").read_text(encoding="utf-8")
-    assert "#j-orb .rot-a{animation:hudCCW 64s linear infinite;}" in css
-    assert "#j-orb .rot-radar{animation:hudCW 6s linear infinite;}" in css
-    assert "#j-orb .rot-a{animation-timing-function:steps" not in css
+    graphic = (ROOT / "static" / "argus-orb-graphic-layer.html").read_text(encoding="utf-8")
+    assert ".slow-cw { transform-origin: 600px 400px; animation: cw 52s linear infinite; }" in graphic
+    assert ".slow-ccw { transform-origin: 600px 400px; animation: ccw 68s linear infinite; }" in graphic
+    assert ".scan {" not in graphic
+    assert 'id="ring-scan-sweep"' not in graphic
+    assert "animation-timing-function:steps" not in graphic
 
 
 def test_argus_orb_renders_measured_audio_level_and_cleans_up():
@@ -173,3 +175,12 @@ process.stdout.write(JSON.stringify({{during, after}}));
     assert float(result["during"]["--orb-scale"]) == 1.021
     assert result["after"]["--beat"] == "0"
     assert result["after"]["--orb-scale"] == "1"
+
+
+def test_speech_gain_has_a_visible_two_x_range_and_live_preview():
+    brand = (ROOT / "static" / "biggy-brand.js").read_text(encoding="utf-8")
+    graphic = (ROOT / "static" / "argus-orb-graphic-layer.html").read_text(encoding="utf-8")
+    assert "Math.min(2, rawLevel * argusSpeechPulseGain)" in brand
+    assert "beat: argusSpeechPulseGain" in brand
+    assert "var(--speech-beat) * .09" in graphic
+    assert "var(--speech-beat) * .025" in graphic

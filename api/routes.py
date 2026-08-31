@@ -24630,6 +24630,81 @@ def _return_smedley_fast_route(handler, s, msg, routed, ptt_owned_tts=False):
     )
 
 
+def _return_biggy_fast_voice_route(handler, s, msg, routed):
+    """Persist one V6 light-lane voice turn and leave TTS to the Biggy pedal."""
+    reply = str((routed or {}).get("reply") or "").strip()
+    if not reply:
+        return bad(handler, "V6 light voice route returned an empty response", 502)
+    now_ts = int(time.time())
+    if not isinstance(getattr(s, "messages", None), list):
+        s.messages = []
+
+    # Some older PTT clients staged the display prompt before POST /api/chat.
+    # Reuse one trailing copy instead of persisting the same utterance twice.
+    wanted = " ".join(str(msg or "").split()).casefold()
+    trailing_matches: list[int] = []
+    for index in range(len(s.messages) - 1, -1, -1):
+        row = s.messages[index]
+        if not isinstance(row, dict) or row.get("role") != "user":
+            break
+        key = " ".join(str(row.get("content") or "").split()).casefold()
+        if key == wanted:
+            trailing_matches.append(index)
+        else:
+            break
+    if trailing_matches:
+        keep = trailing_matches[-1]
+        for index in sorted((idx for idx in trailing_matches if idx != keep), reverse=True):
+            del s.messages[index]
+    else:
+        s.messages.append({"role": "user", "content": msg, "timestamp": now_ts})
+
+    s.messages.append(
+        {
+            "role": "assistant",
+            "content": reply,
+            "timestamp": now_ts + 1,
+            "biggy_fast_voice_route": True,
+            "voice_model": str((routed or {}).get("model") or ""),
+            "story_response": bool((routed or {}).get("story")),
+            "tts_owner": "biggy_pedal_austin",
+        }
+    )
+    s.pending_user_message = None
+    s.active_stream_id = None
+    if hasattr(s, "pending_started_at"):
+        s.pending_started_at = None
+    try:
+        if not getattr(s, "title", None) or str(s.title).strip() in ("", "Untitled", "New chat"):
+            s.title = (str(msg)[:64] or "Biggy").strip()
+        s.save()
+    except Exception:
+        logger.exception("failed to persist Biggy V6 light voice turn for %s", getattr(s, "session_id", None))
+        return bad(handler, "failed to persist V6 light voice turn", 500)
+    try:
+        with LOCK:
+            SESSIONS[s.session_id] = s
+            SESSIONS.move_to_end(s.session_id)
+    except Exception:
+        pass
+    return j(
+        handler,
+        {
+            "session_id": s.session_id,
+            "answer": reply,
+            "reply": reply,
+            "spoken_text": reply,
+            "biggy_fast_voice_route": True,
+            "voice_model": str((routed or {}).get("model") or ""),
+            "story_response": bool((routed or {}).get("story")),
+            "provider_calls": 1,
+            "ptt_owned_tts": False,
+            "status": "done",
+            "session": s.compact() | {"messages": s.messages},
+        },
+    )
+
+
 def _argus_active_followup_objective(session, message: str) -> str | None:
     """Keep an unambiguous continuation in the active Jarvis task.
 
@@ -25678,6 +25753,25 @@ def _handle_chat_sync(handler, body):
         if explicit_objective or _jarvis_followup_objective:
             ask_objective = display_msg if explicit_objective else _jarvis_followup_objective
             return _handle_argus_sync_hard_bind(handler, s, ask_objective)
+    # Biggy voice defaults to the V6 light lane. Do not infer a heavy route
+    # from words such as map, calendar, document, or story: only an explicit
+    # Argus or Smedley invocation bypasses this gate.
+    try:
+        from api.biggy_voice_route import (
+            request_fast_voice_reply,
+            should_use_fast_voice_route,
+        )
+
+        if should_use_fast_voice_route(
+            message=msg,
+            display_message=display_msg if "display_message" in body else None,
+        ):
+            light = request_fast_voice_reply(display_msg, history=getattr(s, "messages", None))
+            return _return_biggy_fast_voice_route(handler, s, display_msg, light)
+    except Exception:
+        # A local light-model outage must not eat the owner's turn. The normal
+        # coordinator lane remains a slower but functional fallback.
+        logger.exception("Biggy V6 light voice route failed; falling back to coordinator chat")
     try:
         from api.smedley_fast_route import try_smedley_fast_route
 

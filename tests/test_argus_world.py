@@ -460,7 +460,7 @@ def test_browser_trace_forwards_verified_page_metadata_only():
     assert "function isGalaxyTraceEligibleMessage(message)" in BIGGY_JS
     assert "message.map_view_model" in BIGGY_JS
     assert "message.trip_plan_view_model" in BIGGY_JS
-    assert "clearRagTrace();\n\n      let recInfo" in BIGGY_JS
+    assert "clearRagTrace();\n\n      const calendarDialog" in BIGGY_JS
     assert "galaxyTraceCitation(message)" in BIGGY_JS
     assert "message.retrieval_receipt" in BIGGY_JS
     assert "message.active_document" in BIGGY_JS
@@ -543,7 +543,8 @@ def test_biggy_root_boot_does_not_restore_native_or_private_saved_session():
 
 
 def test_operational_cards_use_large_responsive_workspace():
-    assert "min(38vw, 720px)" in BIGGY_CSS
+    assert "min(30vw, 560px)" in BIGGY_CSS
+    assert "min(30vw, 560px)" in BIGGY_JS
     assert "height:min(68vh, 720px)" in BIGGY_CSS
     assert "Math.max(480, Math.min(860" in BIGGY_JS
 
@@ -700,9 +701,14 @@ def test_routes_wire_world_endpoint():
 def test_iwo_background_image_removed_from_css():
     assert "iwo.jpg" not in BIGGY_CSS
     assert ".biggy-argus-rag-overview" in BIGGY_CSS
-    assert "padding:10px 84px 54px" in BIGGY_CSS
+    assert "padding:10px 84px 12px" in BIGGY_CSS
 
 
 def test_gitignore_covers_local_world_config():
     gi = (ROOT / ".gitignore").read_text(encoding="utf-8")
     assert "jarvis-v6-world.json" in gi
+
+
+def test_galaxy_horizontal_center_is_locked_to_the_live_orb_dock():
+    assert "const reactor = parent.document.getElementById('biggyArgusReactor');" in world._TRACE_RUNTIME
+    assert "const promptRect = (reactor || prompt).getBoundingClientRect();" in world._TRACE_RUNTIME

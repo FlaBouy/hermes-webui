@@ -168,11 +168,12 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     try {
       const prompt = parent.document.getElementById('biggyPromptDeck')
         || parent.document.getElementById('composerBox');
+      const reactor = parent.document.getElementById('biggyArgusReactor');
       const frame = parent.document.getElementById('biggyV6World');
       const cockpit = parent.document.getElementById('biggyCockpitStrip');
       const orb = parent.document.getElementById('j-orb');
-      if (prompt && frame) {
-        const promptRect = prompt.getBoundingClientRect();
+      if ((reactor || prompt) && frame) {
+        const promptRect = (reactor || prompt).getBoundingClientRect();
         const frameRect = frame.getBoundingClientRect();
         desiredCenterX = promptRect.left + (promptRect.width / 2) - frameRect.left;
       }

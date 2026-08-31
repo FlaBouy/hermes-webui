@@ -57,3 +57,14 @@ def test_calendar_overlays_default_all_listed_on_card_open():
     # Session toggles still refresh the panel; reopen resets via setActiveCategory.
     assert "state.calendarIds = check.checked" in BRAND
     assert "Add / manage Google calendars" in BRAND
+
+
+def test_calendar_conflicts_are_highlighted_from_structured_agent_evidence_until_card_close():
+    assert "function setCalendarConflictEvidence(dlg, evidence)" in BRAND
+    assert "function isCalendarConflictEvent(dlg, event)" in BRAND
+    assert "m.calendar_evidence" in BRAND
+    assert "is-calendar-conflict" in BRAND
+    assert "SCHEDULE CONFLICT${conflict.count === 1 ? '' : 'S'} FOUND" in BRAND
+    assert "if (collapsed) clearCalendarConflictHighlight(dlg);" in BRAND
+    assert ".biggy-calendar-conflict-banner" in BRAND_CSS
+    assert ".biggy-calendar-event.is-calendar-conflict" in BRAND_CSS

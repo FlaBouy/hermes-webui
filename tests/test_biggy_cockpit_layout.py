@@ -34,7 +34,8 @@ def test_filter_stays_functional_but_is_removed_from_right_rail():
 
 def test_orb_is_bottom_docked_and_cockpit_and_fleet_share_top_center():
     assert ".biggy-argus-reactor{" in BRAND_CSS
-    assert "width:204px;height:280px" in BRAND_CSS
+    assert "width:min(560px,calc(100vw - 136px))" in BRAND_CSS
+    assert "aspect-ratio:1200/714" in BRAND_CSS
     assert ".biggy-top-rail-group{" in BRAND_CSS
     assert "position:absolute;left:50%;top:20px" in BRAND_CSS
     assert "group.prepend(strip)" in BRAND
@@ -44,15 +45,16 @@ def test_orb_is_bottom_docked_and_cockpit_and_fleet_share_top_center():
 
 
 def test_reactor_model_badge_remains_single_line_after_bottom_dock_move():
-    chip_rule = BRAND_CSS[BRAND_CSS.index("#j-brain-chip{"):BRAND_CSS.index("#j-orb svg")]
+    chip_rule = BRAND_CSS[BRAND_CSS.index("#j-brain-chip{"):BRAND_CSS.index(".biggy-brand-controls")]
     assert "white-space:nowrap" in chip_rule
     assert "text-overflow:ellipsis" in chip_rule
     assert "border:0" in chip_rule
     assert "background:transparent" in chip_rule
     assert "backdrop-filter:none" in chip_rule
     panel_rule = BRAND_CSS[BRAND_CSS.index("#j-state-panel{"):BRAND_CSS.index("#j-state{")]
-    assert "width:204px" in panel_rule
-    assert "max-width:204px" in panel_rule
+    assert "width:224px" in panel_rule
+    assert "max-width:224px" in panel_rule
+    assert "bottom:0" in panel_rule
     assert "overflow:hidden" in panel_rule
     state_rule = BRAND_CSS[BRAND_CSS.index("#j-state{"):BRAND_CSS.index("#j-state-txt{")]
     assert "max-width:92px" in state_rule
@@ -95,8 +97,8 @@ def test_starfield_is_shell_owned_when_rag_graph_is_not_loaded():
     assert "clearBiggyV6World(mainChat);\n    installStaticStarfield(mainChat);" in shell
 
 
-def test_prompt_and_pa_deck_match_bottom_rail_without_overlap():
-    assert "padding:10px 84px 54px" in BRAND_CSS
+def test_prompt_and_pa_deck_use_the_space_released_by_the_hidden_bottom_rail():
+    assert "padding:10px 84px 12px" in BRAND_CSS
     assert "width:auto!important;max-width:calc(100% - 48px)" in BRAND_CSS
 
 
@@ -108,7 +110,10 @@ def test_tools_rail_reuses_the_smedley_engineering_runtime():
     assert "smedley-engineering.v0.2.5.js" in BRAND
     assert "biggy-tools-rail" in BRAND_CSS
     assert "#mainChat.biggy-brand-iwo > .smedley-engineering-modal-backdrop" in BRAND_CSS
-    assert "inset:72px 0 400px;align-items:flex-start;padding:16px" in BRAND_CSS
+    assert "inset:64px 0 400px;align-items:flex-start;padding:16px" in BRAND_CSS
+    assert ".biggy-projects-pane{position:absolute;z-index:90;left:50%;top:80px" in BRAND_CSS
+    assert ".biggy-project-dialog{position:absolute;z-index:92;left:50%;top:80px" in BRAND_CSS
+    assert "position:absolute;left:14px;top:88px;bottom:226px" in BRAND_CSS
 
 
 def test_smedley_project_reviews_use_native_projects_rag_ingest_and_kanban_dispatch():
@@ -244,6 +249,24 @@ def test_pa_card_open_reveals_rail_and_pa_close_collapses_cards():
     assert "setBiggyPaRailOpen(true)" in travel
 
 
+def test_tools_and_pa_surfaces_are_mutually_exclusive_and_tools_close_their_dialogs():
+    helpers = BRAND[BRAND.index("function closeVisiblePaCards"):BRAND.index("function forceChromeLabels")]
+    tools = BRAND[BRAND.index("function installHermesStrip"):BRAND.index("function syncArgusOrbMenuFromHermes")]
+    travel = BRAND[BRAND.index("const setCollapsed = (collapsed)"):BRAND.index("dlg.__biggySetCollapsed = setCollapsed")]
+    assert "function closeBiggyLeftDialogs()" in helpers
+    assert "#biggyProjectsPane [data-biggy-projects-close]" in helpers
+    assert "#biggyProjectReviewDialog [data-biggy-project-dialog-close]" in helpers
+    assert ".smedley-engineering-modal-backdrop" in helpers
+    assert "function closeBiggyToolsSurfaces()" in helpers
+    assert "closeBiggyToolsSurfaces();\n        return;" in tools
+    assert "setBiggyPaRailOpen(false, { closeCards: true });" in tools
+    assert "if (!wasOpen) {\n        closeBiggyToolsSurfaces();\n        await closeBiggyHermesPanelSurfaces();" in helpers
+    assert "closeBiggyToolsSurfaces();" in travel
+    assert "function closeBiggyHermesPanelSurfaces()" in helpers
+    assert "await closeBiggyHermesPanelSurfaces();" in helpers
+    assert "void closeBiggyHermesPanelSurfaces();" in travel
+
+
 def test_rag_overview_clears_top_rails_on_desktop_and_tablet():
     assert "left:24px;top:66px" in BRAND_CSS
     assert ".biggy-argus-rag-overview{left:12px;top:56px" in BRAND_CSS
@@ -372,3 +395,7 @@ def test_argus_response_label_observer_is_idempotent():
     assert "icon && icon.textContent !== 'A'" in labels
     assert "turn.dataset.responseAgent !== 'argus'" in labels
     assert "if (name) name.textContent = 'A.R.G.U.S.'" not in labels
+
+
+def test_response_lane_matches_the_expanded_right_card_width():
+    assert "width:min(30vw,560px)" in BRAND_CSS

@@ -190,11 +190,22 @@ def test_sync_chat_display_message_splits_agent_input_from_visible_turn(
 def test_sync_voice_appendix_cannot_steal_ordinary_biggy_story(
     sync_chat_env, monkeypatch
 ):
-    """Only the raw owner utterance may select the Argus hard-bind lane."""
+    """The raw owner story uses one V6 light call, never the Argus hard bind."""
+    import api.biggy_voice_route as voice_route
+
     tmp_path = sync_chat_env
     session = _make_session(tmp_path)
     capture: dict = {}
     _install_fake_agent(monkeypatch, capture=capture)
+    monkeypatch.setattr(
+        voice_route,
+        "request_fast_voice_reply",
+        lambda prompt, history=None: {
+            "reply": "A complete story with one ending.",
+            "model": voice_route.DEFAULT_MODEL,
+            "story": True,
+        },
+    )
     monkeypatch.setattr(
         routes,
         "_handle_argus_sync_hard_bind",
@@ -219,7 +230,15 @@ def test_sync_voice_appendix_cannot_steal_ordinary_biggy_story(
     )
 
     assert handler.status == 200
-    assert capture["run_kwargs"]["persist_user_message"] == owner
+    body = handler.json_body()
+    assert body["biggy_fast_voice_route"] is True
+    assert body["provider_calls"] == 1
+    assert body["answer"] == "A complete story with one ending."
+    assert "run_kwargs" not in capture
+    saved = models.get_session(session.session_id)
+    assert [row["role"] for row in saved.messages] == ["user", "assistant"]
+    assert saved.messages[0]["content"] == owner
+    assert saved.messages[1]["tts_owner"] == "biggy_pedal_austin"
 
 
 def test_sync_explicit_new_argus_map_beats_stale_travel_destination(

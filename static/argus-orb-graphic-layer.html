@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ARGUS Orb Graphic Layer</title>
+  <style>
+    :root { color-scheme: normal; background: transparent; }
+    * { box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
+    body {
+      background: transparent;
+      font-family: "Arial Narrow", "Roboto Condensed", Arial, sans-serif;
+    }
+    #orb { width: 100vw; height: 100vh; display: block; --speech-beat: 0; transition: filter .24s ease; }
+    #orb.is-offline { filter: grayscale(.7) brightness(.62); }
+    #orb.is-think { filter: sepia(.18) saturate(1.28) drop-shadow(0 0 8px rgba(255,208,106,.22)); }
+    #orb.is-speak { filter: hue-rotate(34deg) saturate(1.12) drop-shadow(0 0 10px rgba(125,255,217,.28)); }
+    #orb.is-error { filter: sepia(.8) saturate(4) hue-rotate(315deg); }
+    .speech-reactive { transform-box: view-box; transform-origin: 596px 404px; transform: scale(calc(1 + var(--speech-beat) * .09)); opacity: calc(.84 + var(--speech-beat) * .08); }
+    .ring-speech-reactive { transform-box:view-box; transform-origin:596px 404px; transform:scale(calc(1 + var(--speech-beat) * .025)); }
+    .fine { vector-effect: non-scaling-stroke; shape-rendering: geometricPrecision; }
+    .slow-cw { transform-origin: 600px 400px; animation: cw 52s linear infinite; }
+    .slow-ccw { transform-origin: 600px 400px; animation: ccw 68s linear infinite; }
+    .medium-cw { transform-origin: 600px 400px; animation: cw 18s linear infinite; }
+    .medium-ccw { transform-origin: 600px 400px; animation: ccw 24s linear infinite; }
+    .fast-cw { transform-origin: 600px 400px; animation: cw 7s linear infinite; }
+    .pulse { transform-origin: 596px 404px; animation: pulse 5.2s ease-in-out infinite; }
+    .breath { animation: breath 3.3s ease-in-out infinite; }
+    .inner-solid-cw { transform-box:view-box; transform-origin:596px 404px; animation:cw 9.5s linear infinite; }
+    /* Move the dash phase around a fixed, perfectly concentric circle. Rotating
+       the SVG group made the browser resample its stroke and look off-axis. */
+    .inner-dashed-ccw { animation:dashCcw 14s linear infinite; }
+    .synchronized-light { animation: synchronizedLight 5.2s ease-in-out infinite; }
+    .menu-item { cursor: default; }
+    .menu-item .inference { stroke: #27bce8; stroke-width: 1.7; stroke-dasharray: 3 5; opacity: .62; transition: opacity .2s, stroke-width .2s; }
+    .menu-item .menu-node { fill: #061421; stroke: #33dfff; stroke-width: 2; transition: fill .2s; }
+    .menu-item.active .menu-node { fill: #fff; stroke:#fff; filter:drop-shadow(0 0 4px rgba(255,255,255,.9)); }
+    .menu-item.active .inference { stroke: #fff; stroke-width: 3; opacity: 1; filter:drop-shadow(0 0 3px rgba(255,255,255,.75)); }
+    @keyframes cw { to { transform: rotate(360deg); } }
+    @keyframes ccw { to { transform: rotate(-360deg); } }
+    @keyframes dashCcw { to { stroke-dashoffset: 190; } }
+    @keyframes pulse { 0%,100% { opacity: .45; transform: scale(.97); } 50% { opacity: 1; transform: scale(1.04); } }
+    @keyframes breath { 0%,100% { opacity:.6; } 50% { opacity:1; } }
+    @keyframes synchronizedLight {
+      0%,100% { opacity:.28; filter:brightness(.82) drop-shadow(0 0 2px rgba(56,220,255,.2)); }
+      50% { opacity:.92; filter:brightness(1.28) drop-shadow(0 0 10px rgba(56,220,255,.88)); }
+    }
+    #readout { letter-spacing: .17em; }
+  </style>
+</head>
+<body>
+<svg id="orb" viewBox="0 80 1200 640" role="img" aria-label="Animated ARGUS observation orb">
+  <defs>
+    <radialGradient id="coreGlow"><stop stop-color="#bfffff"/><stop offset=".1" stop-color="#33e6ff"/><stop offset=".38" stop-color="#087fc5"/><stop offset=".7" stop-color="#073c6c" stop-opacity=".45"/><stop offset="1" stop-color="#001423" stop-opacity="0"/></radialGradient>
+    <radialGradient id="darkDisk"><stop stop-color="#123b53"/><stop offset=".55" stop-color="#071c2c"/><stop offset="1" stop-color="#02070c"/></radialGradient>
+    <radialGradient id="sensorCore"><stop stop-color="#fff4f1"/><stop offset=".28" stop-color="#ff8d7c"/><stop offset=".68" stop-color="#dc2f28"/><stop offset="1" stop-color="#6f090d"/></radialGradient>
+    <radialGradient id="profileMask"><stop stop-color="#01060b"/><stop offset=".72" stop-color="#020a12"/><stop offset="1" stop-color="#03101a"/></radialGradient>
+    <filter id="glow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+    <filter id="softGlow" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="12"/></filter>
+    <mask id="outerEdgeLights" maskUnits="userSpaceOnUse" x="320" y="120" width="560" height="560">
+      <rect x="320" y="120" width="560" height="560" fill="black"/>
+      <circle cx="596" cy="404" r="255" fill="white"/>
+      <circle cx="596" cy="404" r="205" fill="black"/>
+    </mask>
+  </defs>
+
+  <g id="orb-visual">
+  <!-- Circular silhouette only: it blocks the galaxy without creating a box. -->
+  <circle id="argus-profile-mask" cx="596" cy="404" r="252" fill="url(#profileMask)" opacity=".99"/>
+  <!-- Exact transparent Element layer exported from Argus_Orb.psd. -->
+  <image id="argus-orb-template" href="/static/argus-orb-template.png" x="238.5" y="159" width="723" height="482" preserveAspectRatio="xMidYMid meet"/>
+  <!-- Pulse only the authored outer lamps, leaving the mechanical shell fixed. -->
+  <image id="argus-outer-edge-pulse" class="synchronized-light" href="/static/argus-orb-template.png" x="238.5" y="159" width="723" height="482" preserveAspectRatio="xMidYMid meet" mask="url(#outerEdgeLights)"/>
+  <!-- Fill the aperture with two independently rotating instrument rings. -->
+  <g id="argus-inner-solid-ring" class="inner-solid-cw" fill="none" stroke="#55ddff">
+    <circle cx="596" cy="404" r="91" stroke-width="2.5" opacity=".82"/>
+    <circle cx="596" cy="313" r="4" fill="#c8f8ff" stroke="none" filter="url(#glow)"/>
+  </g>
+  <g id="argus-inner-dashed-ring" class="inner-dashed-ccw" fill="none" stroke="#30bfe9">
+    <circle cx="596" cy="404" r="112" pathLength="703" stroke-width="2.5" stroke-dasharray="11 8" stroke-linecap="butt" vector-effect="non-scaling-stroke" opacity=".78"/>
+  </g>
+  <!-- This sits over the PSD's solid blue inner ring and follows the core pulse. -->
+  <circle id="argus-lit-ring-pulse" class="synchronized-light ring-speech-reactive" cx="596" cy="404" r="150" fill="none" stroke="#42dcff" stroke-width="8" opacity=".32" filter="url(#glow)"/>
+  <!-- The PSD aperture remains open; Biggy owns only the live pulse placed inside it. -->
+  <g class="pulse">
+    <circle cx="596" cy="404" r="74" fill="none" stroke="#1dc7ff" stroke-width="3" opacity=".58" filter="url(#softGlow)"/>
+  </g>
+  <circle cx="596" cy="404" r="68" fill="#020a11" opacity=".9"/>
+  <circle class="speech-reactive" cx="596" cy="404" r="58" fill="#d8322d" opacity=".84" filter="url(#glow)"/>
+  <circle class="breath speech-reactive" cx="596" cy="404" r="43" fill="url(#sensorCore)" filter="url(#glow)"/>
+  </g>
+
+  <!-- Tie-ins are drawn after the artwork but terminate outside its glow.
+       Nothing crosses the Orb and no masking layer is required. -->
+  <g id="menu-layer"></g>
+
+</svg>
+<script>
+  const NS = 'http://www.w3.org/2000/svg';
+  const menuLayer = document.getElementById('menu-layer');
+  const cx = 596, cy = 404;
+  const make = (name, attrs) => { const el = document.createElementNS(NS, name); Object.entries(attrs).forEach(([k,v]) => el.setAttribute(k,v)); return el; };
+
+  // Existing lower-rail modules, moved intact into two linked side rails around ARGUS.
+  const modules = [
+    ['CHAT', 'left'], ['TASKS', 'left'], ['KANBAN', 'left'], ['SKILLS', 'left'], ['MEMORY', 'left'], ['SPACES', 'left'],
+    ['PROFILES', 'right'], ['TODOS', 'right'], ['INSIGHTS', 'right'], ['LOGS', 'right'], ['SETTINGS', 'right'], ['TOOLS', 'right']
+  ];
+  modules.forEach(([name, side], index) => {
+    const row = index % 6;
+    const y = 250 + row * 60;
+    const inwardIndex = [40, 20, 0, 0, 20, 40][row];
+    const nodeX = side === 'left' ? 250 + inwardIndex : 950 - inwardIndex;
+    const elbowX = side === 'left' ? 360 : 840;
+    const edgeRadius = 270;
+    const edgeDx = elbowX - cx;
+    const edgeDy = y - cy;
+    const edgeLength = Math.hypot(edgeDx, edgeDy) || 1;
+    const targetX = cx + (edgeDx / edgeLength) * edgeRadius;
+    const targetY = cy + (edgeDy / edgeLength) * edgeRadius;
+    const item = make('g', { class: 'menu-item poc-only', 'data-module': name, role: 'img', 'aria-disabled': 'true', 'aria-label': `${name} menu connection` });
+    const line = make('path', { class: 'inference', d: `M ${nodeX} ${y} L ${elbowX} ${y} L ${targetX} ${targetY}` });
+    const node = make('circle', { class: 'menu-node', cx: nodeX, cy: y, r: 7 });
+    item.append(line, node);
+    menuLayer.appendChild(item);
+  });
+  const STATE_CLASS = { offline: 'is-offline', online: '', thinking: 'is-think', speaking: 'is-speak', 'tool-running': 'is-think', error: 'is-error' };
+  window.addEventListener('message', event => {
+    if (event.origin !== window.location.origin || !event.data) return;
+    if (event.data.type === 'biggy-argus-orb-state') {
+      orb.classList.remove('is-offline', 'is-think', 'is-speak', 'is-error');
+      const state = String(event.data.state || '');
+      const className = Object.prototype.hasOwnProperty.call(STATE_CLASS, state) ? STATE_CLASS[state] : 'is-error';
+      if (className) orb.classList.add(className);
+    }
+    if (event.data.type === 'biggy-argus-orb-beat') {
+      const beat = Math.max(0, Math.min(2, Number(event.data.beat) || 0));
+      orb.style.setProperty('--speech-beat', String(beat));
+    }
+    if (event.data.type === 'biggy-argus-orb-menu-state') {
+      const active = new Set(Array.isArray(event.data.active) ? event.data.active.map(value => String(value).toUpperCase()) : []);
+      menuLayer.querySelectorAll('.menu-item[data-module]').forEach(item => {
+        item.classList.toggle('active', active.has(String(item.dataset.module || '').toUpperCase()));
+      });
+    }
+  });
+</script>
+</body>
+</html>

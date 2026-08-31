@@ -823,7 +823,10 @@
       deck.style.setProperty('width', `${railWidth}px`);
     }
     const axisRect = (deck || prompt).getBoundingClientRect();
-    const masterX = axisRect.left + (axisRect.width / 2);
+    // The label, prompt deck, and Hermes rail carry a 6px optical correction
+    // so the G in A.R.G.U.S. sits on the fixed Orb axis. Remove that display
+    // offset here so the Orb and upper rails retain the true layout center.
+    const masterX = axisRect.left + (axisRect.width / 2) - 6;
     const placeOnMaster = (node) => {
       if (!node || !node.offsetParent) return;
       const parentRect = node.offsetParent.getBoundingClientRect();
@@ -926,9 +929,8 @@
     strip.innerHTML = '<span class="biggy-fleet-strip-label">HERMES</span>';
     const selectPanel = async (panel, button) => {
       const main = document.querySelector('main.main');
-      const toolsRail = document.getElementById('biggyToolsRail');
-      if (toolsRail) toolsRail.hidden = true;
-      strip.querySelector('.biggy-hermes-tools')?.classList.remove('active');
+      closeBiggyToolsSurfaces();
+      setBiggyPaRailOpen(false, { closeCards: true });
       const current = main && main.dataset.biggyHermesPanel;
       // A second tap on the active utility panel returns the operator to chat.
       const next = current === panel && panel !== 'chat' ? 'chat' : panel;
@@ -968,14 +970,71 @@
       event.preventDefault();
       const rail = ensureBiggyToolsRail();
       const open = rail.hidden;
-      rail.hidden = !open;
-      tools.classList.toggle('active', open);
-      tools.setAttribute('aria-pressed', open ? 'true' : 'false');
-      if (open) await populateBiggyToolsRail(rail);
+      if (!open) {
+        closeBiggyToolsSurfaces();
+        return;
+      }
+      await closeBiggyHermesPanelSurfaces();
+      setBiggyPaRailOpen(false, { closeCards: true });
+      rail.hidden = false;
+      tools.classList.add('active');
+      tools.setAttribute('aria-pressed', 'true');
+      syncArgusOrbMenuFromHermes();
+      await populateBiggyToolsRail(rail);
     });
     strip.appendChild(tools);
+    // The production controls remain the single function owners, but the
+    // authored Orb menu is now their visible and interactive surface.
+    strip.classList.add('biggy-hermes-orb-source');
+    strip.setAttribute('aria-hidden', 'true');
     layout.appendChild(strip);
+    syncArgusOrbMenuFromHermes();
     return strip;
+  }
+
+  function syncArgusOrbMenuFromHermes() {
+    const dock = document.getElementById('biggyArgusReactor');
+    const strip = document.getElementById('biggyHermesStrip');
+    const menu = dock && dock.querySelector('#j-orb-menu');
+    if (!dock || !strip || !menu) return;
+    menu.replaceChildren();
+    const sources = Array.from(strip.querySelectorAll('.biggy-hermes-panel'));
+    const uniformWidth = Math.max(0, ...sources.map((source) => Math.ceil(source.getBoundingClientRect().width)));
+    sources.forEach((source, index) => {
+      const clone = source.cloneNode(true);
+      clone.removeAttribute('id');
+      clone.removeAttribute('data-panel');
+      clone.removeAttribute('aria-hidden');
+      clone.tabIndex = 0;
+      clone.classList.remove('biggy-hermes-tools');
+      clone.classList.add('biggy-orb-menu-tab');
+      clone.classList.add(index < 6 ? 'biggy-orb-menu-left' : 'biggy-orb-menu-right');
+      clone.setAttribute('aria-label', source.title || source.textContent.trim());
+      clone.querySelector('.biggy-fleet-state')?.remove();
+      if (uniformWidth) {
+        clone.style.width = `${uniformWidth}px`;
+        clone.style.minWidth = `${uniformWidth}px`;
+      }
+      const row = index % 6;
+      const inwardIndex = [40, 20, 0, 0, 20, 40][row];
+      const nodeX = index < 6 ? 250 + inwardIndex : 950 - inwardIndex;
+      clone.style.left = `${(nodeX / 1200) * 100}%`;
+      clone.style.top = `${26.5625 + row * 9.375}%`;
+      clone.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        source.click();
+        window.setTimeout(syncArgusOrbMenuFromHermes, 0);
+        window.setTimeout(syncArgusOrbMenuFromHermes, 160);
+      });
+      menu.appendChild(clone);
+    });
+    const visual = document.getElementById('j-orb-frame');
+    if (visual?.contentWindow) {
+      const active = sources.filter((source) => source.classList.contains('active') || source.getAttribute('aria-pressed') === 'true')
+        .map((source) => source.textContent.trim().toUpperCase());
+      try { visual.contentWindow.postMessage({ type: 'biggy-argus-orb-menu-state', active }, window.location.origin); } catch (_) {}
+    }
   }
 
   let smedleyToolsLoadPromise = null;
@@ -1433,6 +1492,43 @@
     });
   }
 
+  function closeBiggyLeftDialogs() {
+    document.querySelector('#biggyProjectsPane [data-biggy-projects-close]')?.click();
+    document.querySelector('#biggyProjectReviewDialog [data-biggy-project-dialog-close]')?.click();
+    document.querySelectorAll('#mainChat.biggy-brand-iwo > .smedley-engineering-modal-backdrop').forEach((backdrop) => {
+      const close = backdrop.querySelector('button[aria-label="Close"]');
+      if (close) close.click();
+      else backdrop.remove();
+    });
+  }
+
+  function closeBiggyToolsSurfaces() {
+    const rail = document.getElementById('biggyToolsRail');
+    if (rail) rail.hidden = true;
+    closeBiggyLeftDialogs();
+    const tools = document.querySelector('#biggyHermesStrip .biggy-hermes-tools');
+    if (tools) {
+      tools.classList.remove('active');
+      tools.setAttribute('aria-pressed', 'false');
+    }
+    syncArgusOrbMenuFromHermes();
+  }
+
+  async function closeBiggyHermesPanelSurfaces() {
+    const main = document.querySelector('main.main');
+    const strip = document.getElementById('biggyHermesStrip');
+    const activePanel = main?.dataset.biggyHermesPanel;
+    if (activePanel && typeof window.switchPanel === 'function') {
+      try { await window.switchPanel('chat'); } catch (_) {}
+    }
+    if (main) delete main.dataset.biggyHermesPanel;
+    strip?.querySelectorAll('.biggy-hermes-panel:not(.biggy-hermes-tools)').forEach((button) => {
+      button.classList.remove('active');
+      button.setAttribute('aria-pressed', 'false');
+    });
+    syncArgusOrbMenuFromHermes();
+  }
+
   function setBiggyPaRailOpen(open, { closeCards = false } = {}) {
     const mainChat = document.getElementById('mainChat');
     const button = document.getElementById('biggyPaToggle');
@@ -1470,9 +1566,13 @@
     button.title = 'Open personal assistant controls';
     button.setAttribute('aria-label', button.title);
     const setOpen = (open, options = {}) => setBiggyPaRailOpen(open, options);
-    button.addEventListener('click', (event) => {
+    button.addEventListener('click', async (event) => {
       event.preventDefault();
       const wasOpen = mainChat.classList.contains('biggy-pa-rail-open');
+      if (!wasOpen) {
+        closeBiggyToolsSurfaces();
+        await closeBiggyHermesPanelSurfaces();
+      }
       setOpen(!wasOpen, { closeCards: wasOpen });
     });
     deck.insertBefore(button, box);
@@ -2328,6 +2428,12 @@
     const orb = document.getElementById('j-orb');
     if (!orb) return;
     orb.className = REACTOR_ORB_CLASS[next] || '';
+    const visual = document.getElementById('j-orb-frame');
+    if (visual && visual.contentWindow) {
+      try {
+        visual.contentWindow.postMessage({ type: 'biggy-argus-orb-state', state: next }, window.location.origin);
+      } catch (_) {}
+    }
     const label = detail ? `${next}: ${detail}` : next;
     orb.setAttribute('title', `A.R.G.U.S. ${label}`);
     orb.setAttribute('aria-label', `A.R.G.U.S. ${label}`);
@@ -2348,6 +2454,7 @@
   let argusSpeechPulseSampleMs = 40;
   let argusSpeechPulseGain = 1;
   let argusSpeechPulseLeadMs = 80;
+  let argusSpeechGainPreviewTimer = null;
 
   async function loadArgusSpeechSyncSettings() {
     try {
@@ -2401,6 +2508,10 @@
       orb.style.setProperty('--beat', '0');
       orb.style.setProperty('--orb-scale', '1');
     }
+    const visual = document.getElementById('j-orb-frame');
+    if (visual && visual.contentWindow) {
+      try { visual.contentWindow.postMessage({ type: 'biggy-argus-orb-beat', beat: 0 }, window.location.origin); } catch (_) {}
+    }
   }
 
   function renderArgusSpeechFrame() {
@@ -2415,11 +2526,15 @@
     }
     const measured = Number(argusSpeechPulseEnvelope[index] || 0);
     const rawLevel = Math.max(0, Number.isFinite(measured) ? measured : 0);
-    const level = Math.max(0, Math.min(1, rawLevel * argusSpeechPulseGain));
-    // The real RMS envelope controls a restrained core glow and 0–2.8% scale.
-    // This reads as speech energy without turning the reactor into a bounce.
+    const level = Math.max(0, Math.min(2, rawLevel * argusSpeechPulseGain));
+    // The measured RMS envelope drives the core and authored blue ring. Gain
+    // is allowed to reach 2x so the tuner produces a plainly visible change.
     orb.style.setProperty('--beat', String(level * .82));
     orb.style.setProperty('--orb-scale', String(1 + (level * .028)));
+    const visual = document.getElementById('j-orb-frame');
+    if (visual && visual.contentWindow) {
+      try { visual.contentWindow.postMessage({ type: 'biggy-argus-orb-beat', beat: level }, window.location.origin); } catch (_) {}
+    }
     argusSpeechPulseFrame = requestAnimationFrame(renderArgusSpeechFrame);
   }
 
@@ -2465,6 +2580,19 @@
       argusSpeechPulseGain = Math.max(.5, Math.min(2, Number(gain.value) || 1));
       saveArgusSpeechSyncSettings();
       render();
+      if (!argusSpeechPulseSignature) {
+        const visual = document.getElementById('j-orb-frame');
+        if (visual && visual.contentWindow) {
+          try { visual.contentWindow.postMessage({ type: 'biggy-argus-orb-beat', beat: argusSpeechPulseGain }, window.location.origin); } catch (_) {}
+          if (argusSpeechGainPreviewTimer) clearTimeout(argusSpeechGainPreviewTimer);
+          argusSpeechGainPreviewTimer = setTimeout(() => {
+            if (!argusSpeechPulseSignature) {
+              try { visual.contentWindow.postMessage({ type: 'biggy-argus-orb-beat', beat: 0 }, window.location.origin); } catch (_) {}
+            }
+            argusSpeechGainPreviewTimer = null;
+          }, 320);
+        }
+      }
     });
     lead.addEventListener('input', () => {
       argusSpeechPulseLeadMs = Math.max(-250, Math.min(300, Number(lead.value) || 0));
@@ -3866,13 +3994,9 @@
     return header;
   }
 
-  // A.R.G.U.S. reactor presence unit (#j-orb / #j-state / #j-brain-chip),
-  // native 204x204, unmodified markup/classes/ids. Only the outer wrapper's
-  // positioning differs (centered over the header/workspace seam here
-  // instead of viewport-right-docked as in the standalone V6 page); see the
-  // matching CSS block in biggy-brand.css for the ported (but unscaled)
-  // styling. This is inserted as a sibling of the header so it can overlap
-  // the header/workspace boundary without being clipped by the header box.
+  // New A.R.G.U.S. graphical-layer POC. Its SVG and inert module placements
+  // stay isolated in a same-origin frame; Biggy retains the production model,
+  // state, accessibility, and speech-envelope ownership in the host DOM.
   function makeReactorDock() {
     const dock = el('div', 'biggy-argus-reactor');
     dock.id = 'biggyArgusReactor';
@@ -3880,37 +4004,19 @@
     dock.setAttribute('data-testid', 'biggy-reactor-dock');
     dock.innerHTML =
       `<div id="j-orb" data-testid="biggy-argus-orb" role="status" aria-live="polite" aria-label="A.R.G.U.S. offline">` +
-      // Opaque freeze underlay: full 204px Orb circumference above Galaxy,
-      // beneath every SVG ring/label. Blocks node/trace bleed without covering
-      // Orb art, model chip, state, or fleet/cockpit interaction.
-      `<div id="j-orb-mask" class="biggy-orb-mask biggy-orb-freeze-overlay" data-testid="biggy-orb-mask" data-biggy-layer="orb-mask" aria-hidden="true"></div>` +
-      `<svg viewBox="0 0 200 200" aria-hidden="true">` +
-      `<defs><radialGradient id="hudCore" cx="50%" cy="45%" r="62%">` +
-      `<stop offset="0%" stop-color="#0e413c"/><stop offset="70%" stop-color="#0b302d"/>` +
-      `<stop offset="100%" stop-color="#082825"/>` +
-      `</radialGradient></defs>` +
-      `<g class="hud-pulse glow">` +
-      `<g class="rot rot-a"><g id="hud-ticks" class="s-hud" stroke-width="0.9"></g></g>` +
-      `<circle class="rot rot-b s-hud" cx="100" cy="100" r="86" stroke-width="3.4" stroke-dasharray="48 30" stroke-linecap="round"/>` +
-      `<circle class="s-hud2" cx="100" cy="100" r="79" stroke-width="1" opacity="0.45"/>` +
-      `<circle class="rot rot-c s-accent" cx="100" cy="100" r="70" stroke-width="4.2" stroke-dasharray="122 318" stroke-linecap="round"/>` +
-      `<circle class="rot rot-d s-hud" cx="100" cy="100" r="55" stroke-width="1.2" stroke-dasharray="2 6" opacity="0.7"/>` +
-      `<circle class="s-hud2" cx="100" cy="100" r="40" stroke-width="1" opacity="0.4"/>` +
-      `<g class="rot rot-core s-hud2" id="hud-spokes" stroke-width="0.9" opacity="0.5"></g>` +
-      `<g class="rot rot-radar"><line class="s-hud" x1="100" y1="100" x2="100" y2="53" stroke-width="1.6" opacity="0.6"/></g>` +
-      `<g id="hud-dots"></g>` +
-      `<circle class="core-glow" cx="100" cy="100" r="37"/>` +
-      `<circle class="core-disc" cx="100" cy="100" r="32"/>` +
-      `<circle class="core-lobe" cx="100" cy="100" r="32"/>` +
-      `<circle class="core-rim" cx="100" cy="100" r="32" stroke-width="1.2"/>` +
-      `<text class="hud-label" x="101.5" y="103.5" text-anchor="middle">A.R.G.U.S.</text>` +
-      `</g>` +
-      `</svg>` +
+      `<iframe id="j-orb-frame" data-testid="biggy-argus-orb-poc" src="/static/argus-orb-graphic-layer.html" title="A.R.G.U.S. graphical layer" tabindex="-1" aria-hidden="true" allowtransparency="true"></iframe>` +
+      `<div id="j-orb-menu" aria-hidden="true"></div>` +
       `</div>` +
+      `<div id="j-argus-name" data-testid="biggy-argus-name">A.R.G.U.S.</div>` +
       `<div id="j-state-panel" data-testid="biggy-argus-readout">` +
       `<div id="j-brain"><span id="j-brain-chip" data-testid="biggy-argus-model">—</span></div>` +
       `<div id="j-state" data-testid="biggy-argus-state"><span class="dot"></span><span id="j-state-txt">OFFLINE</span></div>` +
       `</div>`;
+    const visual = dock.querySelector('#j-orb-frame');
+    if (visual) visual.addEventListener('load', () => {
+      setArgusOrbState(argusOrbState);
+      syncArgusOrbMenuFromHermes();
+    });
     return dock;
   }
 
@@ -4704,6 +4810,39 @@
     return true;
   }
 
+  function calendarConflictEventKey(event) {
+    if (!event || typeof event !== 'object') return '';
+    const id = String(event.id || '').trim();
+    if (id) return `id:${id}`;
+    return `event:${String(event.start || '').trim()}|${String(event.end || '').trim()}|${String(event.summary || '').trim().toLowerCase()}`;
+  }
+
+  function clearCalendarConflictHighlight(dlg) {
+    if (!dlg) return;
+    dlg.__biggyCalendarConflict = null;
+  }
+
+  function setCalendarConflictEvidence(dlg, evidence) {
+    if (!dlg) return false;
+    const events = Array.isArray(evidence && evidence.events) ? evidence.events.filter(Boolean) : [];
+    const count = Math.max(0, Number(evidence && evidence.event_count) || events.length);
+    if (!count) {
+      clearCalendarConflictHighlight(dlg);
+      return false;
+    }
+    const keys = new Set(events.map(calendarConflictEventKey).filter(Boolean));
+    dlg.__biggyCalendarConflict = { count, keys, events };
+    const firstStart = events.map((event) => event && event.start).find(Boolean);
+    if (firstStart) calendarWorkspaceState(dlg).cursor = calendarDateKey(firstStart);
+    return true;
+  }
+
+  function isCalendarConflictEvent(dlg, event) {
+    const conflict = dlg && dlg.__biggyCalendarConflict;
+    if (!conflict || !conflict.keys || !conflict.keys.size) return false;
+    return conflict.keys.has(calendarConflictEventKey(event));
+  }
+
   function calendarRequestWindow(state) {
     const cursor = calendarLocalDate(state.cursor);
     cursor.setHours(0, 0, 0, 0);
@@ -4819,6 +4958,14 @@
     panel.classList.add('biggy-calendar-workspace');
     panel.appendChild(operatorHeading('Google Calendar'));
 
+    const conflict = dlg.__biggyCalendarConflict;
+    if (conflict && conflict.count > 0) {
+      const banner = document.createElement('div');
+      banner.className = 'biggy-calendar-conflict-banner';
+      banner.textContent = `${conflict.count} SCHEDULE CONFLICT${conflict.count === 1 ? '' : 'S'} FOUND`;
+      panel.appendChild(banner);
+    }
+
     if (!calendar.connected) {
       appendOperatorRow(panel, 'Biggy local Google authorization is required.', calendar.oauth_ready ? 'OAuth client is ready for account approval.' : 'Biggy needs its profile-scoped Google OAuth connection.', 'warning');
       return;
@@ -4925,6 +5072,7 @@
       if (!selected.length) appendOperatorRow(day, 'No events scheduled.', 'This day is clear.', 'ready');
       selected.forEach((event) => {
         const row = appendOperatorRow(day, calendarEventLabel(event), `${String(event.calendar_summary || '')}${event.location ? ` · ${event.location}` : ''}`, 'ready');
+        if (isCalendarConflictEvent(dlg, event)) row.classList.add('is-calendar-conflict');
         if (event.editable && calendar.write_ready) {
           row.classList.add('is-actionable');
           row.addEventListener('click', () => calendarEventEditor(panel, dlg, event, calendar.write_ready));
@@ -4964,6 +5112,10 @@
         chip.textContent = calendarEventLabel(event);
         chip.title = `${String(event.summary || '')}${event.location ? ` · ${event.location}` : ''}`;
         chip.style.borderLeftColor = String(event.calendar_color || '#34d399');
+        if (isCalendarConflictEvent(dlg, event)) {
+          chip.classList.add('is-calendar-conflict');
+          chip.setAttribute('aria-label', `Schedule conflict: ${calendarEventLabel(event, true)}`);
+        }
         chip.addEventListener('click', () => {
           if (event.editable && calendar.write_ready) calendarEventEditor(panel, dlg, event, calendar.write_ready);
           else if (event.url) window.open(event.url, '_blank', 'noopener');
@@ -5352,7 +5504,7 @@
     dlg.setAttribute('data-displaces-conversation', 'false');
     dlg.setAttribute('aria-label', 'Travel category rail');
     dlg.setAttribute('data-open-panel-scale', 'workspace');
-    dlg.style.setProperty('--biggy-travel-dock-width', 'min(38vw, 720px)');
+    dlg.style.setProperty('--biggy-travel-dock-width', 'min(30vw, 560px)');
     // Rail stays visible; panel opens on category select / travel content.
     dlg.hidden = false;
     const railBtns = TRAVEL_CATEGORIES.map((label) => {
@@ -5418,12 +5570,15 @@
 
     const setCollapsed = (collapsed) => {
       dlg.classList.toggle('is-collapsed', !!collapsed);
+      if (collapsed) clearCalendarConflictHighlight(dlg);
       const collapseBtn = dlg.querySelector('#biggyTravelDockCollapse');
       if (collapseBtn) collapseBtn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
       if (!collapsed) {
         // Any card opened from the PA categories presents its navigation rail
         // as part of the same action, so the remaining cards are immediately
         // available without a second PA-button click.
+        closeBiggyToolsSurfaces();
+        void closeBiggyHermesPanelSurfaces();
         setBiggyPaRailOpen(true);
         try { if (mapInstance) mapInstance.resize(); } catch (_) {}
         scheduleTravelMapCameraFit('open');
@@ -5499,6 +5654,8 @@
       btn.addEventListener('click', (ev) => {
         ev.preventDefault();
         const key = btn.getAttribute('data-category') || 'travel';
+        const previousKey = dlg.getAttribute('data-active-category') || '';
+        if (previousKey === 'calendar' && key !== 'calendar') clearCalendarConflictHighlight(dlg);
         if (!dlg.classList.contains('is-collapsed') && dlg.getAttribute('data-active-category') === key) {
           setCollapsed(true);
           return;
@@ -6574,6 +6731,11 @@
       const lvm = m.lodging_view_model;
       const avm = m.visual_action_view_model;
       const weatherBriefing = m.weather_briefing;
+      const calendarEvidence = m.calendar_evidence && typeof m.calendar_evidence === 'object'
+        ? m.calendar_evidence
+        : null;
+      const hasCalendarEvidence = !!(calendarEvidence
+        && Number.isFinite(Number(calendarEvidence.event_count)));
       const hasVisual = [
         isUsableTravelVisual(mvm, 'map'),
         isUsableTravelVisual(rvm, 'recommendation'),
@@ -6581,6 +6743,7 @@
         isUsableTravelVisual(lvm, 'lodging'),
         isUsableTravelVisual(avm, 'action'),
         isUsableTravelVisual(weatherBriefing, 'weather'),
+        hasCalendarEvidence,
       ].some(Boolean);
       // Only the latest completed assistant turn is eligible.  Do not walk
       // back through history: a RAG result must never resurrect travel cards.
@@ -6609,6 +6772,9 @@
       // one transaction rather than mixing two trips.
       invalidateTravelVisuals();
       clearRagTrace();
+
+      const calendarDialog = calendarEvidence ? ensureTravelMapDialog() : null;
+      if (calendarDialog) setCalendarConflictEvidence(calendarDialog, calendarEvidence);
 
       let recInfo = { rendered: false, count: 0, category: null };
       let visualActionOk = false;
@@ -6640,6 +6806,13 @@
           if (dlg && typeof dlg.__biggySetActiveCategory === 'function') {
             dlg.__biggySetActiveCategory('weather', { open: true });
           }
+          visualActionOk = true;
+        }
+        if (calendarDialog && !mvm && !rvm && !tpm && !lvm && !avm && !weatherBriefing) {
+          if (typeof calendarDialog.__biggySetActiveCategory === 'function') {
+            calendarDialog.__biggySetActiveCategory('calendar', { open: true });
+          }
+          refreshOperatorPanel(calendarDialog, 'calendar');
           visualActionOk = true;
         }
       } catch (error) {
