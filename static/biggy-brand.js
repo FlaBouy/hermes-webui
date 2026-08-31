@@ -14,7 +14,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260830-tools-rail-39';
+  const BUILD_ID = '20260831-response-travel-40';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -2911,8 +2911,20 @@
 
   function ensureArgusConversationLane(mainChat) {
     const host = mainChat || document.getElementById('mainChat');
-    if (host) host.querySelectorAll('.biggy-argus-conversation-lane').forEach((node) => node.remove());
-    return null;
+    if (!host) return null;
+    let lane = host.querySelector('#biggyArgusConversationLane');
+    if (lane) return lane;
+    lane = el('section', 'biggy-argus-conversation-lane');
+    lane.id = 'biggyArgusConversationLane';
+    lane.dataset.biggyLayer = 'conversation';
+    lane.setAttribute('data-testid', 'biggy-argus-conversation-lane');
+    lane.setAttribute('aria-label', 'Biggy and ARGUS conversation');
+    lane.hidden = true;
+    lane.innerHTML = '<div class="biggy-argus-conversation-heading">CONVERSATION // LIVE</div>'
+      + '<div class="biggy-argus-conversation-turns" aria-live="polite"></div>';
+    host.appendChild(lane);
+    syncArgusConversationLaneBoundary(lane, host);
+    return lane;
   }
 
   function syncArgusConversationLaneBoundary(lane, host) {
@@ -3036,9 +3048,7 @@
     body.scrollTop = body.scrollHeight;
   }
 
-  window.__biggyRenderArgusConversationLaneNow = () => {
-    document.querySelectorAll('.biggy-argus-conversation-lane').forEach((node) => node.remove());
-  };
+  window.__biggyRenderArgusConversationLaneNow = renderArgusConversationLane;
 
   function installArgusConversationLane(mainChat) {
     const lane = ensureArgusConversationLane(mainChat);
@@ -6788,6 +6798,7 @@
     installComposerBranding();
     installFleetStrip();
     installHermesStrip(mainChat);
+    installArgusConversationLane(mainChat);
     installSettingsSessionControls();
     installBiggyDeckLayoutObserver(mainChat);
     scheduleBiggySharedCenterline();

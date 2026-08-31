@@ -49,6 +49,9 @@ def test_stt_wake_homophone_is_repaired_only_at_leading_address():
     ) == (
         "Hey Biggy about getting Argus to get me a map routed to Jordan-Hare Stadium."
     )
+    assert _normalize_biggy_wake_name(
+        "Hey Biggy, ask Argus to map me a route to Jordan-Hair Stadium."
+    ) == "Hey Biggy, ask Argus to map me a route to Jordan-Hare Stadium."
     assert _normalize_biggy_wake_name("Open my piggy bank note") == "Open my piggy bank note"
     assert _normalize_biggy_wake_name(
         "Hey Biggie, have Vargas pull a map to Jordan-Hare Stadium."

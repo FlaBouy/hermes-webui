@@ -77,8 +77,8 @@ def test_rag_button_toggles_panel_without_reinstalling_conversation_stack():
     shell = BRAND[BRAND.index("function applyShell()"):BRAND.index("async function tryStart()")]
     assert "clearBiggyV6World(mainChat)" in shell
     assert "installBiggyV6World(mainChat)" not in shell
-    assert "installArgusConversationLane(mainChat)" not in shell
-    assert ".biggy-argus-conversation-lane" not in BRAND_CSS
+    assert "installArgusConversationLane(mainChat)" in shell
+    assert ".biggy-argus-conversation-lane" in BRAND_CSS
 
 
 def test_starfield_is_shell_owned_when_rag_graph_is_not_loaded():
@@ -267,11 +267,12 @@ def test_rag_ingest_polling_follows_rag_panel_visibility():
     assert "stopArgusRagIngestPolling" in visibility
 
 
-def test_legacy_conversation_stack_is_removed_from_the_active_shell():
+def test_live_response_stack_is_restored_to_the_active_shell():
     shell = BRAND[BRAND.index("function applyShell()"):BRAND.index("async function tryStart()")]
-    assert "installArgusConversationLane(mainChat)" not in shell
+    assert "installArgusConversationLane(mainChat)" in shell
     assert "clearInterval(conversationLaneTimer)" in shell
-    assert ".biggy-argus-conversation-lane" not in BRAND_CSS
+    assert ".biggy-argus-conversation-lane" in BRAND_CSS
+    assert "window.__biggyRenderArgusConversationLaneNow = renderArgusConversationLane" in BRAND
 
 
 def test_hermes_controls_replace_left_navigation_beneath_prompt():

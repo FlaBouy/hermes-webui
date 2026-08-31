@@ -555,10 +555,10 @@ def test_right_rail_utility_labels_remain_canonical():
     assert 'id="biggyOpenSmedley"' not in BIGGY_JS
 
 
-def test_argus_conversation_lane_is_removed_from_active_glass():
+def test_argus_conversation_lane_is_restored_to_active_glass():
     shell = BIGGY_JS[BIGGY_JS.index("function applyShell()"):BIGGY_JS.index("async function tryStart()")]
-    assert "installArgusConversationLane(mainChat)" not in shell
-    assert ".biggy-argus-conversation-lane" not in BIGGY_CSS
+    assert "installArgusConversationLane(mainChat)" in shell
+    assert ".biggy-argus-conversation-lane" in BIGGY_CSS
 
 
 def test_embedded_world_brightens_only_the_stock_star_field():
@@ -660,9 +660,10 @@ def test_travel_categories_do_not_leak_stale_cards_and_map_survives_category_swi
     assert "section.setAttribute('data-rec-category', railKey)" in BIGGY_JS
 
 
-def test_rag_palette_matches_argus_hud_after_conversation_stack_removal():
+def test_rag_palette_matches_argus_hud_with_conversation_stack():
     assert ".biggy-argus-rag-subtitle{margin-top:5px;color:#b59cff" in BIGGY_CSS
-    assert ".biggy-argus-conversation-lane" not in BIGGY_CSS
+    assert ".biggy-argus-conversation-lane" in BIGGY_CSS
+    assert ".biggy-argus-dialog.is-argus" in BIGGY_CSS
     assert "border-left-color:#62dbff" in BIGGY_CSS
 
 
@@ -699,7 +700,7 @@ def test_routes_wire_world_endpoint():
 def test_iwo_background_image_removed_from_css():
     assert "iwo.jpg" not in BIGGY_CSS
     assert ".biggy-argus-rag-overview" in BIGGY_CSS
-    assert "padding:10px 84px 66px" in BIGGY_CSS
+    assert "padding:10px 84px 54px" in BIGGY_CSS
 
 
 def test_gitignore_covers_local_world_config():

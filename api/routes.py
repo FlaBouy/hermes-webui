@@ -23244,7 +23244,7 @@ def _normalize_biggy_wake_name(message: str) -> str:
         flags=re.IGNORECASE,
     )
     msg = re.sub(
-        r"\bJordan\s+Harris\s+Stadium\b",
+        r"\bJordan(?:[\s-]+)(?:Harris|Hair)(?:\s+Stadium)?\b",
         "Jordan-Hare Stadium",
         msg,
         flags=re.IGNORECASE,
