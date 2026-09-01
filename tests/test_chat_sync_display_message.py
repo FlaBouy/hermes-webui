@@ -241,6 +241,53 @@ def test_sync_voice_appendix_cannot_steal_ordinary_biggy_story(
     assert saved.messages[1]["tts_owner"] == "biggy_pedal_austin"
 
 
+def test_browser_biggy_voice_uses_v6_and_one_server_austin_owner(
+    sync_chat_env, monkeypatch
+):
+    """The Biggy GUI local voice lane speaks once without a Realtime owner."""
+    import api.biggy_voice_route as voice_route
+
+    tmp_path = sync_chat_env
+    session = _make_session(tmp_path)
+    spoken = []
+    monkeypatch.setattr(
+        voice_route,
+        "request_fast_voice_reply",
+        lambda prompt, history=None: {
+            "reply": "Quick local answer.",
+            "model": voice_route.DEFAULT_MODEL,
+            "story": False,
+        },
+    )
+    monkeypatch.setattr(routes, "_server_speak_smedley", spoken.append)
+    owner = "Hey Biggy, give me the short version."
+    handler = _FakePostHandler()
+
+    routes._handle_chat_sync(
+        handler,
+        {
+            "session_id": session.session_id,
+            "message": owner + "\n\n[Voice PTT turn — browser-local Biggy Voice]",
+            "display_message": owner,
+            "workspace": str(tmp_path),
+            "biggy_local_voice": True,
+        },
+    )
+
+    assert handler.status == 200
+    body = handler.json_body()
+    assert body["biggy_fast_voice_route"] is True
+    assert body["answer"] == "Quick local answer."
+    assert body["ptt_owned_tts"] is True
+    assert body["tts_owner"] == "server_austin"
+    assert spoken == ["Quick local answer."]
+    saved = models.get_session(session.session_id)
+    assert [row["role"] for row in saved.messages] == ["user", "assistant"]
+    assert saved.messages[0]["content"] == owner
+    assert saved.messages[1]["ptt_owned_tts"] is True
+    assert saved.messages[1]["tts_owner"] == "server_austin"
+
+
 def test_sync_explicit_new_argus_map_beats_stale_travel_destination(
     sync_chat_env, monkeypatch
 ):

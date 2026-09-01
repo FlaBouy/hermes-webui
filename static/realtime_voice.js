@@ -1167,7 +1167,17 @@
     }
   }
 
+  function _biggyV6VoiceController() {
+    const controller = window.__biggyV6VoiceController;
+    return controller && typeof controller === 'object' ? controller : null;
+  }
+
   function beginTalk() {
+    const local = _biggyV6VoiceController();
+    if (local && typeof local.beginTalk === 'function') {
+      local.beginTalk();
+      return;
+    }
     if (!STATE.active || _handsFree()) return;
     if (STATE.phase === 'connecting' || STATE.phase === 'processing') return;
     // Holding Talk during playback is a deliberate barge-in.
@@ -1198,6 +1208,11 @@
   }
 
   function endTalk() {
+    const local = _biggyV6VoiceController();
+    if (local && typeof local.endTalk === 'function') {
+      local.endTalk();
+      return;
+    }
     if (!STATE.talking) return;
     STATE.talking = false;
     _sampleOutboundRtc('end_talk');
@@ -1257,6 +1272,10 @@
   }
 
   async function startGptVoice() {
+    const local = _biggyV6VoiceController();
+    if (local && typeof local.start === 'function') {
+      return local.start();
+    }
     if (STATE.active) return;
     STATE.active = true;
     try { window.__smedleyRealtimeVoiceActive = true; } catch (_) {}
@@ -1271,6 +1290,12 @@
   }
 
   function stopGptVoice(options) {
+    const local = _biggyV6VoiceController();
+    if (local && typeof local.stop === 'function'
+        && typeof local.isActive === 'function' && local.isActive()) {
+      local.stop(options || {});
+      return;
+    }
     const cancelRun = !!(options && options.cancelRun);
     // Silence the speaker before tearing the transport down so Stop is
     // audibly immediate.
@@ -1290,6 +1315,8 @@
   }
 
   async function toggleGptVoice() {
+    const local = _biggyV6VoiceController();
+    if (local && typeof local.toggle === 'function') return local.toggle();
     if (STATE.active) stopGptVoice();
     else await startGptVoice();
   }
@@ -1331,6 +1358,12 @@
   }
 
   function stopCurrentResponse() {
+    const local = _biggyV6VoiceController();
+    if (local && typeof local.stopResponse === 'function'
+        && typeof local.isActive === 'function' && local.isActive()) {
+      local.stopResponse();
+      return;
+    }
     _stopPlayback();
     if (typeof cancelStream === 'function') {
       try {
@@ -1381,7 +1414,8 @@
   window.stopGptVoiceResponse = stopCurrentResponse;
   window.applyGptVoiceButtonVisibility = applyGptVoiceButtonVisibility;
   window._gptVoiceActive = function () {
-    return !!STATE.active;
+    const local = _biggyV6VoiceController();
+    return local && typeof local.isActive === 'function' ? !!local.isActive() : !!STATE.active;
   };
   window._gptVoicePhase = function () {
     return STATE.phase;

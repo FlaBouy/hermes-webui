@@ -781,6 +781,17 @@ function _micToastKeyForRecognitionError(error){
     }
   }
 
+  function _submitPendingDictation(committed){
+    window._micPendingSend=false;
+    if(window.__biggyV6VoicePending&&typeof window.__biggyV6VoiceSubmit==='function'){
+      Promise.resolve(window.__biggyV6VoiceSubmit(String(committed||ta.value||''))).catch((err)=>{
+        showToast(String((err&&err.message)||err||'Biggy Voice failed'));
+      });
+      return;
+    }
+    send();
+  }
+
   function _commitTranscript(text, prefixOverride){
     // `prefixOverride` is the composer content captured at recording start,
     // passed only by the async server-STT path (recorder.onstop → _transcribeBlob).
@@ -817,8 +828,7 @@ function _micToastKeyForRecognitionError(error){
     ta.value=committed;
     autoResize();
     if(window._micPendingSend){
-      window._micPendingSend=false;
-      send();
+      _submitPendingDictation(committed);
     }
   }
 
@@ -1030,8 +1040,7 @@ function _micToastKeyForRecognitionError(error){
       void _releaseMicWakeLock();
       _setRecording(false);
       if(window._micPendingSend){
-        window._micPendingSend=false;
-        send();
+        _submitPendingDictation(committed);
       }
       _applyDeferredServerSttFlip();
     };

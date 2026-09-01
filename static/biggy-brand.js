@@ -14,7 +14,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260901-tools-dialog-41';
+  const BUILD_ID = '20260901-v6-local-voice-42';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -204,6 +204,12 @@
       const next = brandVisibleText(node.textContent || '');
       if (next && next !== node.textContent) node.textContent = next;
     });
+    const settingLabel = document.querySelector('[data-i18n="settings_label_gpt_realtime_voice"]');
+    const settingDescription = document.querySelector('[data-i18n="settings_desc_gpt_realtime_voice"]');
+    if (settingLabel) settingLabel.textContent = 'Biggy Voice (Jarvis V6)';
+    if (settingDescription) {
+      settingDescription.textContent = 'Show the local Biggy Voice control. Microphone transcription uses the Jarvis V6 light lane and the existing Smedley/Austin output path; it does not open an OpenAI Realtime session.';
+    }
   }
 
   function installBiggyVoiceLabels() {
@@ -214,6 +220,154 @@
     window.__biggyVoiceLabelTimer = setInterval(() => {
       rewriteGptVoiceInDom(document);
     }, 1500);
+  }
+
+  const biggyV6VoiceState = {
+    active: false,
+    talking: false,
+    processing: false,
+  };
+
+  function setBiggyV6VoicePhase(phase, detail) {
+    const bar = document.getElementById('gptVoiceBar');
+    const label = document.getElementById('gptVoiceLabel');
+    const button = document.getElementById('btnGptVoice');
+    const talk = document.getElementById('btnGptVoiceTalk');
+    const stop = document.getElementById('btnGptVoiceStop');
+    const guard = document.getElementById('gptVoiceGuard');
+    const normalized = String(phase || 'listening').toLowerCase();
+    if (bar) {
+      bar.style.display = biggyV6VoiceState.active ? 'flex' : 'none';
+      bar.dataset.phase = normalized;
+    }
+    if (label) {
+      const suffix = detail ? ` · ${detail}` : '';
+      label.textContent = `Biggy Voice · ${normalized.toUpperCase()}${suffix}`;
+    }
+    if (button) button.setAttribute('aria-pressed', biggyV6VoiceState.active ? 'true' : 'false');
+    if (talk) {
+      talk.disabled = !biggyV6VoiceState.active || biggyV6VoiceState.processing;
+      talk.textContent = biggyV6VoiceState.talking ? 'Listening…' : 'Hold to talk';
+      talk.setAttribute('aria-label', biggyV6VoiceState.talking ? 'Listening' : 'Hold to talk');
+    }
+    if (stop) {
+      stop.textContent = 'End';
+      stop.setAttribute('aria-label', 'End Biggy Voice');
+    }
+    if (guard) guard.style.display = 'none';
+  }
+
+  async function submitBiggyV6Voice(transcript) {
+    const spoken = String(transcript || '').trim();
+    window.__biggyV6VoicePending = false;
+    window._micPendingSend = false;
+    biggyV6VoiceState.talking = false;
+    if (!spoken) {
+      setBiggyV6VoicePhase('listening');
+      return;
+    }
+    biggyV6VoiceState.processing = true;
+    setBiggyV6VoicePhase('thinking', 'Jarvis V6');
+    const composer = document.getElementById('msg');
+    if (composer) {
+      composer.value = '';
+      composer.dispatchEvent(new Event('input', { bubbles: true }));
+      if (typeof window.autoResize === 'function') window.autoResize();
+    }
+    try {
+      const sid = await ensureGuiSession();
+      if (!sid) throw new Error('Biggy session is not ready');
+      const workspace = (() => {
+        try { return String(S && S.session && S.session.workspace || ''); } catch (_) { return ''; }
+      })();
+      const wrapper = `${spoken}\n\n[Voice PTT turn — browser-local Biggy Voice; use the Jarvis V6 light lane for general conversation and preserve explicit Argus or Smedley specialist routing.]`;
+      const result = await jsonPost('/api/chat', {
+        session_id: sid,
+        message: wrapper,
+        display_message: spoken,
+        workspace,
+        biggy_local_voice: true,
+        ptt_owned_tts: false,
+      });
+      if (!result || result.error) throw new Error(String(result && result.error || 'Biggy Voice failed'));
+      const reload = (typeof window.loadSession === 'function')
+        ? window.loadSession
+        : (typeof loadSession === 'function' ? loadSession : null);
+      if (reload) {
+        await reload(sid, {
+          force: true,
+          externalRefreshReason: 'biggy-v6-local-voice',
+          guiId: GUI_ID,
+        });
+      }
+      setBiggyV6VoicePhase('listening');
+    } catch (error) {
+      const message = String((error && error.message) || error || 'Biggy Voice failed');
+      setBiggyV6VoicePhase('error', message.slice(0, 120));
+      if (typeof window.showToast === 'function') window.showToast(message);
+    } finally {
+      biggyV6VoiceState.processing = false;
+      if (biggyV6VoiceState.active && !biggyV6VoiceState.talking) {
+        setTimeout(() => {
+          if (biggyV6VoiceState.active && !biggyV6VoiceState.processing) {
+            setBiggyV6VoicePhase('listening');
+          }
+        }, 1800);
+      }
+    }
+  }
+
+  function installBiggyV6VoiceController() {
+    if (window.__biggyV6VoiceController) return;
+    const controller = {
+      isActive: () => biggyV6VoiceState.active,
+      start() {
+        biggyV6VoiceState.active = true;
+        biggyV6VoiceState.talking = false;
+        biggyV6VoiceState.processing = false;
+        setBiggyV6VoicePhase('listening', 'Jarvis V6');
+      },
+      stop() {
+        if (biggyV6VoiceState.talking && typeof window._stopMic === 'function') {
+          try { window._stopMic(); } catch (_) {}
+        }
+        window.__biggyV6VoicePending = false;
+        window._micPendingSend = false;
+        biggyV6VoiceState.active = false;
+        biggyV6VoiceState.talking = false;
+        biggyV6VoiceState.processing = false;
+        setBiggyV6VoicePhase('idle');
+      },
+      toggle() {
+        if (biggyV6VoiceState.active) this.stop();
+        else this.start();
+      },
+      beginTalk() {
+        if (!biggyV6VoiceState.active || biggyV6VoiceState.processing || biggyV6VoiceState.talking) return;
+        const mic = document.getElementById('btnMic');
+        if (!mic || mic.disabled) {
+          setBiggyV6VoicePhase('error', 'microphone unavailable');
+          return;
+        }
+        biggyV6VoiceState.talking = true;
+        window.__biggyV6VoicePending = true;
+        window._micPendingSend = true;
+        setBiggyV6VoicePhase('listening');
+        mic.click();
+      },
+      endTalk() {
+        if (!biggyV6VoiceState.talking) return;
+        biggyV6VoiceState.talking = false;
+        setBiggyV6VoicePhase('transcribing');
+        if (typeof window._stopMic === 'function') window._stopMic();
+      },
+      stopResponse() {
+        this.stop();
+      },
+    };
+    window.__biggyV6VoiceSubmit = submitBiggyV6Voice;
+    window.__biggyV6VoiceController = controller;
+    document.body.dataset.biggyVoicePath = 'jarvis-v6-local';
   }
 
   function smedleyWebUiUrl() {
@@ -2498,6 +2652,7 @@
     installArgusResponseLabels();
     installComposerBranding();
     installBiggyVoiceLabels();
+    installBiggyV6VoiceController();
     installGuiDiagnostics();
     removeCaduceus();
   }
@@ -7189,6 +7344,7 @@
     installRagTraceObserver();
     purgeOwnerAckArtifacts();
     installBiggyVoiceLabels();
+    installBiggyV6VoiceController();
     installSmedleyAudioPolicy();
     installGreetingAck();
     installDocumentTitle();

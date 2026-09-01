@@ -24500,6 +24500,16 @@ def _chat_body_ptt_owned_tts(body) -> bool:
     return isinstance(value, str) and value.strip().lower() in {"1", "true", "yes"}
 
 
+def _chat_body_biggy_local_voice(body) -> bool:
+    """True only for the browser-local Biggy V6 microphone lane."""
+    if not isinstance(body, dict):
+        return False
+    value = body.get("biggy_local_voice")
+    if value is True or value == 1:
+        return True
+    return isinstance(value, str) and value.strip().lower() in {"1", "true", "yes"}
+
+
 def _stamp_ptt_owned_tts(messages, owned: bool) -> None:
     """Mark the completed assistant row so GUI Realtime/browser TTS stay silent."""
     if not owned or not isinstance(messages, list):
@@ -24649,8 +24659,8 @@ def _return_smedley_fast_route(handler, s, msg, routed, ptt_owned_tts=False):
     )
 
 
-def _return_biggy_fast_voice_route(handler, s, msg, routed):
-    """Persist one V6 light-lane voice turn and leave TTS to the Biggy pedal."""
+def _return_biggy_fast_voice_route(handler, s, msg, routed, *, server_speak=False):
+    """Persist one V6 light-lane voice turn and assign one explicit TTS owner."""
     reply = str((routed or {}).get("reply") or "").strip()
     if not reply:
         return bad(handler, "V6 light voice route returned an empty response", 502)
@@ -24678,17 +24688,19 @@ def _return_biggy_fast_voice_route(handler, s, msg, routed):
     else:
         s.messages.append({"role": "user", "content": msg, "timestamp": now_ts})
 
-    s.messages.append(
-        {
-            "role": "assistant",
-            "content": reply,
-            "timestamp": now_ts + 1,
-            "biggy_fast_voice_route": True,
-            "voice_model": str((routed or {}).get("model") or ""),
-            "story_response": bool((routed or {}).get("story")),
-            "tts_owner": "biggy_pedal_austin",
-        }
-    )
+    tts_owner = "server_austin" if server_speak else "biggy_pedal_austin"
+    assistant_row = {
+        "role": "assistant",
+        "content": reply,
+        "timestamp": now_ts + 1,
+        "biggy_fast_voice_route": True,
+        "voice_model": str((routed or {}).get("model") or ""),
+        "story_response": bool((routed or {}).get("story")),
+        "tts_owner": tts_owner,
+    }
+    if server_speak:
+        assistant_row["ptt_owned_tts"] = True
+    s.messages.append(assistant_row)
     s.pending_user_message = None
     s.active_stream_id = None
     if hasattr(s, "pending_started_at"):
@@ -24706,6 +24718,8 @@ def _return_biggy_fast_voice_route(handler, s, msg, routed):
             SESSIONS.move_to_end(s.session_id)
     except Exception:
         pass
+    if server_speak:
+        _server_speak_smedley(reply)
     return j(
         handler,
         {
@@ -24717,7 +24731,8 @@ def _return_biggy_fast_voice_route(handler, s, msg, routed):
             "voice_model": str((routed or {}).get("model") or ""),
             "story_response": bool((routed or {}).get("story")),
             "provider_calls": 1,
-            "ptt_owned_tts": False,
+            "ptt_owned_tts": bool(server_speak),
+            "tts_owner": tts_owner,
             "status": "done",
             "session": s.compact() | {"messages": s.messages},
         },
@@ -25786,7 +25801,13 @@ def _handle_chat_sync(handler, body):
             display_message=display_msg if "display_message" in body else None,
         ):
             light = request_fast_voice_reply(display_msg, history=getattr(s, "messages", None))
-            return _return_biggy_fast_voice_route(handler, s, display_msg, light)
+            return _return_biggy_fast_voice_route(
+                handler,
+                s,
+                display_msg,
+                light,
+                server_speak=_chat_body_biggy_local_voice(body),
+            )
     except Exception:
         # A local light-model outage must not eat the owner's turn. The normal
         # coordinator lane remains a slower but functional fallback.
