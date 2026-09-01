@@ -844,6 +844,10 @@ function _micToastKeyForRecognitionError(error){
     return !!(SpeechRecognition&&localStorage.getItem(_micForceMediaRecorderKey)!=='1');
   }
 
+  function _biggyV6PrefersLiveStt(){
+    return !!(window.__biggyV6VoicePending&&SpeechRecognition&&!_rawAudioMode);
+  }
+
   async function _transcribeBlob(blob, prefixSnapshot){
     const ext=(blob.type&&blob.type.includes('ogg'))?'ogg':'webm';
     const form=new FormData();
@@ -1158,7 +1162,11 @@ function _micToastKeyForRecognitionError(error){
       showToast(t('mic_insecure_origin'));
       return;
     }
-    if(recognition && !_forceMediaRecorder && !_rawAudioMode){
+    const biggyLiveStt=_biggyV6PrefersLiveStt();
+    if(biggyLiveStt&&!recognition){
+      recognition=_ensureSpeechRecognition();
+    }
+    if(recognition && (biggyLiveStt||!_forceMediaRecorder) && !_rawAudioMode){
       _activeCaptureMode='speech';
       _speechStopRequested=false;
       _micRestartCount=0;

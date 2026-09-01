@@ -35,6 +35,23 @@ def test_dictation_and_voice_controls_delegate_to_biggy_local_controller():
     assert "return local.toggle()" in realtime
 
 
+def test_biggy_voice_prefers_live_stt_without_changing_normal_dictation():
+    boot = (ROOT / "static" / "boot.js").read_text(encoding="utf-8")
+    start = boot.index("function _biggyV6PrefersLiveStt")
+    end = boot.index("async function _transcribeBlob", start)
+    preference = boot[start:end]
+    capture_start = boot.index("async function _startMicCapture")
+    capture_end = boot.index("async function _toggleMicCapture", capture_start)
+    capture = boot[capture_start:capture_end]
+
+    assert "window.__biggyV6VoicePending" in preference
+    assert "SpeechRecognition" in preference
+    assert "const biggyLiveStt=_biggyV6PrefersLiveStt()" in capture
+    assert "if(biggyLiveStt&&!recognition)" in capture
+    assert "(biggyLiveStt||!_forceMediaRecorder)" in capture
+    assert "_forceMediaRecorder=true" not in preference
+
+
 def test_biggy_controller_is_installed_and_describes_no_realtime_session():
     source = (ROOT / "static" / "biggy-brand.js").read_text(encoding="utf-8")
 
