@@ -14,7 +14,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260901-v6-live-stt-43';
+  const BUILD_ID = '20260901-v6-personality-story-44';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -277,6 +277,24 @@
     try {
       const sid = await ensureGuiSession();
       if (!sid) throw new Error('Biggy session is not ready');
+      // Put the owner's words on glass immediately.  The synchronous V6 call
+      // returns only after a complete story has been generated, so waiting for
+      // loadSession made a healthy story look like a blank/frozen response.
+      // The server deduplicates this trailing optimistic row before saving.
+      try {
+        const lane = ensureArgusConversationLane();
+        if (lane) delete lane.dataset.homeHidden;
+        if (typeof S !== 'undefined' && S) {
+          if (!Array.isArray(S.messages)) S.messages = [];
+          S.messages.push({
+            role: 'user',
+            content: spoken,
+            timestamp: Math.floor(Date.now() / 1000),
+            _biggy_voice_optimistic: true,
+          });
+          renderArgusConversationLane();
+        }
+      } catch (_) {}
       const workspace = (() => {
         try { return String(S && S.session && S.session.workspace || ''); } catch (_) { return ''; }
       })();
@@ -290,6 +308,10 @@
         ptt_owned_tts: false,
       });
       if (!result || result.error) throw new Error(String(result && result.error || 'Biggy Voice failed'));
+      try {
+        const lane = ensureArgusConversationLane();
+        if (lane) delete lane.dataset.homeHidden;
+      } catch (_) {}
       const reload = (typeof window.loadSession === 'function')
         ? window.loadSession
         : (typeof loadSession === 'function' ? loadSession : null);
@@ -2479,6 +2501,10 @@
         completionMessages = messages;
         completionMessagesSessionId = sid;
         persistGuiSessionId(sid);
+        // A completed PTT/Biggy Voice turn is a new conversation, even if the
+        // HOME button hid older dialogs. Reveal the new prompt/final together.
+        const lane = ensureArgusConversationLane();
+        if (lane) delete lane.dataset.homeHidden;
         // Pedal turns arrive through /api/chat and never execute messages.js's
         // direct response hook.  Apply the completed turn once at this shared
         // session boundary, before transcript/card reconciliation.
@@ -7228,6 +7254,8 @@
       completionMessages = messages;
       completionMessagesSessionId = sid;
       persistGuiSessionId(sid);
+      const lane = ensureArgusConversationLane();
+      if (lane) delete lane.dataset.homeHidden;
 
       // A dropped SSE completion must not leave a settled server turn looking
       // permanently busy on glass. Reconcile only after server truth says the

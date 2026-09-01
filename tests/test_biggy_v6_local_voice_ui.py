@@ -20,7 +20,23 @@ def test_biggy_controller_posts_transcript_to_local_v6_chat_lane():
     assert "biggy_local_voice: true" in submit
     assert "display_message: spoken" in submit
     assert "[Voice PTT turn — browser-local Biggy Voice" in submit
+    assert "_biggy_voice_optimistic: true" in submit
+    assert "delete lane.dataset.homeHidden" in submit
+    assert "renderArgusConversationLane()" in submit
     assert "/api/realtime/session" not in controller + submit
+
+
+def test_ptt_completion_reveals_new_dialog_after_home_hid_old_history():
+    source = (ROOT / "static" / "biggy-brand.js").read_text(encoding="utf-8")
+    hydrate_start = source.index("async function hydratePttSessionMessages")
+    hydrate_end = source.index("async function refreshPttProgress", hydrate_start)
+    hydrate = source[hydrate_start:hydrate_end]
+    reconcile_start = source.index("async function reconcileActiveBiggySessionCompletion")
+    reconcile_end = source.index("window.__biggyReconcileActiveSessionCompletion", reconcile_start)
+    reconcile = source[reconcile_start:reconcile_end]
+
+    assert "delete lane.dataset.homeHidden" in hydrate
+    assert "delete lane.dataset.homeHidden" in reconcile
 
 
 def test_dictation_and_voice_controls_delegate_to_biggy_local_controller():

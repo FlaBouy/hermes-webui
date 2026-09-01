@@ -5,7 +5,9 @@ from api.biggy_voice_route import (
     compact_voice_history,
     is_explicit_specialist_request,
     request_fast_voice_reply,
+    resolve_fast_voice_personality,
     should_use_fast_voice_route,
+    specialist_requires_governed_route,
 )
 
 
@@ -53,6 +55,30 @@ def test_fast_voice_gate_requires_real_ptt_wrapper_and_no_specialist():
     )
 
 
+def test_fast_personality_selection_separates_identity_from_heavy_work():
+    assert resolve_fast_voice_personality("Tell me a story", default="biggy") == "biggy"
+    assert resolve_fast_voice_personality("Tell me a story", default="smedley") == "smedley"
+    assert resolve_fast_voice_personality("Ask Smedley to tell me a joke") == "smedley"
+    assert resolve_fast_voice_personality("Ask Argus what he thinks") == "argus"
+    assert specialist_requires_governed_route("Ask Argus to check my calendar")
+    assert specialist_requires_governed_route("Ask Smedley to review the project drawings")
+    assert not specialist_requires_governed_route("Ask Smedley to tell me a story")
+
+
+def test_nonheavy_smedley_voice_uses_fast_lane_but_review_stays_governed():
+    wrapped = "voice\n\n[Voice PTT turn — operator channel: be concise]"
+    assert should_use_fast_voice_route(
+        message=wrapped,
+        display_message="Ask Smedley to tell me a story",
+        personality="smedley",
+    )
+    assert not should_use_fast_voice_route(
+        message=wrapped,
+        display_message="Ask Smedley to review the project drawings",
+        personality="smedley",
+    )
+
+
 def test_compact_history_strips_voice_appendix_and_bounds_rows():
     history = []
     for i in range(5):
@@ -90,3 +116,21 @@ def test_fast_voice_request_uses_one_light_model_call_and_story_budget():
     assert captured["payload"]["reasoning_effort"] == "none"
     assert captured["payload"]["stream"] is False
     assert captured["timeout"] == 55
+
+
+def test_fast_voice_request_injects_selected_personality_prompt():
+    captured = {}
+
+    def opener(request, timeout):
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return _Response({"choices": [{"message": {"content": "Engineering answer."}}]})
+
+    request_fast_voice_reply(
+        "Give me the short version.",
+        personality="smedley",
+        opener=opener,
+    )
+
+    system = captured["payload"]["messages"][0]["content"]
+    assert "You are Smedley" in system
+    assert "senior engineer" in system

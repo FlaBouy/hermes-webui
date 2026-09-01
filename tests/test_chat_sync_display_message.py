@@ -200,7 +200,7 @@ def test_sync_voice_appendix_cannot_steal_ordinary_biggy_story(
     monkeypatch.setattr(
         voice_route,
         "request_fast_voice_reply",
-        lambda prompt, history=None: {
+        lambda prompt, history=None, personality="biggy": {
             "reply": "A complete story with one ending.",
             "model": voice_route.DEFAULT_MODEL,
             "story": True,
@@ -250,14 +250,20 @@ def test_browser_biggy_voice_uses_v6_and_one_server_austin_owner(
     tmp_path = sync_chat_env
     session = _make_session(tmp_path)
     spoken = []
-    monkeypatch.setattr(
-        voice_route,
-        "request_fast_voice_reply",
-        lambda prompt, history=None: {
+    captured = {}
+
+    def _fast_reply(prompt, history=None, personality="biggy"):
+        captured["personality"] = personality
+        return {
             "reply": "Quick local answer.",
             "model": voice_route.DEFAULT_MODEL,
             "story": False,
-        },
+        }
+
+    monkeypatch.setattr(
+        voice_route,
+        "request_fast_voice_reply",
+        _fast_reply,
     )
     monkeypatch.setattr(routes, "_server_speak_smedley", spoken.append)
     owner = "Hey Biggy, give me the short version."
@@ -280,6 +286,8 @@ def test_browser_biggy_voice_uses_v6_and_one_server_austin_owner(
     assert body["answer"] == "Quick local answer."
     assert body["ptt_owned_tts"] is True
     assert body["tts_owner"] == "server_austin"
+    assert body["voice_personality"] == "biggy"
+    assert captured["personality"] == "biggy"
     assert spoken == ["Quick local answer."]
     saved = models.get_session(session.session_id)
     assert [row["role"] for row in saved.messages] == ["user", "assistant"]

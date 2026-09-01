@@ -24510,6 +24510,17 @@ def _chat_body_biggy_local_voice(body) -> bool:
     return isinstance(value, str) and value.strip().lower() in {"1", "true", "yes"}
 
 
+def _fast_voice_default_personality(session) -> str:
+    """Use the active GUI/session identity for local V6 natural language."""
+    profile = str(getattr(session, "profile", None) or "").strip().lower()
+    if not profile:
+        try:
+            profile = str(_get_active_profile_name() or "").strip().lower()
+        except Exception:
+            profile = ""
+    return "smedley" if profile == "smedley" else "biggy"
+
+
 def _stamp_ptt_owned_tts(messages, owned: bool) -> None:
     """Mark the completed assistant row so GUI Realtime/browser TTS stay silent."""
     if not owned or not isinstance(messages, list):
@@ -24539,7 +24550,7 @@ def _server_speak_smedley(text: str) -> None:
     if not spoken:
         return
 
-    def _chunks(value: str, limit: int = 760) -> list[str]:
+    def _chunks(value: str, limit: int = 520) -> list[str]:
         remaining = " ".join(str(value or "").split())
         chunks: list[str] = []
         while len(remaining) > limit:
@@ -24563,16 +24574,28 @@ def _server_speak_smedley(text: str) -> None:
             from urllib.request import urlopen
 
             for chunk in _chunks(spoken):
-                body = json.dumps({"text": chunk, "wait": True}).encode("utf-8")
-                req = Request(
-                    "http://127.0.0.1:5004/speak",
-                    data=body,
-                    headers={"Content-Type": "application/json"},
-                    method="POST",
-                )
-                # wait=true is real playback completion on the live sidecar,
-                # so long fast-route answers remain ordered and complete.
-                urlopen(req, timeout=120).read()
+                # Long-form narration is deliberately sent as ordered,
+                # sentence-safe chunks. Retry an isolated sidecar interruption
+                # once rather than abandoning the rest of the story.
+                last_error = None
+                for _attempt in range(2):
+                    try:
+                        body = json.dumps({"text": chunk, "wait": True}).encode("utf-8")
+                        req = Request(
+                            "http://127.0.0.1:5004/speak",
+                            data=body,
+                            headers={"Content-Type": "application/json"},
+                            method="POST",
+                        )
+                        # wait=true is real playback completion on the live
+                        # sidecar, keeping narration ordered without overlap.
+                        urlopen(req, timeout=180).read()
+                        last_error = None
+                        break
+                    except Exception as exc:
+                        last_error = exc
+                if last_error is not None:
+                    raise last_error
         except Exception:
             logger.warning("[smedley-server-speak] direct sidecar speak failed", exc_info=True)
 
@@ -24659,7 +24682,9 @@ def _return_smedley_fast_route(handler, s, msg, routed, ptt_owned_tts=False):
     )
 
 
-def _return_biggy_fast_voice_route(handler, s, msg, routed, *, server_speak=False):
+def _return_biggy_fast_voice_route(
+    handler, s, msg, routed, *, server_speak=False, personality="biggy"
+):
     """Persist one V6 light-lane voice turn and assign one explicit TTS owner."""
     reply = str((routed or {}).get("reply") or "").strip()
     if not reply:
@@ -24697,6 +24722,7 @@ def _return_biggy_fast_voice_route(handler, s, msg, routed, *, server_speak=Fals
         "voice_model": str((routed or {}).get("model") or ""),
         "story_response": bool((routed or {}).get("story")),
         "tts_owner": tts_owner,
+        "voice_personality": personality,
     }
     if server_speak:
         assistant_row["ptt_owned_tts"] = True
@@ -24733,6 +24759,7 @@ def _return_biggy_fast_voice_route(handler, s, msg, routed, *, server_speak=Fals
             "provider_calls": 1,
             "ptt_owned_tts": bool(server_speak),
             "tts_owner": tts_owner,
+            "voice_personality": personality,
             "status": "done",
             "session": s.compact() | {"messages": s.messages},
         },
@@ -25793,20 +25820,32 @@ def _handle_chat_sync(handler, body):
     try:
         from api.biggy_voice_route import (
             request_fast_voice_reply,
+            resolve_fast_voice_personality,
             should_use_fast_voice_route,
+        )
+
+        voice_personality = resolve_fast_voice_personality(
+            display_msg,
+            default=_fast_voice_default_personality(s),
         )
 
         if should_use_fast_voice_route(
             message=msg,
             display_message=display_msg if "display_message" in body else None,
+            personality=voice_personality,
         ):
-            light = request_fast_voice_reply(display_msg, history=getattr(s, "messages", None))
+            light = request_fast_voice_reply(
+                display_msg,
+                history=getattr(s, "messages", None),
+                personality=voice_personality,
+            )
             return _return_biggy_fast_voice_route(
                 handler,
                 s,
                 display_msg,
                 light,
                 server_speak=_chat_body_biggy_local_voice(body),
+                personality=voice_personality,
             )
     except Exception:
         # A local light-model outage must not eat the owner's turn. The normal
