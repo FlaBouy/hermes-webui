@@ -14,7 +14,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260831-response-travel-40';
+  const BUILD_ID = '20260901-tools-dialog-41';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -1082,6 +1082,101 @@
     return rail;
   }
 
+  // Presentation-only filter for Biggy's Smedley project-review dialog.
+  // Underlying session history / API payloads stay intact; this only decides
+  // what the review pane should show to the owner.
+  function biggyProjectReviewMessageText(message) {
+    let value = message && message.content;
+    if (Array.isArray(value)) {
+      value = value.map((part) => {
+        if (typeof part === 'string') return part;
+        return part && typeof part === 'object' ? (part.text || part.content || '') : '';
+      }).join('\n');
+    } else if (value && typeof value === 'object') {
+      value = value.text || value.content || '';
+    }
+    return String(value || '').trim();
+  }
+
+  function biggyProjectReviewOwnerVisibleText(raw) {
+    const text = String(raw || '');
+    const ownerMarker = text.lastIndexOf('Owner message:');
+    return (ownerMarker >= 0 ? text.slice(ownerMarker) : text).replace(/^Owner message:\s*/i, '').trim();
+  }
+
+  function biggyProjectReviewTryParseJson(text) {
+    const raw = String(text || '').trim();
+    if (!raw) return null;
+    // Use char codes so source extractors that ignore string quotes stay balanced.
+    const opener = raw.charCodeAt(0);
+    if (opener !== 123 && opener !== 91) return null;
+    try { return JSON.parse(raw); } catch (_error) { return null; }
+  }
+
+  function biggyProjectReviewIsInternalPayload(parsed) {
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return false;
+    if (Array.isArray(parsed.todos)) return true;
+    if (parsed.approval != null || parsed.approval_id != null || Array.isArray(parsed.approvals)) return true;
+    if (parsed.tool_calls != null || parsed.tool_call_id != null || parsed._partial_tool_calls != null) return true;
+    if (typeof parsed.name === 'string' && (parsed.arguments != null || parsed.input != null || parsed.parameters != null)) return true;
+    if (typeof parsed.command === 'string' || typeof parsed.cmd === 'string' || typeof parsed.shell_command === 'string') return true;
+    if ((parsed.ok != null || parsed.status != null) && (parsed.result != null || parsed.output != null || parsed.stdout != null)) return true;
+    return false;
+  }
+
+  function biggyProjectReviewProgressSummary(payload) {
+    const todos = Array.isArray(payload?.todos) ? payload.todos : [];
+    if (!todos.length) return '';
+    const lines = todos.map((todo) => {
+      if (!todo || typeof todo !== 'object') return '';
+      const status = String(todo.status || 'pending').replace(/_/g, ' ');
+      const content = String(todo.content || todo.title || todo.id || '').trim();
+      return content ? `${status}: ${content}` : '';
+    }).filter(Boolean);
+    if (!lines.length) return '';
+    const summary = payload.summary && typeof payload.summary === 'object' ? payload.summary : {};
+    const counts = ['completed', 'in_progress', 'pending', 'cancelled']
+      .map((key) => {
+        const count = Number(summary[key] || 0);
+        return count > 0 ? `${count} ${key.replace(/_/g, ' ')}` : '';
+      })
+      .filter(Boolean);
+    const head = counts.length ? `Review progress (${counts.join(', ')}):` : 'Review progress:';
+    return `${head}\n${lines.slice(0, 8).join('\n')}`;
+  }
+
+  function formatBiggyProjectReviewDialogTurns(messages) {
+    const turns = [];
+    for (const message of (Array.isArray(messages) ? messages : [])) {
+      if (!message || message._hidden || message.tool_only) continue;
+      const role = String(message.role || '');
+      if (role === 'tool' || role === 'system' || role === 'developer') continue;
+      const raw = biggyProjectReviewMessageText(message);
+      if (role === 'user') {
+        const content = biggyProjectReviewOwnerVisibleText(raw);
+        if (!content) continue;
+        turns.push({ role: 'owner', content, kind: 'owner' });
+        continue;
+      }
+      if (role !== 'assistant') continue;
+      if (!raw) continue;
+      const parsed = biggyProjectReviewTryParseJson(raw);
+      if (parsed && biggyProjectReviewIsInternalPayload(parsed)) {
+        if (Array.isArray(parsed.todos)) {
+          const summary = biggyProjectReviewProgressSummary(parsed);
+          if (summary) turns.push({ role: 'smedley', content: summary, kind: 'progress' });
+        }
+        continue;
+      }
+      if (parsed) {
+        const opener = raw.charCodeAt(0);
+        if (opener === 123 || opener === 91) continue;
+      }
+      turns.push({ role: 'smedley', content: raw, kind: 'prose' });
+    }
+    return turns;
+  }
+
   function ensureBiggyProjectsPane() {
     let pane = document.getElementById('biggyProjectsPane');
     if (pane) return pane;
@@ -1130,13 +1225,11 @@
     };
     const renderDialog = (payload) => {
       const messages = Array.isArray(payload?.dialog?.messages) ? payload.dialog.messages : [];
+      const turns = formatBiggyProjectReviewDialogTurns(messages);
       const list = dialog.querySelector('#biggyProjectDialogMessages');
-      list.innerHTML = messages.length ? messages.map((message) => {
-        const role = String(message?.role || '') === 'user' ? 'owner' : 'smedley';
-        const rawContent = String(message?.content || '');
-        const ownerMarker = rawContent.lastIndexOf('Owner message:');
-        const content = (ownerMarker >= 0 ? rawContent.slice(ownerMarker) : rawContent).replace(/^Owner message:\s*/i, '');
-        return `<article class="biggy-project-dialog-message is-${role}"><b>${role === 'owner' ? 'OWNER' : 'SMEDLEY'}</b><p>${esc(content)}</p></article>`;
+      list.innerHTML = turns.length ? turns.map((turn) => {
+        const kindClass = turn.kind === 'progress' ? ' is-progress' : '';
+        return `<article class="biggy-project-dialog-message is-${turn.role}${kindClass}"><b>${turn.role === 'owner' ? 'OWNER' : 'SMEDLEY'}</b><p>${esc(turn.content).replace(/\n/g, '<br>')}</p></article>`;
       }).join('') : '<p class="biggy-project-dialog-empty">Open the review with Smedley. Your conversation and its evidence remain attached to this project.</p>';
       list.scrollTop = list.scrollHeight;
       const streaming = !!payload?.dialog?.is_streaming;

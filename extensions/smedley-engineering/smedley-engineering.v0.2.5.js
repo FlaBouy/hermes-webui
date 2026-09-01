@@ -3,9 +3,15 @@
   if (window.__smedleyEngineeringLoaded) return;
   window.__smedleyEngineeringLoaded = true;
 
-  const RAG_PROXY = '/api/extensions/smedley-engineering/sidecar';
   const GUI_ID=window.__HERMES_GUI_ID__==='biggy'?'biggy':'smedley';
   const TOOLS_ONLY_EMBED=GUI_ID==='biggy';
+  // Biggy's profile only installs biggy-brand.  The shared calculators still
+  // talk to the same loopback tools sidecar (:5004), but must use the host
+  // profile's consented extension id — smedley-engineering is not present on
+  // Biggy and returns "Extension not found".
+  const RAG_PROXY = TOOLS_ONLY_EMBED
+    ? '/api/extensions/biggy-brand/sidecar'
+    : '/api/extensions/smedley-engineering/sidecar';
   const PTT_INSTANCE='smedley';
   // Biggy intentionally locks its own GUI identity.  The shared calculator
   // runtime must not try to replace it when loaded from the Tools rail.
