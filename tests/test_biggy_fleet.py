@@ -74,7 +74,9 @@ def test_biggy_project_reviews_are_native_projects_with_smedley_governance_metad
     assert 'parsed.path == "/api/biggy/projects/reviews"' in ROUTES
     assert '"review_owner": "smedley"' in ROUTES
     assert '"profile": "biggy"' in ROUTES
-    assert '"rag_folder": f"Project Reviews/' in ROUTES
+    assert 'required_root = ["Projects", f"Projects - {review_year}"]' in ROUTES
+    assert '"rag_folder": "/".join(rag_parts)' in ROUTES
+    assert '"existing": True' in ROUTES
     assert '"standards-compliance"' in ROUTES
     assert 'save_projects(projects)' in ROUTES
     assert 'parsed.path == "/api/biggy/projects/reviews/dialog"' in ROUTES

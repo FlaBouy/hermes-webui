@@ -25,13 +25,12 @@
     .medium-cw { transform-origin: 600px 400px; animation: cw 18s linear infinite; }
     .medium-ccw { transform-origin: 600px 400px; animation: ccw 24s linear infinite; }
     .fast-cw { transform-origin: 600px 400px; animation: cw 7s linear infinite; }
-    .pulse { transform-origin: 596px 404px; animation: pulse 5.2s ease-in-out infinite; }
-    .breath { animation: breath 3.3s ease-in-out infinite; }
+    .core-pulse { transform-box:view-box; transform-origin:596px 404px; animation:corePulse 5.6s ease-in-out infinite; }
     .inner-solid-cw { transform-box:view-box; transform-origin:596px 404px; animation:cw 9.5s linear infinite; }
     /* Move the dash phase around a fixed, perfectly concentric circle. Rotating
        the SVG group made the browser resample its stroke and look off-axis. */
     .inner-dashed-ccw { animation:dashCcw 14s linear infinite; }
-    .synchronized-light { animation: synchronizedLight 5.2s ease-in-out infinite; }
+    .synchronized-light { animation:synchronizedLight 5.6s ease-in-out infinite; }
     .menu-item { cursor: default; }
     .menu-item .inference { stroke: #27bce8; stroke-width: 1.7; stroke-dasharray: 3 5; opacity: .62; transition: opacity .2s, stroke-width .2s; }
     .menu-item .menu-node { fill: #061421; stroke: #33dfff; stroke-width: 2; transition: fill .2s; }
@@ -40,8 +39,10 @@
     @keyframes cw { to { transform: rotate(360deg); } }
     @keyframes ccw { to { transform: rotate(-360deg); } }
     @keyframes dashCcw { to { stroke-dashoffset: 190; } }
-    @keyframes pulse { 0%,100% { opacity: .45; transform: scale(.97); } 50% { opacity: 1; transform: scale(1.04); } }
-    @keyframes breath { 0%,100% { opacity:.6; } 50% { opacity:1; } }
+    @keyframes corePulse {
+      0%,100% { opacity:.8; transform:scale(.985); filter:brightness(.82) drop-shadow(0 0 3px rgba(232,45,42,.42)); }
+      50% { opacity:1; transform:scale(1.025); filter:brightness(1.2) drop-shadow(0 0 12px rgba(255,70,58,.88)); }
+    }
     @keyframes synchronizedLight {
       0%,100% { opacity:.28; filter:brightness(.82) drop-shadow(0 0 2px rgba(56,220,255,.2)); }
       50% { opacity:.92; filter:brightness(1.28) drop-shadow(0 0 10px rgba(56,220,255,.88)); }
@@ -82,13 +83,15 @@
   </g>
   <!-- This sits over the PSD's solid blue inner ring and follows the core pulse. -->
   <circle id="argus-lit-ring-pulse" class="synchronized-light ring-speech-reactive" cx="596" cy="404" r="150" fill="none" stroke="#42dcff" stroke-width="8" opacity=".32" filter="url(#glow)"/>
-  <!-- The PSD aperture remains open; Biggy owns only the live pulse placed inside it. -->
-  <g class="pulse">
-    <circle cx="596" cy="404" r="74" fill="none" stroke="#1dc7ff" stroke-width="3" opacity=".58" filter="url(#softGlow)"/>
-  </g>
   <circle cx="596" cy="404" r="68" fill="#020a11" opacity=".9"/>
-  <circle class="speech-reactive" cx="596" cy="404" r="58" fill="#d8322d" opacity=".84" filter="url(#glow)"/>
-  <circle class="breath speech-reactive" cx="596" cy="404" r="43" fill="url(#sensorCore)" filter="url(#glow)"/>
+  <!-- One slow, coordinated red pulse: layered halo and bulb breathe together.
+       The surrounding instrument rings and authored edge lamps remain blue. -->
+  <g id="argus-red-core-pulse" class="core-pulse">
+    <circle cx="596" cy="404" r="65" fill="none" stroke="#7f1014" stroke-width="7" opacity=".42" filter="url(#softGlow)"/>
+    <circle cx="596" cy="404" r="59" fill="none" stroke="#d92f2b" stroke-width="5" opacity=".72" filter="url(#glow)"/>
+    <circle class="speech-reactive" cx="596" cy="404" r="53" fill="#b91f20" opacity=".9" filter="url(#glow)"/>
+    <circle class="speech-reactive" cx="596" cy="404" r="41" fill="url(#sensorCore)" filter="url(#glow)"/>
+  </g>
   </g>
 
   <!-- Tie-ins are drawn after the artwork but terminate outside its glow.

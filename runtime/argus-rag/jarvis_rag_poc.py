@@ -61,6 +61,7 @@ DEFAULT_FOLDERS = [
     LIB_ROOT + "/Coin Database",
     LIB_ROOT + "/Electrical Resources",
     LIB_ROOT + "/Network Mappings",
+    LIB_ROOT + "/Projects/Projects - 2026",
     LIB_ROOT + "/Vendor Data",
 ]
 CHUNK_CHARS = 1000

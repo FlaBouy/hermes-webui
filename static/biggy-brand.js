@@ -1094,6 +1094,7 @@
       + '<div class="biggy-projects-grid"><section class="biggy-projects-intake"><h2>NEW REVIEW</h2>'
       + '<label>PROJECT NAME<input id="biggyProjectReviewName" type="text" maxlength="128" placeholder="e.g. Auburn MCC modernization" autocomplete="off"></label>'
       + '<label>REVIEW TYPE<select id="biggyProjectReviewType"><option value="internal-design">Internal design review</option><option value="customer-approval">Customer approval</option><option value="engineering-approval">Engineering approval</option><option value="standards-compliance">Standards & compliance</option><option value="claude-migration">Claude review migration</option></select></label>'
+      + '<label>RAG PROJECT FOLDER<div class="biggy-project-rag-folder-grid"><select id="biggyProjectRagFolder"><option value="">LOADING…</option></select><select id="biggyProjectRagSubfolder" disabled><option value="">SELECT FOLDER FIRST</option></select><select id="biggyProjectRagLevel3" disabled><option value="">SELECT SUBFOLDER FIRST</option></select><select id="biggyProjectRagLevel4" disabled><option value="">PROJECT FOLDER ROOT</option></select></div><small>SELECT AN EXISTING FOLDER FROM THE INGEST RADAR LIBRARY TREE</small></label>'
       + '<label>PLANT SPECIFICATION LOCATION<div class="biggy-project-location"><input id="biggyProjectPlantSpecs" type="text" maxlength="512" placeholder="RAG folder, network path, or document identifier"><button type="button" class="biggy-project-location-browse" data-biggy-location-target="biggyProjectPlantSpecs">BROWSE</button><span class="biggy-project-location-menu" hidden><button type="button" data-biggy-location-pick="folder">FOLDER</button><button type="button" data-biggy-location-pick="file">FILE</button></span></div></label>'
       + '<label>CODE BOOK / STANDARD LOCATION<div class="biggy-project-location"><input id="biggyProjectCodeBooks" type="text" maxlength="512" placeholder="NEC, NFPA, customer standards, or document identifier"><button type="button" class="biggy-project-location-browse" data-biggy-location-target="biggyProjectCodeBooks">BROWSE</button><span class="biggy-project-location-menu" hidden><button type="button" data-biggy-location-pick="folder">FOLDER</button><button type="button" data-biggy-location-pick="file">FILE</button></span></div></label>'
       + '<label>DESIGN PACKAGE LOCATION<div class="biggy-project-location"><input id="biggyProjectDesignPackage" type="text" maxlength="512" placeholder="Drawings, studies, calculations, or document identifier"><button type="button" class="biggy-project-location-browse" data-biggy-location-target="biggyProjectDesignPackage">BROWSE</button><span class="biggy-project-location-menu" hidden><button type="button" data-biggy-location-pick="folder">FOLDER</button><button type="button" data-biggy-location-pick="file">FILE</button></span></div></label>'
@@ -1194,15 +1195,65 @@
         setStatus(String(error.message || error), true);
       }
     };
-    const makeRagFolder = async (folder) => {
-      for (const name of ['Project Reviews', folder]) {
-        try {
-          await argusRagIngestJson('/library-folders', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
-        } catch (error) {
-          if (!/exist/i.test(String(error.message || ''))) throw error;
-        }
+    const ragFolder = pane.querySelector('#biggyProjectRagFolder');
+    const ragSubfolder = pane.querySelector('#biggyProjectRagSubfolder');
+    const ragLevel3 = pane.querySelector('#biggyProjectRagLevel3');
+    const ragLevel4 = pane.querySelector('#biggyProjectRagLevel4');
+    const selectedProjectRagFolder = () => [ragFolder, ragSubfolder, ragLevel3, ragLevel4]
+      .map((select) => String(select?.value || '').trim()).filter(Boolean).join('/');
+    const setRagOptions = (select, names, rootLabel = '') => {
+      select.innerHTML = '';
+      if (rootLabel) {
+        const root = document.createElement('option');
+        root.value = '';
+        root.textContent = rootLabel;
+        select.appendChild(root);
+      }
+      names.forEach((name) => {
+        const option = document.createElement('option');
+        option.value = String(name);
+        option.textContent = String(name).toUpperCase();
+        select.appendChild(option);
+      });
+      select.disabled = !names.length && !rootLabel;
+    };
+    const loadRagChildren = async (select, parent, emptyLabel) => {
+      if (!parent) { setRagOptions(select, [], emptyLabel); select.disabled = true; return; }
+      const payload = await argusRagIngestJson(`/library-folders?parent=${encodeURIComponent(parent)}`);
+      setRagOptions(select, Array.isArray(payload?.folders) ? payload.folders : [], emptyLabel);
+      select.disabled = false;
+    };
+    const refreshProjectRagLevel4 = async () => {
+      const parent = [ragFolder.value, ragSubfolder.value, ragLevel3.value].filter(Boolean).join('/');
+      await loadRagChildren(ragLevel4, ragLevel3.value ? parent : '', 'PROJECT FOLDER ROOT');
+    };
+    const refreshProjectRagLevel3 = async () => {
+      const parent = [ragFolder.value, ragSubfolder.value].filter(Boolean).join('/');
+      await loadRagChildren(ragLevel3, ragSubfolder.value ? parent : '', 'SELECT PROJECT FOLDER');
+      await refreshProjectRagLevel4();
+    };
+    const refreshProjectRagSubfolders = async () => {
+      await loadRagChildren(ragSubfolder, ragFolder.value, 'SELECT SUBFOLDER');
+      if (ragFolder.value === 'Projects') {
+        const currentYear = `Projects - ${new Date().getFullYear()}`;
+        if (Array.from(ragSubfolder.options).some((option) => option.value === currentYear)) ragSubfolder.value = currentYear;
+      }
+      await refreshProjectRagLevel3();
+    };
+    const refreshProjectRagFolders = async () => {
+      try {
+        const payload = await argusRagIngestJson('/library-folders');
+        const names = Array.isArray(payload?.folders) ? payload.folders : [];
+        setRagOptions(ragFolder, names);
+        if (names.includes('Projects')) ragFolder.value = 'Projects';
+        await refreshProjectRagSubfolders();
+      } catch (error) {
+        setStatus(`RAG folder tree unavailable: ${String(error.message || error)}`, true);
       }
     };
+    ragFolder.addEventListener('change', refreshProjectRagSubfolders);
+    ragSubfolder.addEventListener('change', refreshProjectRagLevel3);
+    ragLevel3.addEventListener('change', refreshProjectRagLevel4);
     const chooseLocation = async (targetId, kind) => {
       const input = pane.querySelector(`#${targetId}`);
       if (!input) return;
@@ -1265,8 +1316,11 @@
     }));
     pane.querySelector('#biggyProjectRefresh').addEventListener('click', () => render());
     pane.querySelector('#biggyProjectCreate').addEventListener('click', async () => {
+      const createButton = pane.querySelector('#biggyProjectCreate');
       const name = pane.querySelector('#biggyProjectReviewName').value.trim();
       if (!name) { setStatus('A project name is required.', true); return; }
+      const reviewFolder = selectedProjectRagFolder();
+      if (!reviewFolder || !ragLevel3.value) { setStatus('Select the existing project folder from the RAG library tree.', true); return; }
       const reviewType = pane.querySelector('#biggyProjectReviewType').value;
       const sources = {
         plant_specifications: pane.querySelector('#biggyProjectPlantSpecs').value.trim(),
@@ -1274,21 +1328,21 @@
         design_package: pane.querySelector('#biggyProjectDesignPackage').value.trim(),
       };
       const scope = pane.querySelector('#biggyProjectReviewScope').value.trim();
-      setStatus('Creating Hermes project and RAG review folder…');
+      setStatus(`Creating the review against ${reviewFolder}…`);
+      createButton.disabled = true;
       try {
-        const payload = await window.api('/api/biggy/projects/reviews', { method: 'POST', body: JSON.stringify({ name, review_type: reviewType, sources, scope }) });
+        const payload = await window.api('/api/biggy/projects/reviews', { method: 'POST', body: JSON.stringify({ name, review_type: reviewType, rag_folder: reviewFolder, sources, scope }) });
         const project = payload?.project;
         if (!project) throw new Error('Project review was not created.');
-        try {
-          await makeRagFolder(project.review?.rag_folder || '');
-          setStatus(`Created ${project.name}. Upload the review package, then open the Smedley dialog.`);
-        } catch (folderError) {
-          setStatus(`Created ${project.name}, but its RAG folder needs retry: ${String(folderError.message || folderError)}`, true);
-        }
+        setStatus(payload?.existing
+          ? `${project.name} already exists; the existing review was selected.`
+          : `Created ${project.name} against ${project.review?.rag_folder}.`);
         await render();
         setSelected(project);
       } catch (error) {
         setStatus(`Create failed: ${String(error.message || error)}`, true);
+      } finally {
+        createButton.disabled = false;
       }
     });
     pane.querySelector('#biggyProjectReviewFile').addEventListener('change', async (event) => {
@@ -1322,6 +1376,7 @@
       await populateBiggyToolsRail(rail);
     });
     pane.__refresh = render;
+    refreshProjectRagFolders();
     return pane;
   }
 
@@ -3725,6 +3780,23 @@
 
   let ragWorldStatusFailures = 0;
   let lastGoodRagWorldStatus = null;
+  let ragWorldObservedIngesting = false;
+
+  function refreshVisibleRagWorldAfterIngest() {
+    const host = document.getElementById('mainChat');
+    const current = document.getElementById('biggyV6World');
+    if (!host || !current || current.dataset.ragVisible !== '1') return;
+    installBiggyV6World(host);
+    const replacement = document.getElementById('biggyV6World');
+    if (replacement) {
+      replacement.dataset.ragVisible = '1';
+      replacement.dataset.ragHomePending = '1';
+    }
+    galaxyFilterTreePromise = null;
+    const filterDialog = document.getElementById('biggyTravelMapDialog');
+    const filterState = filterDialog?.querySelector('#biggyGalaxyFilterState');
+    if (filterDialog && filterState && !filterState.hidden) refreshGalaxyFilterPanel(filterDialog);
+  }
 
   function noteRagWorldStatusFailure() {
     ragWorldStatusFailures += 1;
@@ -3749,6 +3821,12 @@
       renderArgusRagOverview(status);
       const phase = String(status && status.phase || '').toLowerCase();
       const state = String(status && status.state || '').toLowerCase();
+      const ingesting = state === 'active' || /^(detected|queued|indexing|extracting|embedding|active)$/i.test(phase);
+      if (ingesting) ragWorldObservedIngesting = true;
+      else if (ragWorldObservedIngesting && !/^(failed|quarantined)$/i.test(phase) && state !== 'error') {
+        ragWorldObservedIngesting = false;
+        refreshVisibleRagWorldAfterIngest();
+      }
       const file = String(status && status.last_file || '').trim();
       if (file && (state === 'error' || phase === 'failed' || phase === 'quarantined')) {
         postRagTrace({ state: 'failed', source: file, reason: status.last_error || phase });

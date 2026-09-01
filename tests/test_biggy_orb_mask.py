@@ -130,7 +130,7 @@ def test_orb_has_circular_profile_mask_and_requested_motion_layers():
     assert "const edgeRadius = 270;" in POC
     assert "const targetX = cx + (edgeDx / edgeLength) * edgeRadius;" in POC
     assert 'id="argus-lit-ring-pulse" class="synchronized-light ring-speech-reactive"' in POC
-    assert 'class="speech-reactive" cx="596" cy="404" r="58"' in POC
+    assert 'id="argus-red-core-pulse" class="core-pulse"' in POC
     assert "Math.min(2, Number(event.data.beat)" in POC
     assert 'id="argus-outer-edge-pulse" class="synchronized-light"' in POC
     assert 'mask="url(#outerEdgeLights)"' in POC
@@ -138,7 +138,13 @@ def test_orb_has_circular_profile_mask_and_requested_motion_layers():
 
 def test_orb_center_pulses_red_while_surrounding_lighting_stays_blue():
     assert '<radialGradient id="sensorCore"><stop stop-color="#fff4f1"/>' in POC
-    assert 'r="58" fill="#d8322d"' in POC
+    assert '.core-pulse { transform-box:view-box; transform-origin:596px 404px; animation:corePulse 5.6s ease-in-out infinite; }' in POC
+    assert 'id="argus-red-core-pulse" class="core-pulse"' in POC
+    assert 'r="65" fill="none" stroke="#7f1014"' in POC
+    assert 'r="59" fill="none" stroke="#d92f2b"' in POC
+    assert 'r="53" fill="#b91f20"' in POC
+    assert 'r="41" fill="url(#sensorCore)"' in POC
+    assert '.synchronized-light { animation:synchronizedLight 5.6s ease-in-out infinite; }' in POC
     assert 'id="argus-lit-ring-pulse"' in POC
     assert 'stroke="#42dcff"' in POC
     assert 'id="argus-outer-edge-pulse" class="synchronized-light"' in POC

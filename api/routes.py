@@ -17033,6 +17033,20 @@ def handle_post(handler, parsed) -> bool:
         name = str(body.get("name") or "").strip()[:128]
         if not name:
             return bad(handler, "name required")
+        rag_folder = str(body.get("rag_folder") or "").replace("\\", "/").strip("/")
+        rag_parts = [part.strip() for part in rag_folder.split("/") if part.strip()]
+        review_year = time.localtime().tm_year
+        required_root = ["Projects", f"Projects - {review_year}"]
+        if len(rag_parts) < 3 or rag_parts[:2] != required_root or any(part in {".", ".."} for part in rag_parts):
+            return bad(handler, f"select a folder under Projects/Projects - {review_year}")
+        library_root = Path(os.getenv("ARGUS_RAG_LIBRARY_ROOT", "/Users/rick/Mounts/RAG_Pool/Library")).resolve()
+        rag_target = (library_root / Path(*rag_parts)).resolve()
+        try:
+            rag_target.relative_to(library_root)
+        except ValueError:
+            return bad(handler, "RAG folder escapes library root")
+        if not rag_target.is_dir():
+            return bad(handler, f"RAG folder does not exist: {rag_folder}")
         review_type = str(body.get("review_type") or "internal-design").strip()
         allowed_types = {
             "internal-design", "customer-approval", "engineering-approval",
@@ -17050,7 +17064,13 @@ def handle_post(handler, parsed) -> bool:
         scope = str(body.get("scope") or "").strip()
         if "\x00" in scope or len(scope) > 2000:
             return bad(handler, "invalid review scope")
-        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:72] or "project-review"
+        projects = load_projects()
+        existing = next((item for item in projects
+                         if _profiles_match(item.get("profile"), "biggy")
+                         and str(item.get("name") or "").strip().casefold() == name.casefold()
+                         and str((item.get("review") or {}).get("review_owner") or "") == "smedley"), None)
+        if existing is not None:
+            return j(handler, {"ok": True, "project": existing, "existing": True})
         project_id = uuid.uuid4().hex[:12]
         project = {
             "project_id": project_id,
@@ -17062,15 +17082,14 @@ def handle_post(handler, parsed) -> bool:
                 "review_owner": "smedley",
                 "review_type": review_type,
                 "state": "intake",
-                "rag_folder": f"Project Reviews/{slug}-{project_id[:6]}",
+                "rag_folder": "/".join(rag_parts),
                 "sources": sources,
                 "scope": scope,
             },
         }
-        projects = load_projects()
         projects.append(project)
         save_projects(projects)
-        return j(handler, {"ok": True, "project": project})
+        return j(handler, {"ok": True, "project": project, "existing": False})
 
     if parsed.path == "/api/biggy/projects/reviews/dialog":
         project_id = str(body.get("project_id") or "").strip()

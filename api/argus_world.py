@@ -52,7 +52,7 @@ MAX_WORLD_DOCUMENTS = 4000
 _WORLD_CACHE_TTL_S = 20.0
 _BROWSABLE_DOCUMENT_SUFFIXES = frozenset({".pdf", ".txt", ".md", ".csv", ".json", ".html", ".htm", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"})
 _world_cache_lock = threading.Lock()
-_world_cache: tuple[float, bytes] | None = None
+_world_cache: tuple[float, int, bytes] | None = None
 
 # Fixed allowlist: asset name -> content-type. Nothing outside this exact
 # set of names is ever readable through this module — deliberately not a
@@ -1106,16 +1106,21 @@ def _rag_pool_graph_data(fallback: bytes) -> bytes:
     if ledger is None:
         return fallback
     now = time.monotonic()
+    try:
+        ledger_mtime = ledger.stat().st_mtime_ns
+    except OSError:
+        ledger_mtime = 0
     with _world_cache_lock:
-        if _world_cache and now - _world_cache[0] < _WORLD_CACHE_TTL_S:
-            return _world_cache[1]
+        if (_world_cache and _world_cache[1] == ledger_mtime
+                and now - _world_cache[0] < _WORLD_CACHE_TTL_S):
+            return _world_cache[2]
     try:
         graph = _build_rag_pool_graph(ledger)
         rendered = ("const GRAPH = " + json.dumps(graph, separators=(",", ":")) + ";\n").encode("utf-8")
     except OSError:
         return fallback
     with _world_cache_lock:
-        _world_cache = (now, rendered)
+        _world_cache = (now, ledger_mtime, rendered)
     return rendered
 
 

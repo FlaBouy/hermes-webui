@@ -123,10 +123,14 @@ def test_smedley_project_reviews_use_native_projects_rag_ingest_and_kanban_dispa
     assert "PLANT SPECIFICATION LOCATION" in tools
     assert "CODE BOOK / STANDARD LOCATION" in tools
     assert "DESIGN PACKAGE LOCATION" in tools
+    assert "RAG PROJECT FOLDER" in tools
+    assert "SELECT AN EXISTING FOLDER FROM THE INGEST RADAR LIBRARY TREE" in tools
     assert "data-biggy-location-target" in tools
     assert "claude-migration" in tools
     assert "'/api/biggy/projects/reviews'" in tools
     assert "'/library-folders'" in tools
+    assert "selectedProjectRagFolder" in tools
+    assert "makeRagFolder" not in tools
     assert "/ingest-upload?folder=" in tools
     assert "assignee: 'smedley'" in tools
     assert "'/api/kanban/tasks'" in tools
