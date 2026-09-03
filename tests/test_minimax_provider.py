@@ -276,3 +276,26 @@ def test_minimax_slash_format_routes_openrouter_when_not_active():
     )
     assert model == 'minimax/MiniMax-M2.7'
     assert provider == 'openrouter'
+
+
+def test_slash_local_model_without_active_provider_is_not_openrouter():
+    """Empty profile model.provider must not invent OpenRouter for HF-style ids.
+
+    Live review sessions can carry ``qwen/qwen3.8-27b`` with model_provider null
+    under a specialist profile that has MCP but no model block. Cross-provider
+    OpenRouter routing requires an explicit active provider to diverge from.
+    """
+    model, provider, base_url = _resolve_with_config('qwen/qwen3.8-27b')
+    assert model == 'qwen/qwen3.8-27b'
+    assert provider != 'openrouter', (
+        f"empty model.provider must not select paid openrouter; got provider={provider!r} base_url={base_url!r}"
+    )
+    assert provider in (None, ''), provider
+    assert base_url in (None, ''), base_url
+
+    model2, provider2, base_url2 = _resolve_with_config(
+        'qwen/qwen3.8-27b', provider='lmstudio', base_url='http://127.0.0.1:1234/v1',
+    )
+    assert model2 == 'qwen/qwen3.8-27b'
+    assert provider2 == 'lmstudio'
+    assert base_url2 == 'http://127.0.0.1:1234/v1'

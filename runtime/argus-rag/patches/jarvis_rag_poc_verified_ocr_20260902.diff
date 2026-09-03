@@ -1,0 +1,108 @@
+--- jarvis_rag_poc.py
++++ jarvis_rag_poc.py
+@@ -311,9 +311,11 @@
+                 print("      [pdf] sidecar OK  %s  -> %s" % (base, os.path.basename(sidecar)), flush=True)
+                 manifest = {
+                     "schema": "jarvis.pdf_extraction.v2", "source": os.path.realpath(path),
+-                    "quality_state": "verified", "extraction_mode": "sidecar",
++                    "quality_state": "needs_review", "extraction_mode": "sidecar",
++                    "ocr_verification_state": "unverified",
+                     "page_count": None, "ocr_pages": [], "text_pages": [],
+-                    "extracted_chars": len(text), "warnings": [],
++                    "extracted_chars": len(text),
++                    "warnings": ["Independent OCR/table verification required for sidecar extractions."],
+                     "sidecar_path": os.path.realpath(sidecar),
+                 }
+                 return text, manifest
+@@ -407,13 +409,21 @@
+                             if start <= int(page["page"]) <= end and page["needs_ocr"])
+             if ocr_count and chars < OCR_PAGE_MIN_CHARS * ocr_count:
+                 warnings.append("low OCR yield on pages %s (%d chars)" % (key, chars))
+-        quality = "needs_review" if warnings else "verified"
++        if mode in {"full_ocr", "mixed_selective_ocr"}:
++            quality = "needs_review"
++            if "Independent OCR/table verification required." not in warnings:
++                warnings.append("Independent OCR/table verification required.")
++        else:
++            quality = "needs_review" if warnings else "verified"
+     return {
+         "schema": "jarvis.pdf_extraction.v2",
+         "source": os.path.realpath(path),
+         "fingerprint": os.path.basename(_ocr_cache_path(path))[:-3],
+         "quality_state": quality,
+         "extraction_mode": mode,
++        "ocr_verification_state": (
++            "unverified" if mode in {"full_ocr", "mixed_selective_ocr", "sidecar"} else "not_applicable"
++        ),
+         "page_count": len(profiles),
+         "ocr_pages": ocr_pages,
+         "text_pages": text_pages,
+@@ -443,6 +453,9 @@
+ def extract(path):
+     ext = os.path.splitext(path)[1].lower()
+     try:
++        if ext == ".dxf":
++            text_out, _manifest = extract_with_manifest(path)
++            return text_out
+         if ext in (".doc", ".docx", ".rtf", ".html", ".htm"):
+             return _textutil(path)
+         if ext in (".txt", ".md", ".log", ".csv"):
+@@ -460,6 +473,50 @@
+ 
+ def extract_with_manifest(path):
+     ext = os.path.splitext(path)[1].lower()
++    if ext == ".dxf":
++        try:
++            import sys
++            hermes_root = "/Users/rick/hermes-webui"
++            if hermes_root not in sys.path:
++                sys.path.insert(0, hermes_root)
++            from api.smedley_dxf_extract import extract_dxf
++            from api.jarvis_rag_ingest_events import evidence_root_for, file_sha256
++            sha = file_sha256(path)
++            evidence_dir = evidence_root_for(sha, basename=os.path.basename(path))
++            payload = extract_dxf(path, evidence_dir=evidence_dir, update_ledger=False, source_sha256=sha)
++            texts = payload.get("texts") or []
++            text_out = "\n".join(str(item.get("text") or "") for item in texts)
++            manifest = {
++                "schema": "jarvis.dxf_extraction.v1",
++                "source": os.path.realpath(path),
++                "quality_state": payload.get("quality_state") or "needs_review",
++                "extraction_mode": "dxf_native",
++                "ocr_verification_state": "not_applicable",
++                "page_count": None,
++                "ocr_pages": [],
++                "text_pages": [],
++                "extracted_chars": len(text_out),
++                "table_rows": 0,
++                "warnings": list(payload.get("warnings") or []),
++                "manifest_path": payload.get("manifest_path"),
++            }
++            return text_out, manifest
++        except Exception as exc:
++            print("      [dxf] hermes extractor unavailable (%s); skipping DXF" % exc, flush=True)
++            return "", {
++                "schema": "jarvis.dxf_extraction.v1",
++                "source": os.path.realpath(path),
++                "quality_state": "failed",
++                "extraction_mode": "dxf_native",
++                "ocr_verification_state": "not_applicable",
++                "warnings": ["DXF extractor unavailable: %s" % exc],
++                "page_count": None,
++                "ocr_pages": [],
++                "text_pages": [],
++                "extracted_chars": 0,
++                "table_rows": 0,
++                "manifest_path": None,
++            }
+     if ext == ".pdf":
+         return _pdf_with_manifest(path)
+     text = extract(path)
+@@ -573,6 +630,7 @@
+         "chunks": n,
+         "quality_state": manifest.get("quality_state", "failed"),
+         "extraction_mode": manifest.get("extraction_mode"),
++        "ocr_verification_state": manifest.get("ocr_verification_state"),
+         "page_count": manifest.get("page_count"),
+         "ocr_pages": manifest.get("ocr_pages", []),
+         "text_pages": manifest.get("text_pages", []),

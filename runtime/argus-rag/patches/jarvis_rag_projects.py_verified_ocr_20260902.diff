@@ -1,0 +1,11 @@
+--- jarvis_rag_projects.py
++++ jarvis_rag_projects.py
+@@ -24,7 +24,7 @@
+ PROJ_ROOT = "/Users/rick/Mounts/RAG_Pool/Projects"
+ STATE     = "/Users/rick/.jarvis_rag_projects_state.json"
+ INTERVAL  = 30
+-SUPPORTED = {".doc", ".docx", ".rtf", ".html", ".htm", ".txt", ".md", ".log", ".csv", ".pdf", ".xlsx"}
++SUPPORTED = {".doc", ".docx", ".rtf", ".html", ".htm", ".txt", ".md", ".log", ".csv", ".pdf", ".xlsx", ".dxf"}
+ 
+ # ── heartbeat / status for the MK.2 panel ───────────────────────
+ STATUS_DIR  = os.path.expanduser("~/.jarvis_rag_status")

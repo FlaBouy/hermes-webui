@@ -14,7 +14,7 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260901-v6-personality-story-44';
+  const BUILD_ID = '20260903-review-tool-handoff-57';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';
@@ -558,18 +558,24 @@
     // Exact override: speechSynthesis sink and other no-opts callers were
     // posting /speak with no voice_id → Austin. Ask Argus turns must carry
     // Alistar through this single Smedley-sink choke point.
+    // Review speech carries its server-selected voice. Never silently fall back
+    // to Austin if that identity is missing or malformed.
+    if (opts.personality === 'smedley' && !/^[A-Za-z0-9_-]{8,64}$/.test(voiceId)) return false;
     if (!voiceId) voiceId = resolveArgusVoiceId();
     if (!/^[A-Za-z0-9_-]{8,64}$/.test(voiceId)) voiceId = '';
     const chunks = splitSmedleySpeech(clean, 760);
     const dispatch = async () => {
       try {
         for (const chunk of chunks) {
+          if (opts.canSpeak && !opts.canSpeak()) return false;
           const body = { text: chunk, wait: true };
           if (voiceId) body.voice_id = voiceId;
+          if (opts.personality === 'smedley') body.assistant_identity = 'smedley';
           // wait=true makes each chunk finish playback before the next begins;
           // this prevents both the former 800-character cutoff and overlap.
           await proxyJson('/speak', {
             method: 'POST',
+            timeoutMs: 190000, timeoutToast: false, retries: 0,
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
           });
@@ -1274,6 +1280,27 @@
     return String(value || '').trim();
   }
 
+  // Only a send in THIS tab arms speech. Opening history/polling never does.
+  // Generation invalidation releases queued preparation on close/cancel/switch.
+  function createProjectReviewSpeechGate() {
+    let generation = 0;
+    let armed = null;
+    return {
+      arm(projectId, baselineId) {
+        generation += 1;
+        armed = { projectId, baselineId, generation };
+      },
+      reset() { generation += 1; armed = null; },
+      take(candidate) {
+        if (!armed || !candidate || candidate.id === armed.baselineId) return null;
+        const ticket = { projectId: armed.projectId, replyId: candidate.id, generation };
+        armed = null;
+        return ticket;
+      },
+      valid(ticket) { return !!ticket && ticket.generation === generation; },
+    };
+  }
+
   function biggyProjectReviewOwnerVisibleText(raw) {
     const text = String(raw || '');
     const ownerMarker = text.lastIndexOf('Owner message:');
@@ -1321,6 +1348,18 @@
     return `${head}\n${lines.slice(0, 8).join('\n')}`;
   }
 
+  function biggyProjectReviewCancelButtonState(dialogPayload) {
+    const streaming = !!dialogPayload?.is_streaming;
+    const streamId = String(dialogPayload?.cancel_stream_id || '').trim();
+    const canCancel = streaming && !!streamId;
+    return {
+      hidden: !canCancel,
+      disabled: !canCancel,
+      recommended: !!dialogPayload?.cancel_recommended,
+      streamId,
+    };
+  }
+
   function formatBiggyProjectReviewDialogTurns(messages) {
     const turns = [];
     for (const message of (Array.isArray(messages) ? messages : [])) {
@@ -1353,6 +1392,91 @@
     return turns;
   }
 
+  function createReviewDictation(options) {
+    const {input, button, status, projectId, visible} = options;
+    let epoch = 0, recorder = null, stream = null, abort = null, timer = null;
+    let phase = 'idle';
+    const paint = (next, message = '') => {
+      phase = next;
+      button.textContent = next === 'recording' ? 'STOP DICTATION' : next === 'transcribing' ? 'CANCEL DICTATION' : 'SMEDLEY VOICE';
+      button.classList.toggle('is-active', next !== 'idle');
+      button.setAttribute('aria-pressed', String(next !== 'idle'));
+      status.textContent = message;
+    };
+    const release = () => {
+      clearTimeout(timer);
+      stream?.getTracks().forEach(track => track.stop());
+      stream = null;
+    };
+    const cancel = () => {
+      epoch += 1;
+      abort?.abort(); abort = null;
+      if (recorder && recorder.state !== 'inactive') recorder.stop();
+      recorder = null;
+      release();
+      paint('idle');
+    };
+    const toggle = async () => {
+      if (phase === 'recording') { const current = recorder; release(); current?.stop(); return; }
+      if (phase !== 'idle') { cancel(); return; }
+      const ticket = ++epoch, project = projectId();
+      const valid = () => ticket === epoch && visible() && projectId() === project;
+      if (!project || !visible()) return;
+      if (window._micActive || window.__biggyV6VoicePending) {
+        paint('idle', 'Stop Biggy voice input before using Smedley Voice.'); return;
+      }
+      paint('starting', 'Opening microphone…');
+      try {
+        if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') throw new Error('Microphone recording is unavailable in this browser.');
+        const acquired = await navigator.mediaDevices.getUserMedia({audio: true});
+        if (!valid()) { acquired.getTracks().forEach(track => track.stop()); return; }
+        stream = acquired;
+        const mimeType = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4'].find(type => MediaRecorder.isTypeSupported(type));
+        const capture = new MediaRecorder(stream, mimeType ? {mimeType} : {});
+        const chunks = [];
+        recorder = capture;
+        capture.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
+        capture.onerror = () => { if (valid()) { cancel(); paint('idle', 'Microphone recording failed. Your typed draft is unchanged.'); } };
+        capture.onstop = async () => {
+          if (!valid()) return;
+          release(); recorder = null;
+          paint('transcribing', 'Transcribing locally…');
+          abort = new AbortController();
+          timer = setTimeout(() => abort?.abort(), 60000);
+          try {
+            const type = capture.mimeType || 'audio/webm';
+            const blob = new Blob(chunks, {type});
+            if (!blob.size) throw new Error('No audio was recorded.');
+            const form = new FormData();
+            form.append('file', blob, `review.${type.includes('mp4') ? 'mp4' : type.includes('ogg') ? 'ogg' : 'webm'}`);
+            form.append('local_only', 'true');
+            const response = await fetch('/api/transcribe', {method: 'POST', body: form, signal: abort.signal});
+            const data = await response.json();
+            if (!valid()) return;
+            if (!response.ok) throw new Error(data.error || 'Transcription failed.');
+            const words = String(data.transcript || '').trim();
+            if (!words) throw new Error('No speech was recognized.');
+            const combined = [input.value.trimEnd(), words].filter(Boolean).join(' ');
+            if (combined.length > input.maxLength) throw new Error('The combined prompt is too long. Shorten the draft and dictate again.');
+            input.value = combined;
+            input.dispatchEvent(new Event('input', {bubbles: true}));
+            input.focus();
+            paint('idle', 'Prompt ready. Edit if needed, then Send to Smedley.');
+          } catch (error) {
+            if (valid()) paint('idle', `${error.name === 'AbortError' ? 'Transcription timed out.' : error.message} Your typed draft is unchanged.`);
+          } finally { if (valid()) { clearTimeout(timer); abort = null; } }
+        };
+        capture.start();
+        timer = setTimeout(() => { if (valid() && capture.state === 'recording') { release(); capture.stop(); } }, 60000);
+        paint('recording', 'Listening — click Stop Dictation when finished (60-second limit).');
+      } catch (error) {
+        if (valid()) { release(); paint('idle', `${error.message} You can still type your prompt.`); }
+      }
+    };
+    button.addEventListener('click', toggle);
+    return {cancel, toggle};
+  }
+
   function ensureBiggyProjectsPane() {
     let pane = document.getElementById('biggyProjectsPane');
     if (pane) return pane;
@@ -1378,7 +1502,7 @@
     dialog.id = 'biggyProjectReviewDialog';
     dialog.hidden = true;
     dialog.setAttribute('aria-label', 'Smedley project review dialog');
-    dialog.innerHTML = '<header class="biggy-projects-header"><div><span id="biggyProjectDialogTitle">SMEDLEY // REVIEW DIALOG</span><small id="biggyProjectDialogMeta">PROJECT-SCOPED REVIEW CONVERSATION</small></div><button type="button" data-biggy-project-dialog-close aria-label="Close Smedley review dialog">×</button></header><div id="biggyProjectDialogMessages" class="biggy-project-dialog-messages"></div><footer class="biggy-project-dialog-compose"><textarea id="biggyProjectDialogInput" rows="2" maxlength="8000" placeholder="Continue the review with Smedley…"></textarea><button id="biggyProjectDialogSend" class="biggy-fleet-machine is-online" type="button"><span class="biggy-fleet-state"></span><span>SEND TO SMEDLEY</span></button></footer>';
+    dialog.innerHTML = '<header class="biggy-projects-header"><div><span id="biggyProjectDialogTitle">SMEDLEY // REVIEW DIALOG</span><small id="biggyProjectDialogMeta">PROJECT-SCOPED REVIEW CONVERSATION</small></div><button type="button" data-biggy-project-dialog-close aria-label="Close Smedley review dialog">×</button></header><div id="biggyProjectDialogMessages" class="biggy-project-dialog-messages"></div><footer class="biggy-project-dialog-compose"><textarea id="biggyProjectDialogInput" rows="2" maxlength="8000" placeholder="Continue the review with Smedley…"></textarea><button id="biggyProjectDialogCancel" class="biggy-fleet-machine is-online" type="button" hidden><span class="biggy-fleet-state"></span><span>CANCEL TURN</span></button><button id="biggyProjectDialogSend" class="biggy-fleet-machine is-online" type="button"><span class="biggy-fleet-state"></span><span>SEND TO SMEDLEY</span></button></footer>';
     layout?.appendChild(dialog);
     let selected = null;
     const status = pane.querySelector('#biggyProjectReviewStatus');
@@ -1387,6 +1511,54 @@
     const openDialog = pane.querySelector('#biggyProjectOpenDialog');
     let dialogProject = null;
     let dialogPoll = null;
+    let dialogCancelStreamId = '';
+    let dialogSpeechId = '';
+    const dictationButton = el('button', 'biggy-fleet-machine');
+    dictationButton.type = 'button';
+    dictationButton.id = 'biggyProjectDialogVoice';
+    dictationButton.textContent = 'SMEDLEY VOICE';
+    dictationButton.setAttribute('aria-pressed', 'false');
+    const dictationStatus = el('p', 'biggy-project-dictation-status');
+    dictationStatus.setAttribute('role', 'status');
+    dialog.querySelector('#biggyProjectDialogSend').before(dictationButton);
+    dialog.querySelector('.biggy-project-dialog-compose').appendChild(dictationStatus);
+    const reviewDictation = createReviewDictation({
+      input: dialog.querySelector('#biggyProjectDialogInput'), button: dictationButton,
+      status: dictationStatus, projectId: () => dialogProject?.project_id,
+      visible: () => !dialog.hidden,
+    });
+    new MutationObserver(() => { if (dialog.hidden) reviewDictation.cancel(); }).observe(dialog, {attributes: true, attributeFilter: ['hidden']});
+    const reviewSpeechGate = createProjectReviewSpeechGate();
+    const reviewVoiceAllowed = () => !dialog.hidden
+      && document.getElementById('biggyAudioRoute')?.dataset.outputMuted !== 'true';
+    const playReviewReply = async (candidate) => {
+      const ticket = reviewSpeechGate.take(candidate);
+      if (!ticket || !reviewVoiceAllowed()) return;
+      const stillCurrent = () => reviewSpeechGate.valid(ticket) && reviewVoiceAllowed()
+        && dialogProject?.project_id === ticket.projectId;
+      let playbackRequested = false;
+      try {
+        const result = await window.api('/api/biggy/projects/reviews/dialog/speech', {
+          method: 'POST', timeoutToast: false,
+          body: JSON.stringify({ project_id: ticket.projectId, reply_id: ticket.replyId }),
+        });
+        if (!stillCurrent() || result?.speech?.id !== ticket.replyId) return;
+        playbackRequested = true;
+        const played = await speakOnSmedley(result.speech.text, {
+          personality: 'smedley', voice_id: result.speech.voice_id, canSpeak: stillCurrent,
+        });
+        if (!played && stillCurrent()) throw new Error('Local voice playback failed');
+      } catch (error) {
+        if (!stillCurrent()) return;
+        const list = dialog.querySelector('#biggyProjectDialogMessages');
+        list.querySelector('.biggy-review-voice-error')?.remove();
+        const notice = playbackRequested
+          ? 'Playback confirmation was lost; audio may still be playing. The written reply is complete.'
+          : 'The spoken reply could not be prepared. The full written reply is still here.';
+        list.insertAdjacentHTML('beforeend', `<p class="biggy-project-dialog-empty is-error biggy-review-voice-error" role="status">${notice}</p>`);
+      }
+    };
+    let readinessPoll = null;
     const setStatus = (message, bad = false) => {
       status.textContent = message || '';
       status.classList.toggle('is-error', !!bad);
@@ -1394,22 +1566,71 @@
     const setSelected = (project) => {
       selected = project || null;
       const folder = String(selected?.review?.rag_folder || '');
-      selectedPath.textContent = folder || 'Select or create a project review to ingest documents.';
-      dispatch.disabled = !selected;
+      const readiness = selected?.review?.ingest_readiness || null;
+      const ready = !!readiness?.ready;
+      selectedPath.textContent = folder
+        ? `${folder} · ${String(readiness?.state || 'unverified').replace(/_/g, ' ').toUpperCase()}${readiness?.reason ? ` — ${readiness.reason}` : ''}`
+        : 'Select or create a project review to ingest documents.';
+      dispatch.disabled = !selected || !ready;
+      // Evidence problems are discussed and corrected in the Smedley dialog;
+      // they only block governed queue dispatch/sign-off, never conversation.
       openDialog.disabled = !selected;
       pane.querySelectorAll('[data-biggy-review-id]').forEach((node) => node.classList.toggle('active', node.dataset.biggyReviewId === String(selected?.project_id || '')));
     };
     const renderDialog = (payload) => {
+      if (payload?.project?.project_id && payload.project.project_id !== dialogProject?.project_id) return;
       const messages = Array.isArray(payload?.dialog?.messages) ? payload.dialog.messages : [];
       const turns = formatBiggyProjectReviewDialogTurns(messages);
       const list = dialog.querySelector('#biggyProjectDialogMessages');
-      list.innerHTML = turns.length ? turns.map((turn) => {
+      // Preserve explicit owner expand of tool activity across poll re-renders.
+      const priorDetails = list.querySelector('.biggy-project-dialog-tool-details');
+      const toolDetailsOpen = !!(priorDetails && priorDetails.open);
+      const transcript = turns.length ? turns.map((turn) => {
         const kindClass = turn.kind === 'progress' ? ' is-progress' : '';
         return `<article class="biggy-project-dialog-message is-${turn.role}${kindClass}"><b>${turn.role === 'owner' ? 'OWNER' : 'SMEDLEY'}</b><p>${esc(turn.content).replace(/\n/g, '<br>')}</p></article>`;
       }).join('') : '<p class="biggy-project-dialog-empty">Open the review with Smedley. Your conversation and its evidence remain attached to this project.</p>';
+      const lifecycleStatus = String(payload?.dialog?.status || 'idle');
+      const lifecycleMessage = String(payload?.dialog?.status_message || '');
+      const progress = payload?.dialog?.progress && typeof payload.dialog.progress === 'object' ? payload.dialog.progress : null;
+      const progressItems = Array.isArray(progress?.items) ? progress.items : [];
+      const progressTrail = (!lifecycleMessage || !progressItems.length)
+        ? ''
+        : `<details class="biggy-project-dialog-tool-details"${toolDetailsOpen ? ' open' : ''}><summary>Tool activity</summary><ol class="biggy-project-dialog-progress" aria-label="Live review tool activity">${progressItems.slice(-6).map((item) => {
+          const kind = String(item?.kind || '');
+          if (kind === 'interim' && item?.text) {
+            return `<li class="is-interim">${esc(String(item.text))}</li>`;
+          }
+          const tool = esc(String(item?.tool || 'tool'));
+          const path = item?.path ? ` · ${esc(String(item.path))}` : '';
+          const sample = item?.sample_only ? ' · sample-only' : '';
+          let label;
+          if (kind === 'tool_complete') {
+            label = item?.failed
+              ? `Failed ${tool}${path}${sample}`
+              : `Finished ${tool}${path}${sample}`;
+          } else {
+            label = `Running ${tool}${path}${sample}`;
+          }
+          const failClass = item?.failed ? ' is-failed' : '';
+          return `<li class="is-${esc(kind || 'tool')}${failClass}">${label}</li>`;
+        }).join('')}</ol></details>`;
+      // Simple owner-visible working/error status stays outside the closed tool details.
+      const lifecycle = lifecycleMessage
+        ? `<p class="biggy-project-dialog-status is-${esc(lifecycleStatus)}" role="status">${esc(lifecycleMessage)}</p>${progressTrail}`
+        : '';
+      list.innerHTML = transcript + lifecycle;
       list.scrollTop = list.scrollHeight;
       const streaming = !!payload?.dialog?.is_streaming;
+      const cancelState = biggyProjectReviewCancelButtonState(payload?.dialog || {});
+      dialogCancelStreamId = cancelState.streamId || '';
+      const cancelBtn = dialog.querySelector('#biggyProjectDialogCancel');
+      cancelBtn.hidden = cancelState.hidden;
+      cancelBtn.disabled = cancelState.disabled;
+      cancelBtn.classList.toggle('is-recommended', !!cancelState.recommended);
       dialog.querySelector('#biggyProjectDialogSend').disabled = streaming;
+      dialogSpeechId = payload?.dialog?.speech?.id || '';
+      if (['interrupted', 'cancelled', 'failed', 'error'].includes(lifecycleStatus)) reviewSpeechGate.reset();
+      if (!streaming && payload?.dialog?.speech) playReviewReply(payload.dialog.speech);
       if (dialogPoll) { clearTimeout(dialogPoll); dialogPoll = null; }
       if (!dialog.hidden && dialogProject && streaming) {
         dialogPoll = window.setTimeout(() => refreshDialog(), 1250);
@@ -1426,6 +1647,9 @@
     };
     const openReviewDialog = async () => {
       if (!selected) return;
+      reviewDictation.cancel();
+      reviewSpeechGate.reset();
+      dialogSpeechId = '';
       dialogProject = selected;
       pane.hidden = true;
       dialog.hidden = false;
@@ -1453,12 +1677,18 @@
         list.innerHTML = projects.map((project) => {
           const review = project.review || {};
           const sourceCount = Object.values(review.sources || {}).filter(Boolean).length;
-          return `<button type="button" class="biggy-project-review-card" data-biggy-review-id="${esc(project.project_id)}"><b>${esc(project.name)}</b><span>${esc(String(review.review_type || 'review').replace(/-/g, ' ').toUpperCase())}</span><small>${esc(review.rag_folder || 'RAG folder pending')} · ${sourceCount} review sources</small></button>`;
+          const readiness = review.ingest_readiness || {};
+          const evidenceState = String(readiness.state || 'unverified').replace(/_/g, ' ').toUpperCase();
+          return `<button type="button" class="biggy-project-review-card" data-biggy-review-id="${esc(project.project_id)}"><b>${esc(project.name)}</b><span>${esc(String(review.review_type || 'review').replace(/-/g, ' ').toUpperCase())}</span><small>${esc(review.rag_folder || 'RAG folder pending')} · ${sourceCount} review sources · EVIDENCE ${esc(evidenceState)}</small></button>`;
         }).join('');
         list.querySelectorAll('[data-biggy-review-id]').forEach((button) => button.addEventListener('click', () => {
           setSelected(projects.find((project) => project.project_id === button.dataset.biggyReviewId));
         }));
         setSelected(projects.find((project) => project.project_id === selected?.project_id) || projects[0]);
+        if (readinessPoll) { clearTimeout(readinessPoll); readinessPoll = null; }
+        if (!pane.hidden && ['processing'].includes(String(selected?.review?.ingest_readiness?.state || ''))) {
+          readinessPoll = window.setTimeout(() => render(), 2000);
+        }
       } catch (error) {
         list.innerHTML = '<p>Project review library is unavailable.</p>';
         setStatus(String(error.message || error), true);
@@ -1557,20 +1787,79 @@
       }, { once: true });
       picker.click();
     };
-    pane.querySelector('[data-biggy-projects-close]').addEventListener('click', () => { pane.hidden = true; });
-    dialog.querySelector('[data-biggy-project-dialog-close]').addEventListener('click', () => { if (dialogPoll) clearTimeout(dialogPoll); dialog.hidden = true; });
+    pane.querySelector('[data-biggy-projects-close]').addEventListener('click', () => {
+      if (readinessPoll) clearTimeout(readinessPoll);
+      readinessPoll = null;
+      pane.hidden = true;
+    });
+    dialog.querySelector('[data-biggy-project-dialog-close]').addEventListener('click', () => { reviewSpeechGate.reset(); if (dialogPoll) clearTimeout(dialogPoll); dialog.hidden = true; });
+    dialog.querySelector('#biggyProjectDialogCancel').addEventListener('click', async () => {
+      if (!dialogProject || !dialogCancelStreamId) return;
+      reviewSpeechGate.reset();
+      const cancelBtn = dialog.querySelector('#biggyProjectDialogCancel');
+      cancelBtn.disabled = true;
+      try {
+        const payload = await window.api('/api/biggy/projects/reviews/dialog/cancel', {
+          method: 'POST',
+          body: JSON.stringify({
+            project_id: dialogProject.project_id,
+            stream_id: dialogCancelStreamId,
+          }),
+        });
+        renderDialog(payload);
+      } catch (error) {
+        dialog.querySelector('#biggyProjectDialogMessages').insertAdjacentHTML(
+          'beforeend',
+          `<p class="biggy-project-dialog-empty is-error">Cancel failed: ${esc(String(error.message || error))}</p>`
+        );
+        cancelBtn.disabled = false;
+      }
+    });
     dialog.querySelector('#biggyProjectDialogSend').addEventListener('click', async () => {
       const input = dialog.querySelector('#biggyProjectDialogInput');
       const message = input.value.trim();
       if (!message || !dialogProject) return;
+      reviewDictation.cancel();
+      const sendingProjectId = dialogProject.project_id;
+      reviewSpeechGate.arm(sendingProjectId, dialogSpeechId);
       input.value = '';
-      dialog.querySelector('#biggyProjectDialogSend').disabled = true;
+      const sendButton = dialog.querySelector('#biggyProjectDialogSend');
+      const messageList = dialog.querySelector('#biggyProjectDialogMessages');
+      // The owner should never wait for Smedley's worker startup before seeing
+      // the words that were just sent.  Paint the local turn immediately; the
+      // authoritative poll replaces it once the server persists the message.
+      messageList.querySelector('.biggy-project-dialog-empty')?.remove();
+      messageList.insertAdjacentHTML('beforeend', `<article class="biggy-project-dialog-message is-owner is-optimistic"><b>OWNER</b><p>${esc(message).replace(/\n/g, '<br>')}</p></article><p class="biggy-project-dialog-status is-running" role="status">Smedley is working…</p>`);
+      messageList.scrollTop = messageList.scrollHeight;
+      sendButton.disabled = true;
       try {
-        const payload = await window.api('/api/biggy/projects/reviews/dialog', { method: 'POST', body: JSON.stringify({ project_id: dialogProject.project_id, message }) });
+        const payload = await window.api('/api/biggy/projects/reviews/dialog', { method: 'POST', body: JSON.stringify({ project_id: sendingProjectId, message }) });
+        if (dialog.hidden || dialogProject?.project_id !== sendingProjectId) return;
         renderDialog(payload);
+        if (payload.tool_action) {
+          const tools = await ensureSharedSmedleyTools();
+          if (dialog.hidden || dialogProject?.project_id !== sendingProjectId) return;
+          // One work surface at a time; retain conversation and draft in place.
+          dialog.hidden = true;
+          tools.open(payload.tool_action.id, {params: payload.tool_action.params || {}, onReturn: async (params) => {
+            if (dialogProject?.project_id !== sendingProjectId) return;
+            dialog.hidden = false;
+            try {
+              const updated = await window.api('/api/biggy/projects/reviews/dialog', {method:'POST', body:JSON.stringify({project_id:sendingProjectId, calculator_inputs:params})});
+              if (dialogProject?.project_id === sendingProjectId) renderDialog(updated);
+            } catch (_) { dictationStatus.textContent = 'Calculator parameters could not be saved. Re-enter changed values in your next question.'; }
+          }});
+        }
       } catch (error) {
-        dialog.querySelector('#biggyProjectDialogMessages').insertAdjacentHTML('beforeend', `<p class="biggy-project-dialog-empty is-error">Message was not sent: ${esc(String(error.message || error))}</p>`);
-        dialog.querySelector('#biggyProjectDialogSend').disabled = false;
+        if (dialog.hidden || dialogProject?.project_id !== sendingProjectId) return;
+        reviewSpeechGate.reset();
+        messageList.querySelector('.biggy-project-dialog-status.is-running')?.remove();
+        const errText = String(error.message || error);
+        const retryHint = /retry|retryable|dialogue reply failed/i.test(errText)
+          ? ' You can retry this message.'
+          : '';
+        messageList.insertAdjacentHTML('beforeend', `<p class="biggy-project-dialog-empty is-error">Message was not sent: ${esc(errText)}${esc(retryHint)}</p>`);
+        sendButton.disabled = false;
       }
     });
     pane.querySelectorAll('[data-biggy-location-target]').forEach((button) => button.addEventListener('click', () => {
@@ -1624,17 +1913,16 @@
         const response = await fetch(`${ARGUS_RAG_INGEST_PROXY}/ingest-upload?folder=${encodeURIComponent(folder)}`, { method: 'POST', body });
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         setStatus(`Queued ${file.name} for RAG ingestion in ${folder}.`);
+        await render();
       } catch (error) { setStatus(`Ingest upload failed: ${String(error.message || error)}`, true); }
       event.target.value = '';
     });
     openDialog.addEventListener('click', () => openReviewDialog());
     pane.querySelector('#biggyProjectDispatchReview').addEventListener('click', async () => {
       if (!selected) return;
-      const review = selected.review || {};
-      const body = [`Project review: ${selected.name}`, `Type: ${review.review_type || 'internal design'}`, `RAG folder: ${review.rag_folder || 'not set'}`, `Plant specifications: ${review.sources?.plant_specifications || 'not provided'}`, `Code books / standards: ${review.sources?.code_books || 'not provided'}`, `Design package: ${review.sources?.design_package || 'not provided'}`, '', `Scope: ${review.scope || 'Perform governance, compliance, and electrical design error review.'}`].join('\n');
       setStatus('Assigning the review to Smedley…');
       try {
-        const payload = await window.api('/api/kanban/tasks', { method: 'POST', body: JSON.stringify({ title: `Smedley review — ${selected.name}`, body, assignee: 'smedley', priority: 2, status: 'ready' }) });
+        const payload = await window.api('/api/biggy/projects/reviews/dispatch', { method: 'POST', body: JSON.stringify({ project_id: selected.project_id }) });
         const taskId = payload?.task?.id || 'created task';
         setStatus(`Smedley review assigned: ${taskId}. The native Kanban dispatcher owns execution.`);
       } catch (error) { setStatus(`Review assignment failed: ${String(error.message || error)}`, true); }
@@ -2345,6 +2633,7 @@
       const active = String(status.active_route || 'room').toLowerCase();
       const desired = String(status.desired_route || active).toLowerCase();
       const muted = !!status.output_muted;
+      routeBtn.dataset.outputMuted = String(muted);
       const switching = !!status.route_switching || routePending;
       const headsetAvailable = !!status.headset_available;
       const shownRoute = (switching ? desired : active) === 'headset' ? 'headset' : 'room';
@@ -3476,7 +3765,11 @@
   function argusConversationIdentity(message) {
     if (!message || message.role === 'user') return { key: 'operator', label: 'PROMPT' };
     const identity = String(message.assistant_identity || '').toLowerCase();
+    if (identity === 'smedley' || message.voice_personality === 'smedley') {
+      return { key: 'smedley', label: 'SMEDLEY' };
+    }
     const isArgus = identity === 'argus' || identity === 'jarvis'
+      || message.voice_personality === 'argus'
       || message.ask_argus_hard_bind || message.argus_response || message.argus_v1
       || message.ask_jarvis_hard_bind || message.jarvis_response || message.jarvis_v6;
     return isArgus ? { key: 'argus', label: 'A.R.G.U.S.' } : { key: 'biggy', label: 'BIGGY' };

@@ -18,6 +18,51 @@ Successful n8n executions are retained for correlation autopsy. An empty
 webhook body is never blindly replayed: Biggy recovers the already-completed
 terminal result by correlation ID or takes the governed transport fallback.
 
+## Project Review DXF / verified OCR
+
+Bounded callable MCP tools `project_review_extract_capabilities` and
+`project_review_extract` (`scripts/smedley_project_review_mcp.py`):
+
+- **Live:** Turing registered `smedley_project_review` in Smedley
+  `config.yaml` (repo `.venv` + Biggy `HERMES_WEBUI_STATE_DIR`); Biggy WebUI
+  restarted (`:8790` `/health` ok). Hermes-agent venv has the 11 pinned deps
+  (`pip check` clean per main).
+- HTTP aliases still require auth (unauthenticated → 401).
+- External producer/watch patches remain **staged only** — automatic DXF
+  watcher ingestion is not claimed.
+- docs: `docs/smedley-dxf-verified-ocr.md` (`12-1-0104.pdf` is **TEST ONLY**;
+  leave in place; table `structure_unverified` ≠ engineering-verified)
+- activation note: `runtime/argus-rag/staging/HERMES_WORKER_PROJECT_REVIEW_ACTIVATION.md`
+
+Table structure uses OpenCV gutter-split for side-by-side ruled tables; uncertain
+geometry is `structure_unverified` and must not be treated as verified cells.
+Blank-blank OCR matches are reported separately from nonblank agreements.
+Default PDF OCR also triggers on sparse native text plus significant image
+coverage (P&ID-like), without requiring `producer_mode`/`force`. Orientation is
+chosen by Tesseract readable-token coverage × confidence over 0/90/180/270 CW
+(no content-cue lexicon; uncertainty margin; per-probe timeout). Parsers open an
+immutable hashed `source_snapshot/` under the evidence root (exclusive names;
+library original unchanged).
+
+Project Review dialog follow-through (`smedley-review-followthrough-20260902`):
+shared `plan_project_review_turn` contract — default dialogue/clarify; governed
+only on an explicit *current* execute/continuation clause (not mentioned,
+negated, hypothetical, or future-dependent verbs). Fast failure is retryable
+and must not escalate into heavy extraction. Question marks alone never select
+governed. Concurrency ownership before both lanes. Distinguish ROUTING
+SIMULATION tests from ACTUAL `start_session_turn`→MCP capabilities tool-loop
+checks in `docs/smedley-review-followthrough.md`.
+
+Runaway / missing progress (`smedley-review-runaway-20260902`): canonical RAG
+precedence, sample-only fixture exclusion, status-vs-action reporting, compact
+agent context without mutating saved history, live interim progress in the
+review dialog, and stalled recoverable terminal — see
+`docs/smedley-review-runaway-repair.md`.
+
+Readiness fails closed for producer modes `full_ocr`, `mixed_selective_ocr`, and
+`sidecar` until `ocr_verification_state` is independently cross-checked or
+human-verified. Producer deploy artifacts remain staged only.
+
 ## Destination PA contract
 
 A travel destination is active short-term context, not a one-turn string. On

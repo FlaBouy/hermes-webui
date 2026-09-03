@@ -1,0 +1,27 @@
+--- jarvis_rag_watch.py
++++ jarvis_rag_watch.py
+@@ -59,7 +59,7 @@
+ FILE_TIMEOUT = int(os.environ.get("RAG_WATCH_FILE_TIMEOUT", "600"))   # hard cap per file (10 min)
+ MAX_STRIKES  = int(os.environ.get("RAG_WATCH_MAX_STRIKES", "3"))      # non-timeout errors before quarantine
+ HEARTBEAT_TICK = int(os.environ.get("RAG_WATCH_HEARTBEAT_TICK", "20"))
+-SUPPORTED    = {".doc", ".docx", ".rtf", ".html", ".htm", ".txt", ".md", ".log", ".csv", ".pdf", ".xlsx"}
++SUPPORTED    = {".doc", ".docx", ".rtf", ".html", ".htm", ".txt", ".md", ".log", ".csv", ".pdf", ".xlsx", ".dxf"}
+ 
+ # ── heartbeat / status for the MK.2 panel ───────────────────────
+ STATUS_DIR  = os.path.expanduser("~/.jarvis_rag_status")
+@@ -298,6 +298,7 @@
+                             p, "indexed", chunks=result.get("chunks"),
+                             quality_state=result.get("quality_state"),
+                             extraction_mode=result.get("extraction_mode"),
++                            ocr_verification_state=result.get("ocr_verification_state"),
+                             page_count=result.get("page_count"),
+                             ocr_pages=result.get("ocr_pages"),
+                             text_pages=result.get("text_pages"),
+@@ -325,6 +326,7 @@
+                             chunks=result.get("chunks"),
+                             quality_state=result.get("quality_state"),
+                             extraction_mode=result.get("extraction_mode"),
++                            ocr_verification_state=result.get("ocr_verification_state"),
+                             page_count=result.get("page_count"),
+                             ocr_pages=result.get("ocr_pages"),
+                             text_pages=result.get("text_pages"),

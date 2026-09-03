@@ -24,10 +24,28 @@ WATCH_STATE = os.path.expanduser("~/.jarvis_rag_watch_state.json")
 LIBRARY_ROOT = "/Users/rick/Mounts/RAG_Pool/Library"
 FOCUS_FILES = ("1756-td005_-en-e.pdf", "1756-in619_-en-p.pdf")
 PROCESSING = {"detected", "queued", "extracting", "indexing"}
-ACTIONABLE_PHASES = {"failed", "quarantined"}
+ACTIONABLE_PHASES = {"failed", "quarantined", "needs_review"}
 INDEXED_PHASES = {"indexed", "indexed_via_sidecar", "duplicate"}
 RESOLVED_PHASES = {"resolved"}
 HIDDEN_CARD_PHASES = PROCESSING | INDEXED_PHASES | RESOLVED_PHASES | {"idle", "running", "absent"}
+SUPPORTED_EXTENSIONS = {
+    ".pdf", ".doc", ".docx", ".txt", ".md", ".rtf", ".html", ".htm", ".csv", ".xlsx", ".log", ".dxf",
+}
+# Producer (jarvis_rag_poc) emits these OCR-ish modes. mixed_selective_ocr must be
+# gated the same as full_ocr. sidecar is convenience text, not independent verification.
+OCR_EXTRACTION_MODES_NEEDING_VERIFICATION = {
+    "full_ocr",
+    "ocr",
+    "mixed_ocr",
+    "mixed_selective_ocr",
+    "sidecar",
+}
+INDEPENDENT_OCR_VERIFIED_STATES = {
+    "verified",
+    "human_verified",
+    "cross_checked",
+    "cross-checked",
+}
 PUB_FILENAME_RE = re.compile(
     r"^1756[-_](td|um|in)0*(\d{1,4})[-_][^\s]+\.(?:pdf|docx?)$",
     re.IGNORECASE,
@@ -201,6 +219,18 @@ def record_file_event(
     sidecar_path: str | None = None,
     sidecar_sha256: str | None = None,
     reconciliation_reason: str | None = None,
+    quality_state: str | None = None,
+    extraction_mode: str | None = None,
+    page_count: int | None = None,
+    ocr_pages: list[int] | None = None,
+    text_pages: list[int] | None = None,
+    extracted_chars: int | None = None,
+    table_rows: int | None = None,
+    warnings: list[str] | None = None,
+    manifest_path: str | None = None,
+    ocr_verification_state: str | None = None,
+    table_verification_state: str | None = None,
+    human_verified: bool | None = None,
 ) -> dict[str, Any]:
     real = os.path.realpath(path) if path else ""
     base = os.path.basename(path or "")
@@ -235,7 +265,7 @@ def record_file_event(
     elif phase in RESOLVED_PHASES:
         entry["resolved_at"] = now
         entry["reason"] = None
-    elif phase in {"failed", "quarantined"}:
+    elif phase in {"failed", "quarantined", "needs_review"}:
         entry["failed_at"] = now
     if chunks is not None:
         entry["chunks"] = chunks
@@ -250,6 +280,23 @@ def record_file_event(
     if reconciliation_reason is not None:
         entry["reconciliation_reason"] = reconciliation_reason
         entry["reconciled_at"] = now
+    extraction_fields = {
+        "quality_state": quality_state,
+        "extraction_mode": extraction_mode,
+        "page_count": page_count,
+        "ocr_pages": ocr_pages,
+        "text_pages": text_pages,
+        "extracted_chars": extracted_chars,
+        "table_rows": table_rows,
+        "warnings": warnings,
+        "manifest_path": manifest_path,
+        "ocr_verification_state": ocr_verification_state,
+        "table_verification_state": table_verification_state,
+        "human_verified": human_verified,
+    }
+    for key, value in extraction_fields.items():
+        if value is not None:
+            entry[key] = value
     files[real] = entry
     recent = [row for row in ledger.get("recent") or [] if row.get("path") != real]
     recent.insert(0, dict(entry))
@@ -403,6 +450,96 @@ def build_ingest_status() -> dict[str, Any]:
     return status
 
 
+def folder_ingest_readiness(folder: str) -> dict[str, Any]:
+    """Return a fail-closed Project Review readiness decision for one RAG folder."""
+    rel = _safe_rel_folder(folder)
+    root = os.path.realpath(LIBRARY_ROOT)
+    target = os.path.realpath(os.path.join(root, rel))
+    if not rel or (target != root and not target.startswith(root + os.sep)):
+        return {"ready": False, "state": "failed", "reason": "invalid RAG folder", "counts": {}}
+    if not os.path.isdir(target):
+        return {"ready": False, "state": "failed", "reason": "RAG folder does not exist", "counts": {}}
+
+    ledger_files = load_ledger().get("files") or {}
+    rows = []
+    for dirpath, _, filenames in os.walk(target):
+        for name in sorted(filenames):
+            if name.startswith((".", "~")) or os.path.splitext(name)[1].lower() not in SUPPORTED_EXTENSIONS:
+                continue
+            path = os.path.realpath(os.path.join(dirpath, name))
+            entry = ledger_files.get(path) if isinstance(ledger_files.get(path), dict) else {}
+            phase = str(entry.get("phase") or "untracked").lower()
+            quality = str(entry.get("quality_state") or "unknown").lower()
+            extraction_mode = str(entry.get("extraction_mode") or "").lower()
+            verification_state = str(
+                entry.get("ocr_verification_state")
+                or entry.get("table_verification_state")
+                or ""
+            ).lower()
+            independent_ocr_verified = bool(
+                entry.get("human_verified") is True
+                or verification_state in INDEPENDENT_OCR_VERIFIED_STATES
+            )
+            # mixed_selective_ocr is the live producer mode; sidecar must not
+            # pass merely because the producer stamped quality_state=verified.
+            unverified_ocr = bool(
+                extraction_mode in OCR_EXTRACTION_MODES_NEEDING_VERIFICATION
+                and not independent_ocr_verified
+            )
+            if phase in PROCESSING:
+                state = "processing"
+            elif phase in {"failed", "quarantined"}:
+                state = "failed"
+            elif phase == "needs_review" or quality == "needs_review" or unverified_ocr:
+                state = "needs_review"
+            elif phase in INDEXED_PHASES and quality == "verified" and not unverified_ocr:
+                state = "verified"
+            else:
+                state = "unverified"
+            warnings = list(entry.get("warnings") or [])
+            reason = entry.get("reason")
+            if unverified_ocr:
+                if extraction_mode == "sidecar":
+                    reason = reason or (
+                        "Sidecar OCR text is indexed but has not been independently cross-checked."
+                    )
+                    warn = "Independent OCR/table verification required for sidecar extractions."
+                else:
+                    reason = reason or "OCR extraction is indexed but has not been independently verified."
+                    warn = "Independent OCR/table verification required."
+                if warn not in warnings:
+                    warnings.append(warn)
+            rows.append({
+                "path": path, "source": _rel_from_path(path), "basename": name,
+                "phase": phase, "quality_state": quality, "state": state,
+                "reason": reason, "warnings": warnings,
+                "extraction_mode": entry.get("extraction_mode"),
+                "ocr_verification_state": verification_state or None,
+                "ocr_pages": entry.get("ocr_pages") or [],
+            })
+
+    counts = {key: sum(1 for row in rows if row["state"] == key)
+              for key in ("verified", "processing", "needs_review", "failed", "unverified")}
+    if not rows:
+        state, reason = "empty", "No review documents found in the RAG folder."
+    elif counts["failed"]:
+        state, reason = "failed", "%d document(s) failed ingestion." % counts["failed"]
+    elif counts["needs_review"]:
+        state, reason = "needs_review", "%d document(s) require independent OCR/table verification." % counts["needs_review"]
+    elif counts["processing"]:
+        state, reason = "processing", "%d document(s) are still ingesting." % counts["processing"]
+    elif counts["unverified"]:
+        state, reason = "unverified", "%d document(s) do not have verified extraction manifests." % counts["unverified"]
+    else:
+        state, reason = "verified", "All review documents have verified extraction manifests."
+    return {
+        "schema": "smedley.project_review_readiness.v1",
+        "folder": rel, "path": target, "ready": state == "verified",
+        "state": state, "reason": reason, "counts": counts,
+        "documents": rows,
+    }
+
+
 def request_rescan(folder: str) -> dict[str, Any]:
     rel = _safe_rel_folder(folder)
     if not rel:
@@ -427,7 +564,7 @@ def request_rescan(folder: str) -> dict[str, Any]:
                 continue
             path = os.path.join(dirpath, name)
             ext = os.path.splitext(name)[1].lower()
-            if ext not in {".pdf", ".doc", ".docx", ".txt", ".md", ".rtf", ".html", ".htm", ".csv", ".xlsx", ".log"}:
+            if ext not in {".pdf", ".doc", ".docx", ".txt", ".md", ".rtf", ".html", ".htm", ".csv", ".xlsx", ".log", ".dxf"}:
                 continue
             real = os.path.realpath(path)
             if real in hashed_paths:
@@ -572,3 +709,94 @@ def resolve_ingest_source(path: str) -> dict[str, Any]:
         reconciliation_reason="operator-resolved",
     )
     return {"path": real, "status": "resolved", "queued": False}
+
+
+EVIDENCE_ROOT = os.path.expanduser("~/.jarvis_rag_status/project_review_evidence")
+
+
+def evidence_root_for(source_sha256: str, *, basename: str | None = None) -> str:
+    digest = str(source_sha256 or "").strip().lower()
+    if len(digest) < 16 or any(ch not in "0123456789abcdef" for ch in digest):
+        raise ValueError("invalid source sha for evidence root")
+    safe_base = re.sub(r"[^\w.\-]+", "_", os.path.basename(basename or "source"))[:80] or "source"
+    root = os.environ.get("SMEDLEY_PROJECT_REVIEW_EVIDENCE_ROOT") or EVIDENCE_ROOT
+    path = os.path.join(os.path.expanduser(root), digest[:16], safe_base)
+    os.makedirs(path, exist_ok=True)
+    return path
+
+
+def attach_review_extraction_evidence(
+    path: str,
+    *,
+    source_sha256: str,
+    evidence: dict[str, Any],
+) -> dict[str, Any]:
+    """Attach Project Review extraction evidence without rewriting ingest phase.
+
+    Never promotes an entry to indexed merely because a parser ran. Preserves
+    existing ingestion history. Marks evidence stale when the on-disk sha differs.
+    """
+    real = os.path.realpath(path)
+    ledger = load_ledger()
+    files = ledger["files"]
+    entry = files.get(real) if isinstance(files.get(real), dict) else {}
+    if not entry:
+        entry = {
+            "path": real,
+            "basename": os.path.basename(real),
+            "source": _rel_from_path(real),
+            "folder": os.path.dirname(_rel_from_path(real)),
+            "phase": "untracked",
+        }
+    current_sha = file_sha256(real) if os.path.isfile(real) else None
+    stale = bool(current_sha and current_sha != source_sha256)
+    package = dict(evidence or {})
+    package.update({
+        "source_sha256": source_sha256,
+        "attached_at": _iso(),
+        "stale": stale,
+        "current_source_sha256": current_sha,
+    })
+    history = list(entry.get("extraction_evidence_history") or [])
+    if isinstance(entry.get("extraction_evidence"), dict):
+        history.insert(0, entry["extraction_evidence"])
+    history.insert(0, package)
+    entry["extraction_evidence"] = package
+    entry["extraction_evidence_history"] = history[:20]
+    # Evidence fields for readiness — do not clobber phase/indexed_at.
+    if package.get("ocr_verification_state") is not None:
+        entry["ocr_verification_state"] = package.get("ocr_verification_state")
+    if package.get("quality_state") is not None:
+        # Never auto-upgrade to verified from extraction alone.
+        incoming = str(package.get("quality_state") or "").lower()
+        if incoming == "verified":
+            incoming = "needs_review"
+            package["quality_state"] = incoming
+        entry["quality_state"] = incoming
+    if package.get("extraction_mode") is not None:
+        entry["extraction_mode"] = package.get("extraction_mode")
+    if package.get("manifest_path") is not None:
+        entry["manifest_path"] = package.get("manifest_path")
+    if package.get("warnings") is not None:
+        merged = list(entry.get("warnings") or [])
+        for warning in package.get("warnings") or []:
+            if warning not in merged:
+                merged.append(warning)
+        entry["warnings"] = merged
+    if stale:
+        entry["ocr_verification_state"] = "stale"
+        entry["quality_state"] = "needs_review"
+        warn = "Extraction evidence is stale; source sha changed after evidence capture."
+        warnings = list(entry.get("warnings") or [])
+        if warn not in warnings:
+            warnings.append(warn)
+        entry["warnings"] = warnings
+    entry["updated_at"] = _iso()
+    # Preserve prior phase. Extraction is not Qdrant indexing.
+    if not entry.get("phase"):
+        entry["phase"] = "untracked"
+    files[real] = entry
+    ledger["files"] = files
+    ledger["updated"] = entry["updated_at"]
+    _save(LEDGER_FILE, ledger)
+    return entry

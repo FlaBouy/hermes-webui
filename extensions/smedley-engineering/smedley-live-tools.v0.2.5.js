@@ -84,8 +84,8 @@
       const hasDesignation = String(cable.cable_designation || '').trim();
       const hasOd = cable.od_in != null && cable.od_in !== '';
       const hasArea = cable.area_sqin != null && cable.area_sqin !== '';
-      if (!hasDesignation && !(hasOd && hasArea)) {
-        return `${label}[${i}] needs cable_designation or od_in + area_sqin.`;
+      if (!hasDesignation && !String(cable.conductor_awg || '').trim() && !(hasOd && hasArea)) {
+        return `${label}[${i}] needs conductor_awg for TC-ER, cable_designation, or od_in + area_sqin.`;
       }
     }
     return '';

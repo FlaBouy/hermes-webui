@@ -16,3 +16,11 @@ mcp
 python-docx
 openpyxl
 python-pptx
+# Optional Project Review CAD/OCR evidence (Smedley DXF + verified OCR slice).
+# Installed in the repo .venv for local validation; tests inject OCR runners when
+# RapidOCR/docling are unavailable. Do not install into system Python.
+ezdxf>=1.3.0,<2
+pypdfium2>=4.30.0,<6
+pytesseract>=0.3.10,<1
+rapidocr>=3.8,<4
+onnxruntime>=1.17,<2

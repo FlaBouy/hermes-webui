@@ -161,7 +161,7 @@
         pushRow(rows, valueRow('Receiving end voltage', result.receiving_end_voltage, 'V'));
         pushRow(rows, valueRow('Threshold', result.threshold_pct, '%'));
         pushRow(rows, valueRow('Design amps', result.design_amps, 'A'));
-        pushRow(rows, valueRow('Derated ampacity', result.derated_ampacity_A, 'A'));
+        pushRow(rows, valueRow(result.derated_ampacity_basis_size ? `Minimum-size (${result.derated_ampacity_basis_size} AWG) ampacity` : 'Derated ampacity', result.derated_ampacity_A, 'A'));
         break;
       case 'feeder-size':
         pushRow(rows, valueRow('Conductor', firstPresent(result.conductor_size, result.conductor_awg), 'AWG'));

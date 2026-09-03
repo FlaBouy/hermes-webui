@@ -76,6 +76,47 @@ def _configure_manifest_extension(monkeypatch, tmp_path, payload):
     return state_dir, root
 
 
+def test_waiting_speech_proxy_survives_playback_longer_than_ten_seconds(monkeypatch):
+    import threading
+    import time
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from api import routes
+
+    class VoiceFixture(BaseHTTPRequestHandler):
+        def do_POST(self):
+            self.rfile.read(int(self.headers.get("Content-Length", 0)))
+            time.sleep(10.2)  # Old proxy returned 502 while the sink was still speaking.
+            payload = b'{"status":"completed","returncode":0,"waited":true}'
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), VoiceFixture)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    origin = f"http://127.0.0.1:{server.server_port}"
+    monkeypatch.setattr("api.extensions.resolve_extension_sidecar_proxy_target",
+                        lambda *args, **kwargs: {"origin": origin, "upstream_url": origin + "/speak"})
+    body = b'{"text":"fixture only; no audio","wait":true}'
+    handler = FakeHandler(body)
+    handler.headers = {"Host": "webui.local", "Origin": "http://webui.local",
+                       "Content-Type": "application/json", "Content-Length": str(len(body))}
+    try:
+        routes.handle_post(handler, SimpleNamespace(
+            path="/api/extensions/biggy-brand/sidecar/speak", query=""))
+        assert handler.status == 200
+        assert json.loads(handler.body)["status"] == "completed"
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
 def test_extension_sidecar_proxy_requires_webui_auth(monkeypatch):
     monkeypatch.setenv("HERMES_WEBUI_PASSWORD", "test-password")
 
@@ -300,7 +341,19 @@ def test_extension_sidecar_proxy_malformed_consents_fail_closed(tmp_path, monkey
     assert exc.value.status == 403
 
 
-def test_extension_sidecar_proxy_route_uses_shared_resolver_and_strips_headers(monkeypatch):
+@pytest.mark.parametrize("extension,proxy_path,raw_body,expected_timeout", [
+    ("templates", "v1/ping", b'{"ping":"pong"}', 10),
+    ("biggy-brand", "speak", b'{"text":"Hello","wait":true}', 180),
+    ("smedley-engineering", "speak", b'{"text":"Hello","wait":true}', 180),
+    ("biggy-brand", "speak", b'{"wait":false}', 10),
+    ("biggy-brand", "speak", b'{"wait":"true"}', 10),
+    ("biggy-brand", "speak", b'[]', 10),
+    ("biggy-brand", "speak", b'not-json', 10),
+    ("templates", "speak", b'{"wait":true}', 10),
+    ("biggy-brand", "other", b'{"wait":true}', 10),
+])
+def test_extension_sidecar_proxy_route_uses_shared_resolver_and_strips_headers(
+        monkeypatch, extension, proxy_path, raw_body, expected_timeout):
     from api import routes
 
     captured = {}
@@ -350,7 +403,6 @@ def test_extension_sidecar_proxy_route_uses_shared_resolver_and_strips_headers(m
         lambda allowed_origin: FakeOpener(),
     )
 
-    raw_body = b'{"ping":"pong"}'
     handler = FakeHandler(raw_body)
     handler.headers = {
         "Accept": "application/json",
@@ -371,11 +423,11 @@ def test_extension_sidecar_proxy_route_uses_shared_resolver_and_strips_headers(m
 
     result = routes.handle_post(
         handler,
-        SimpleNamespace(path="/api/extensions/templates/sidecar/v1/ping", query="debug=1"),
+        SimpleNamespace(path=f"/api/extensions/{extension}/sidecar/{proxy_path}", query="debug=1"),
     )
     assert result is True
     assert captured == {
-        "url": "http://127.0.0.1:17787/v1/ping?debug=1",
+        "url": f"http://127.0.0.1:17787/{proxy_path}?debug=1",
         "method": "POST",
         "data": raw_body,
         "headers": {
@@ -385,7 +437,7 @@ def test_extension_sidecar_proxy_route_uses_shared_resolver_and_strips_headers(m
             "range": "bytes=0-64",
             "x-sidecar-auth": "local-token",
         },
-        "timeout": 10,
+        "timeout": expected_timeout,
     }
     assert handler.status == 202
     assert handler.body == b'{"ok":true}'

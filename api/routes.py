@@ -61,6 +61,7 @@ from api.session_events import (
     subscribe_session_events,
     unsubscribe_session_events,
 )
+from api.turn_journal import derive_turn_journal_states, read_turn_journal
 from api.gateway_restart import restart_active_profile_gateway
 from api.shares import create_or_refresh_share, load_share, revoke_share
 
@@ -5769,6 +5770,16 @@ def _handle_extension_sidecar_proxy(
         proxy_timeout = (
             _EXTENSION_SIDECAR_PROXY_STREAM_TIMEOUT_SECONDS if stream_binary else 10
         )
+        # These local voice sinks acknowledge wait=true only AFTER playback.
+        # Keep ordinary extension requests on the short budget.
+        if (extension_id in {"biggy-brand", "smedley-engineering"}
+                and proxy_path.strip("/") == "speak" and method.upper() == "POST"):
+            try:
+                speak_body = json.loads(request_body or b"{}")
+            except (ValueError, UnicodeDecodeError):
+                speak_body = None
+            if isinstance(speak_body, dict) and speak_body.get("wait") is True:
+                proxy_timeout = 180
         # Diagnostic-only (no behavior change): a phantom-200 was observed for
         # the smedley-engineering /speak proxy on 2026-08-18 — the browser got
         # 200 back from this proxy but the request never reached the sidecar's
@@ -5884,6 +5895,363 @@ _BIGGY_RAG_ALLOWED_QUERY = {
     "library-folders": {"parent"},
     "ingest-upload": {"folder"},
 }
+
+
+def _authorize_biggy_smedley_review_dialog_access(
+    handler,
+    project: dict | None,
+    session_id: str | None,
+    *,
+    stream_id: str | None = None,
+    emit_error: bool = True,
+) -> bool:
+    """Authorize Biggy-coordinator / Smedley-owner access to a review dialog session.
+
+    Aligns with dialog start/read: Biggy owns the project record, Smedley owns
+    the review session. Does **not** weaken global ``_session_id_visible_to_request_profile``
+    / ``_stream_id_visible_to_request_profile`` — those remain exact-profile for
+    ordinary chat/session routes. This helper only covers the known coordinator
+    boundary used by ``/api/biggy/projects/reviews/dialog*``.
+    """
+    active = str(_get_active_profile_name() or "")
+    if not (_profiles_match(active, "biggy") or _profiles_match(active, "smedley")):
+        if emit_error:
+            bad(
+                handler,
+                "active profile must be biggy (coordinator) or smedley (review owner)",
+                403,
+            )
+        return False
+    if not isinstance(project, dict):
+        if emit_error:
+            bad(handler, "project review not found", 404)
+        return False
+    if not _profiles_match(project.get("profile"), "biggy"):
+        if emit_error:
+            bad(handler, "project review not found", 404)
+        return False
+    review = project.get("review") if isinstance(project.get("review"), dict) else {}
+    if str(review.get("review_owner") or "") != "smedley":
+        if emit_error:
+            bad(handler, "project review not found", 404)
+        return False
+    bound = str(review.get("session_id") or "").strip()
+    sid = str(session_id or "").strip()
+    if not sid or not bound or bound != sid:
+        if emit_error:
+            bad(handler, "review dialog has no active session", 404)
+        return False
+    if not is_safe_session_id(sid):
+        if emit_error:
+            bad(handler, "review dialog unavailable", 404)
+        return False
+    try:
+        session = get_session(sid, metadata_only=True)
+    except KeyError:
+        if emit_error:
+            bad(handler, "review dialog unavailable", 404)
+        return False
+    if not _profiles_match(getattr(session, "profile", None), "smedley"):
+        if emit_error:
+            bad(handler, "Session not found", 404)
+        return False
+    sess_project = str(getattr(session, "project_id", None) or "").strip()
+    proj_id = str(project.get("project_id") or "").strip()
+    if sess_project and proj_id and sess_project != proj_id:
+        if emit_error:
+            bad(handler, "Session not found", 404)
+        return False
+    expected_stream = str(stream_id or "").strip()
+    if expected_stream:
+        owner = _stream_id_owner_session_id(expected_stream)
+        if owner and owner != sid:
+            if emit_error:
+                bad(handler, "Session not found", 404)
+            return False
+    return True
+
+
+def _biggy_project_review_live_stream_id(session) -> str | None:
+    """Return the process-live stream id that owns this review session, if any.
+
+    Persisted ``is_streaming`` / ``active_stream_id`` survive restart; only
+    STREAMS (open SSE channel) or ACTIVE_RUNS (worker bookkeeping) prove a
+    worker is still alive in *this* process. Prefer the claimed stream when it
+    is live; otherwise accept a live ACTIVE_RUNS row for the same session.
+    """
+    claimed = str(getattr(session, "active_stream_id", None) or "").strip()
+    try:
+        from api.session_ops import _live_active_stream_id
+
+        live_claimed = _live_active_stream_id(session)
+        if live_claimed:
+            return str(live_claimed)
+    except Exception:
+        live_claimed = None
+        if claimed:
+            try:
+                with STREAMS_LOCK:
+                    if claimed in STREAMS:
+                        return claimed
+                with ACTIVE_RUNS_LOCK:
+                    if claimed in (ACTIVE_RUNS or {}):
+                        return claimed
+            except Exception:
+                pass
+    try:
+        run_stream = _active_run_stream_for_session(getattr(session, "session_id", None))
+    except Exception:
+        run_stream = None
+    if run_stream and (not claimed or str(run_stream) == claimed):
+        return str(run_stream)
+    return None
+
+
+def _biggy_project_review_journal_event_for_stream(
+    events: list,
+    stream_id: str | None,
+) -> dict | None:
+    """Latest journal event belonging to ``stream_id``, if any."""
+    stream = str(stream_id or "").strip()
+    if not stream:
+        return None
+    latest = None
+    latest_ts = float("-inf")
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        if str(event.get("stream_id") or "").strip() != stream:
+            continue
+        created_at = float(event.get("created_at") or 0)
+        if latest is None or created_at >= latest_ts:
+            latest = event
+            latest_ts = created_at
+    return latest
+
+
+def _biggy_project_review_owner_visible_text(raw: str | None) -> str:
+    """Match dialog UI stripper: keep text after the last ``Owner message:`` marker."""
+    text = str(raw or "")
+    marker = "Owner message:"
+    idx = text.rfind(marker)
+    if idx >= 0:
+        return text[idx + len(marker) :].strip()
+    return text.strip()
+
+
+def _biggy_project_review_message_text(message: dict | None) -> str:
+    if not isinstance(message, dict):
+        return ""
+    value = message.get("content")
+    if isinstance(value, list):
+        parts: list[str] = []
+        for part in value:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict):
+                parts.append(str(part.get("text") or part.get("content") or ""))
+        return "\n".join(p for p in parts if p).strip()
+    if isinstance(value, dict):
+        return str(value.get("text") or value.get("content") or "").strip()
+    return str(value or "").strip()
+
+
+def _biggy_project_review_pending_already_represented(
+    messages: list,
+    pending: str,
+) -> bool:
+    """True when the transcript tail already shows this pending owner turn."""
+    pending_full = str(pending or "").strip()
+    if not pending_full:
+        return True
+    pending_visible = _biggy_project_review_owner_visible_text(pending_full)
+    for message in reversed(list(messages or [])):
+        if not isinstance(message, dict):
+            continue
+        if message.get("_hidden") or message.get("tool_only"):
+            continue
+        role = str(message.get("role") or "").strip().lower()
+        if role == "tool":
+            continue
+        if role != "user":
+            return False
+        content = _biggy_project_review_message_text(message)
+        if content == pending_full:
+            return True
+        if pending_visible and _biggy_project_review_owner_visible_text(content) == pending_visible:
+            return True
+        return False
+    return False
+
+
+def _biggy_project_review_messages_for_payload(session) -> list:
+    """Presentation copy of transcript + current pending owner turn (no store mutation)."""
+    stored = getattr(session, "messages", None)
+    messages = list(stored) if isinstance(stored, list) else []
+    pending = str(getattr(session, "pending_user_message", None) or "").strip()
+    if not pending:
+        return messages
+    if _biggy_project_review_pending_already_represented(messages, pending):
+        return messages
+    # Preserve full pending shape (canonical context + Owner message: …) so the
+    # existing dialog renderer can strip to visible owner text. Never write back.
+    return messages + [
+        {
+            "role": "user",
+            "content": pending,
+            "source": "project_review",
+            "_pending": True,
+        }
+    ]
+
+
+def _biggy_project_review_dialog_payload(session) -> dict:
+    """Return project-review transcript plus an honest server-turn lifecycle."""
+    messages = _biggy_project_review_messages_for_payload(session)
+    claimed_stream_id = str(getattr(session, "active_stream_id", None) or "").strip() or None
+    persisted_streaming = bool(
+        getattr(session, "is_streaming", False) or claimed_stream_id
+    )
+    live_stream_id = _biggy_project_review_live_stream_id(session)
+    # Authoritative live ownership wins: keep dialog polling while this process
+    # still has a worker/SSE channel, even if interim assistant prose or a prior
+    # turn's completed journal would otherwise look "settled".
+    if live_stream_id:
+        from api.biggy_project_review_runtime import (
+            collect_review_run_progress,
+            format_review_progress_status,
+        )
+
+        progress = collect_review_run_progress(session.session_id, live_stream_id)
+        status_message = format_review_progress_status(progress)
+        status = "stalled" if progress.get("stalled") else "running"
+        # Stalled is still recoverable: keep is_streaming true while the worker
+        # is process-live so the owner can cancel/retry; do not fake completion
+        # or hide the spinner.
+        return {
+            "session_id": session.session_id,
+            "messages": messages,
+            "is_streaming": True,
+            "status": status,
+            "status_message": status_message,
+            "progress": progress,
+            "cancel_stream_id": live_stream_id,
+            "cancel_recommended": bool(progress.get("cancel_recommended")),
+        }
+
+    streaming = persisted_streaming
+    status = "running" if persisted_streaming else "idle"
+    status_message = "Smedley is working…" if persisted_streaming else ""
+
+    events: list = []
+    try:
+        journal = read_turn_journal(str(session.session_id))
+        events = list(journal.get("events") or [])
+        states, _collisions = derive_turn_journal_states(events)
+        latest = max(
+            states.values(),
+            key=lambda event: float(event.get("created_at") or 0),
+            default=None,
+        )
+    except (OSError, TypeError, ValueError):
+        logger.debug(
+            "Unable to read project-review turn lifecycle for session %s",
+            getattr(session, "session_id", ""),
+            exc_info=True,
+        )
+        latest = None
+
+    # Prefer the claimed stream's journal when deciding settlement so a prior
+    # completed turn cannot hide a newer claimed turn that is still nonterminal.
+    claimed_event = _biggy_project_review_journal_event_for_stream(events, claimed_stream_id)
+    relevant = claimed_event or latest
+
+    latest_assistant_ts = max(
+        (
+            float(message.get("timestamp") or 0)
+            for message in messages
+            if isinstance(message, dict)
+            and str(message.get("role") or "").strip().lower() == "assistant"
+            and str(message.get("content") or "").strip()
+            and not message.get("_pending")
+        ),
+        default=0,
+    )
+
+    if relevant:
+        event = str(relevant.get("event") or "").strip().lower()
+        created_at = float(relevant.get("created_at") or 0)
+        relevant_stream = str(relevant.get("stream_id") or "").strip() or None
+        completed = event == "completed"
+        interrupted = event == "interrupted"
+        predates_process = bool(created_at and created_at < SERVER_START_TIME)
+        # Fast-lane / later visible reply may supersede a *stale nonterminal*
+        # journal only when this session is not claiming an active stream.
+        # Interim assistant prose during a claimed turn must not stop polling.
+        visible_reply_supersedes_journal = bool(
+            (not persisted_streaming)
+            and latest_assistant_ts
+            and created_at
+            and latest_assistant_ts > created_at
+        )
+        matching_current_turn = bool(
+            not claimed_stream_id
+            or not relevant_stream
+            or claimed_stream_id == relevant_stream
+        )
+        if completed and matching_current_turn:
+            streaming = False
+            status = "completed"
+            status_message = ""
+        elif visible_reply_supersedes_journal:
+            streaming = False
+            status = "completed"
+            status_message = ""
+        elif interrupted or predates_process or not persisted_streaming:
+            # Persisted stream flags survive a restart. A nonterminal journal
+            # event from before this server process cannot still have a worker.
+            # Without process-live STREAMS/ACTIVE_RUNS evidence above, do not
+            # trust the persisted claim alone.
+            streaming = False
+            status = "interrupted"
+            status_message = (
+                "Smedley's reply was interrupted before completion. "
+                "Send the message again to retry."
+            )
+        elif (
+            completed
+            and claimed_stream_id
+            and relevant_stream
+            and claimed_stream_id != relevant_stream
+            and not claimed_event
+        ):
+            # Claimed a different stream than the latest settled journal, but
+            # that claimed stream has no journal yet and is not process-live —
+            # fail closed rather than poll a ghost.
+            streaming = False
+            status = "interrupted"
+            status_message = (
+                "Smedley's reply was interrupted before completion. "
+                "Send the message again to retry."
+            )
+
+    from api.project_review_speech import review_speech_candidate
+
+    speech = review_speech_candidate({
+        "session_id": session.session_id, "messages": messages,
+        "is_streaming": streaming, "status": status,
+    })
+    return {
+        "session_id": session.session_id,
+        "messages": messages,
+        "is_streaming": streaming,
+        "status": status,
+        "status_message": status_message,
+        "progress": {"items": [], "tool_count": 0, "interim_count": 0, "tool_complete_count": 0},
+        "cancel_stream_id": None,
+        "cancel_recommended": False,
+        "speech": {"id": speech["id"], "mode": speech["mode"]} if speech else None,
+    }
 
 
 def _biggy_rag_proxy_target(parsed, method: str) -> str | None:
@@ -13807,7 +14175,16 @@ def handle_get(handler, parsed) -> bool:
             and str(project.get("review", {}).get("review_owner") or "") == "smedley"
         ]
         projects.sort(key=lambda project: float(project.get("created_at") or 0), reverse=True)
+        from api.jarvis_rag_ingest_events import folder_ingest_readiness
+        for project in projects:
+            review = project.setdefault("review", {})
+            review["ingest_readiness"] = folder_ingest_readiness(str(review.get("rag_folder") or ""))
         return j(handler, {"projects": projects, "review_owner": "smedley"})
+
+    if parsed.path == "/api/biggy/projects/reviews/extract/capabilities" or parsed.path == "/api/smedley/project-review/extract/capabilities":
+        from api.smedley_project_review_extract import capabilities as review_extract_capabilities
+
+        return j(handler, {"ok": True, "tool": "project_review_extract", "mcp_tools": ["project_review_extract_capabilities", "project_review_extract"], **review_extract_capabilities()})
 
     if parsed.path == "/api/biggy/projects/reviews/dialog":
         project_id = str((parse_qs(parsed.query).get("project_id") or [""])[0]).strip()
@@ -13825,11 +14202,11 @@ def handle_get(handler, parsed) -> bool:
             session = get_session(session_id)
         except KeyError:
             return j(handler, {"project": project, "dialog": None})
-        return j(handler, {"project": project, "dialog": {
-            "session_id": session.session_id,
-            "messages": list(getattr(session, "messages", None) or []),
-            "is_streaming": bool(getattr(session, "is_streaming", False) or getattr(session, "active_stream_id", None)),
-        }})
+        _clear_stale_stream_state(session)
+        return j(handler, {
+            "project": project,
+            "dialog": _biggy_project_review_dialog_payload(session),
+        })
 
     if parsed.path == "/api/prompts":
         return j(handler, {"prompts": _load_saved_prompts()})
@@ -17102,6 +17479,10 @@ def handle_post(handler, parsed) -> bool:
         if project is None:
             return bad(handler, "project review not found", 404)
         review = project.setdefault("review", {})
+        readiness = None
+        if message:
+            from api.jarvis_rag_ingest_events import folder_ingest_readiness
+            readiness = folder_ingest_readiness(str(review.get("rag_folder") or ""))
         session_id = str(review.get("session_id") or "").strip()
         session = None
         if session_id:
@@ -17117,37 +17498,454 @@ def handle_post(handler, parsed) -> bool:
             session.save()
             save_projects(projects)
             session_id = session.session_id
+        else:
+            _clear_stale_stream_state(session)
+        if isinstance(body.get("calculator_inputs"), dict) and not message:
+            allowed = {"voltage", "phase", "amps", "hp", "length_ft", "target_vd_pct", "power_factor",
+                       "circuit_type", "continuous_load", "temp_rating", "ambient_temp_c", "num_conductors",
+                       "conduit_type", "parallel_sets", "installation_method", "cable_construction",
+                       "cable_series", "tray_cover", "covered_length_ft", "rung_spacing_in", "material"}
+            values = {k: v for k, v in body["calculator_inputs"].items() if k in allowed and isinstance(v, (str, int, float, bool))}
+            if values:
+                from api.config import _get_session_agent_lock
+                parameter_lock = _get_session_agent_lock(session_id)
+                if not parameter_lock.acquire(timeout=2):
+                    return bad(handler, "Review is busy; calculator parameters were not saved. Retry after the current reply.", 409)
+                try:
+                    session.messages.append({"role": "user", "content": "Calculator parameters updated: " + "; ".join(f"{k}={v}" for k, v in values.items()),
+                        "calculator_inputs": values, "source": "project_review_calculator", "timestamp": int(time.time())})
+                    session.save()
+                finally:
+                    parameter_lock.release()
         if message:
             if len(message) > 8000:
                 return bad(handler, "review message exceeds 8000 characters")
-            context = ""
+            sources = review.get("sources") if isinstance(review.get("sources"), dict) else {}
+            from api.biggy_project_review_runtime import (
+                REVIEW_MAX_ITERATIONS,
+                build_canonical_project_context,
+                build_dialogue_project_context,
+                build_review_agent_context_messages,
+                build_status_report_reply,
+            )
+            from api.biggy_voice_route import (
+                is_capability_or_deferred_planning,
+                plan_project_review_turn,
+                request_fast_voice_reply,
+            )
+            from api.config import _get_session_agent_lock
+
+            from api.project_review_electrical import is_voltage_drop_question, voltage_drop_reply, requested_tool, tool_form_reply
+            plan = plan_project_review_turn(message)
+            requested_calculator = requested_tool(message)
+            if is_voltage_drop_question(message, getattr(session, "messages", None)):
+                plan = {"lane": "electrical", "reason": "bounded_deterministic_voltage_drop"}
+            elif requested_calculator:
+                plan = {"lane": "electrical", "reason": "interactive_electrical_tool"}
+            lane = str(plan.get("lane") or "governed")
+            if lane == "status":
+                intent = "status_report"
+            elif lane == "fast":
+                intent = "dialogue"
+            else:
+                intent = "execute"
+            planning = bool(lane == "fast" and is_capability_or_deferred_planning(message))
+            if lane == "fast":
+                project_context = build_dialogue_project_context(
+                    project=project,
+                    review=review,
+                    readiness=readiness,
+                    planning=planning,
+                )
+            else:
+                project_context = build_canonical_project_context(
+                    project=project,
+                    review=review,
+                    readiness=readiness,
+                    sources=sources,
+                    intent=intent,
+                )
+            # Always refresh scoped project_id + capability/MCP context on every
+            # turn (including established review sessions). Onboarding preamble
+            # is only needed once when the transcript is empty.
+            onboarding = ""
             if not getattr(session, "messages", None):
-                sources = review.get("sources") if isinstance(review.get("sources"), dict) else {}
-                context = (
+                onboarding = (
                     "You are Smedley, Senior Engineer reporting to Biggy. Conduct a continuing "
                     "electrical design review with the owner. Keep recommendations grounded in the "
                     "project review library and state assumptions, code/standard basis, risks, and "
                     "approval implications.\n\n"
-                    f"Project: {project.get('name') or 'Project review'}\n"
-                    f"Review type: {review.get('review_type') or 'internal-design'}\n"
-                    f"RAG folder: {review.get('rag_folder') or 'not yet assigned'}\n"
                     f"Plant specifications: {sources.get('plant_specifications') or 'not provided'}\n"
                     f"Code books / standards: {sources.get('code_books') or 'not provided'}\n"
                     f"Design package: {sources.get('design_package') or 'not provided'}\n"
                     f"Review scope: {review.get('scope') or 'Perform governance, compliance, and design error review.'}\n\n"
                 )
-            result = start_session_turn(session_id, context + "Owner message: " + message, source="project_review")
-            if int(result.get("_status", 200) or 200) >= 400:
-                return bad(handler, str(result.get("error") or "Smedley review could not start"), int(result.get("_status") or 500))
+            governed_message = project_context + onboarding + "Owner message: " + message
+
+            # Ownership check applies before ALL lanes. Fast/status replies must
+            # not append/clear streaming while a governed run is live.
+            sync_done = False
+            with _get_session_agent_lock(session_id):
+                try:
+                    session = get_session(session_id)
+                except KeyError:
+                    return bad(handler, "review dialog unavailable", 404)
+                if getattr(session, "is_streaming", False) or getattr(session, "active_stream_id", None):
+                    return bad(
+                        handler,
+                        "Smedley review turn already in progress; wait for completion before sending another request",
+                        409,
+                    )
+
+                if lane == "status":
+                    # Deterministic prior-results report — no LLM polish (latency/hallucination).
+                    reply_text = build_status_report_reply(
+                        getattr(session, "messages", None),
+                        owner_message=message,
+                    )
+                    now_ts = int(time.time())
+                    if not isinstance(getattr(session, "messages", None), list):
+                        session.messages = []
+                    session.messages.append({
+                        "role": "user",
+                        "content": "Owner message: " + message,
+                        "timestamp": now_ts,
+                        "source": "project_review",
+                    })
+                    session.messages.append({
+                        "role": "assistant",
+                        "content": reply_text,
+                        "timestamp": now_ts + 1,
+                        "assistant_identity": "smedley",
+                        "project_review_status_route": True,
+                        "project_review_dispatch_reason": plan.get("reason") or "status_inquiry_report_prior",
+                        "voice_model": "",
+                    })
+                    session.is_streaming = False
+                    session.active_stream_id = None
+                    session.save()
+                    sync_done = True
+                elif lane in {"fast", "electrical"}:
+                    try:
+                        # Capability/deferred planning: keep history short so prior
+                        # extract inventories are not re-enumerated. Genuine prior-
+                        # result questions keep a longer conversational window.
+                        history_cap = 4 if planning else 24
+                        routed = (tool_form_reply(requested_calculator, session.messages, message)
+                                  if plan.get("reason") == "interactive_electrical_tool" else
+                                  voltage_drop_reply(session.messages, message)) if lane == "electrical" else request_fast_voice_reply(
+                            message,
+                            system_context=project_context,
+                            history_rows=history_cap,
+                            history=build_review_agent_context_messages(
+                                getattr(session, "messages", None),
+                                max_messages=history_cap,
+                            ),
+                            personality="smedley",
+                        )
+                        now_ts = int(time.time())
+                        if not isinstance(getattr(session, "messages", None), list):
+                            session.messages = []
+                        session.messages.append({
+                            "role": "user",
+                            "content": "Owner message: " + message,
+                            "timestamp": now_ts,
+                            "source": "project_review",
+                        })
+                        session.messages.append({
+                            "role": "assistant",
+                            "content": str(routed.get("reply") or "").strip(),
+                            "timestamp": now_ts + 1,
+                            "assistant_identity": "smedley",
+                            "project_review_fast_route": lane == "fast",
+                            "electrical_inputs": routed.get("electrical_inputs"),
+                            "electrical_result": routed.get("electrical_result"),
+                            "project_review_dispatch_reason": plan.get("reason")
+                            or "informational_transcript_only",
+                            "voice_model": str(routed.get("model") or ""),
+                        })
+                        session.is_streaming = False
+                        session.active_stream_id = None
+                        session.save()
+                        sync_done = True
+                    except Exception:
+                        # Dialogue/fast failures must not silently escalate into the
+                        # heavy tool loop — that is how deferred-parameter questions
+                        # burned 11+ minutes of governed execution.
+                        logger.exception(
+                            "Smedley V6 review dialogue lane failed; not escalating to governed"
+                        )
+                        return j(
+                            handler,
+                            {
+                                "ok": False,
+                                "error": (
+                                    "Smedley dialogue reply failed; retry the message. "
+                                    "Heavy extraction was not started."
+                                ),
+                                "retryable": True,
+                                "lane": "fast",
+                                "dispatch_reason": plan.get("reason") or "dialogue_or_informational",
+                            },
+                            status=503,
+                        )
+                else:
+                    # Bound agent-facing context for long review transcripts without
+                    # mutating the full saved display history (messages) or durable
+                    # context_messages. One-shot turn binding is consumed by the
+                    # streaming worker (process-local; not session JSON).
+                    from api.biggy_project_review_runtime import set_project_review_turn_binding
+
+                    saved_messages = list(getattr(session, "messages", None) or [])
+                    set_project_review_turn_binding(
+                        session_id,
+                        context_messages=build_review_agent_context_messages(saved_messages),
+                        max_iterations=REVIEW_MAX_ITERATIONS,
+                    )
+                    sync_done = False
+
+            if not sync_done:
+                result = start_session_turn(session_id, governed_message, source="project_review")
+                if int(result.get("_status", 200) or 200) >= 400:
+                    return bad(handler, str(result.get("error") or "Smedley review could not start"), int(result.get("_status") or 500))
         try:
             session = get_session(session_id)
         except KeyError:
             return bad(handler, "review dialog unavailable", 404)
-        return j(handler, {"ok": True, "project": project, "dialog": {
-            "session_id": session.session_id,
-            "messages": list(getattr(session, "messages", None) or []),
-            "is_streaming": bool(getattr(session, "is_streaming", False) or getattr(session, "active_stream_id", None)),
-        }})
+        return j(handler, {
+            "ok": True,
+            "project": project,
+            "dialog": _biggy_project_review_dialog_payload(session),
+            "ingest_readiness": readiness,
+            "tool_action": routed.get("tool_action") if message and lane == "electrical" else None,
+        })
+
+    if parsed.path == "/api/biggy/projects/reviews/dialog/speech":
+        # Explicit preparation only: GET/poll/open never triggers TTS or an LLM.
+        # The initiating tab owns playback, using the existing local V6 sink.
+        from api.project_review_speech import review_speech_candidate, prepare_review_speech
+
+        project_id = str(body.get("project_id") or "").strip()
+        expected_id = str(body.get("reply_id") or "").strip()
+        project = next((p for p in load_projects() if str(p.get("project_id") or "") == project_id), None)
+        if not project or not expected_id:
+            return bad(handler, "project and reply_id required", 400)
+        session_id = str((project.get("review") or {}).get("session_id") or "")
+        if not _authorize_biggy_smedley_review_dialog_access(handler, project, session_id):
+            return True
+        session = get_session(session_id)
+        candidate = review_speech_candidate(_biggy_project_review_dialog_payload(session))
+        if not candidate or candidate["id"] != expected_id:
+            return bad(handler, "reply is no longer the completed current review turn", 409)
+        try:
+            speech = prepare_review_speech(candidate)
+        except Exception:
+            logger.warning("Project review spoken summary unavailable", exc_info=True)
+            return bad(handler, "Voice summary unavailable; the full written reply is unchanged", 503)
+        # Summary generation can overlap a new owner turn. Do not speak stale work.
+        current = review_speech_candidate(_biggy_project_review_dialog_payload(get_session(session_id)))
+        if not current or current["id"] != expected_id:
+            return bad(handler, "review turn changed while preparing speech", 409)
+        return j(handler, {"ok": True, "speech": speech})
+
+    if parsed.path == "/api/biggy/projects/reviews/dialog/cancel":
+        project_id = str(body.get("project_id") or "").strip()
+        expected_stream = str(body.get("stream_id") or "").strip()
+        if not expected_stream:
+            return bad(handler, "stream_id required", 400)
+        projects = load_projects()
+        project = next((item for item in projects
+                        if str(item.get("project_id") or "") == project_id
+                        and _profiles_match(item.get("profile"), "biggy")
+                        and str((item.get("review") or {}).get("review_owner") or "") == "smedley"), None)
+        if project is None:
+            return bad(handler, "project review not found", 404)
+        review = project.get("review") or {}
+        session_id = str(review.get("session_id") or "").strip()
+        if not session_id:
+            return bad(handler, "review dialog has no active session", 404)
+        # Narrow coordinator boundary (Biggy active + Smedley session) — do not
+        # use exact-profile session/stream visibility here; that 404s production
+        # Cancel when GUI profile=biggy and review session.profile=smedley.
+        if not _authorize_biggy_smedley_review_dialog_access(
+            handler, project, session_id, stream_id=expected_stream
+        ):
+            return True
+        from api.config import _get_session_agent_lock
+
+        with _get_session_agent_lock(session_id):
+            try:
+                session = get_session(session_id)
+            except KeyError:
+                return bad(handler, "review dialog unavailable", 404)
+            live_stream_id = _biggy_project_review_live_stream_id(session)
+            claimed = str(getattr(session, "active_stream_id", None) or "").strip() or None
+            if not live_stream_id:
+                return j(handler, {
+                    "ok": True,
+                    "cancelled": False,
+                    "reason": "no_live_review_stream",
+                    "dialog": _biggy_project_review_dialog_payload(session),
+                })
+            # Never cancel a claimed id that disagrees with the process-live stream.
+            if claimed and claimed != live_stream_id:
+                return j(
+                    handler,
+                    {
+                        "ok": False,
+                        "cancelled": False,
+                        "error": "review stream ownership conflict",
+                        "expected_stream_id": expected_stream,
+                        "live_stream_id": live_stream_id,
+                        "claimed_stream_id": claimed,
+                        "dialog": _biggy_project_review_dialog_payload(session),
+                    },
+                    status=409,
+                )
+            if expected_stream != live_stream_id:
+                return j(
+                    handler,
+                    {
+                        "ok": False,
+                        "cancelled": False,
+                        "error": "stream_id does not match current live review stream",
+                        "expected_stream_id": expected_stream,
+                        "live_stream_id": live_stream_id,
+                        "dialog": _biggy_project_review_dialog_payload(session),
+                    },
+                    status=409,
+                )
+            cancelled = cancel_stream(expected_stream)
+            try:
+                session = get_session(session_id)
+            except KeyError:
+                session = None
+            return j(handler, {
+                "ok": True,
+                "cancelled": bool(cancelled),
+                "stream_id": expected_stream,
+                "session_id": session_id,
+                "dialog": _biggy_project_review_dialog_payload(session) if session else None,
+            })
+
+    if parsed.path == "/api/biggy/projects/reviews/dispatch":
+        project_id = str(body.get("project_id") or "").strip()
+        project = next((item for item in load_projects()
+                        if str(item.get("project_id") or "") == project_id
+                        and _profiles_match(item.get("profile"), "biggy")
+                        and str((item.get("review") or {}).get("review_owner") or "") == "smedley"), None)
+        if project is None:
+            return bad(handler, "project review not found", 404)
+        review = project.get("review") or {}
+        from api.jarvis_rag_ingest_events import folder_ingest_readiness
+        readiness = folder_ingest_readiness(str(review.get("rag_folder") or ""))
+        if not readiness.get("ready"):
+            return j(handler, {
+                "error": "Project review is not evidence-ready: %s" % readiness.get("reason"),
+                "ingest_readiness": readiness,
+            }, status=409)
+        from api.kanban_bridge import _create_task_payload
+        sources = review.get("sources") if isinstance(review.get("sources"), dict) else {}
+        task_body = "\n".join([
+            "Project review: %s" % (project.get("name") or "Project"),
+            "Type: %s" % (review.get("review_type") or "internal design"),
+            "RAG folder: %s" % (review.get("rag_folder") or "not set"),
+            "Evidence gate: VERIFIED (%d documents)" % readiness.get("counts", {}).get("verified", 0),
+            "Plant specifications: %s" % (sources.get("plant_specifications") or "not provided"),
+            "Code books / standards: %s" % (sources.get("code_books") or "not provided"),
+            "Design package: %s" % (sources.get("design_package") or "not provided"),
+            "", "Scope: %s" % (review.get("scope") or "Perform governance, compliance, and electrical design error review."),
+        ])
+        payload = _create_task_payload({
+            "title": "Smedley review — %s" % (project.get("name") or "Project"),
+            "body": task_body, "assignee": "smedley", "priority": 2, "status": "ready",
+        })
+        payload["ingest_readiness"] = readiness
+        return j(handler, payload)
+
+    if parsed.path == "/api/biggy/projects/reviews/extract/capabilities":
+        from api.smedley_project_review_extract import capabilities as review_extract_capabilities
+
+        return j(handler, {"ok": True, **review_extract_capabilities()})
+
+    if parsed.path in {
+        "/api/biggy/projects/reviews/extract",
+        "/api/smedley/project-review/extract",
+    }:
+        project_id = str(body.get("project_id") or "").strip()
+        source_path = str(body.get("path") or body.get("source") or "").strip()
+        kind = str(body.get("kind") or "auto").strip().lower() or "auto"
+        update_ledger = bool(body.get("update_ledger", True))
+        producer_mode = body.get("producer_mode")
+        if "output_dir" in body:
+            return bad(handler, "output_dir is not client-configurable; evidence uses the server-owned isolated root", 400)
+        try:
+            max_pages = int(body.get("max_pages") or 8)
+        except (TypeError, ValueError):
+            return bad(handler, "max_pages must be a positive integer", 400)
+        if max_pages < 1:
+            return bad(handler, "max_pages must be a positive integer", 400)
+        max_pages = min(max_pages, 12)
+        projects = load_projects(_migrate=False)
+        project = next((item for item in projects
+                        if str(item.get("project_id") or "") == project_id
+                        and (
+                            (
+                                parsed.path.startswith("/api/biggy/")
+                                and _profiles_match(item.get("profile"), "biggy")
+                                and str((item.get("review") or {}).get("review_owner") or "") == "smedley"
+                            )
+                            or (
+                                parsed.path.startswith("/api/smedley/")
+                                and (
+                                    _profiles_match(item.get("profile"), "smedley")
+                                    or (
+                                        _profiles_match(item.get("profile"), "biggy")
+                                        and str((item.get("review") or {}).get("review_owner") or "") == "smedley"
+                                    )
+                                )
+                            )
+                        )), None)
+        if project is None:
+            return bad(handler, "project review not found", 404)
+        if parsed.path.startswith("/api/smedley/"):
+            active = str(_get_active_profile_name() or "")
+            if not (_profiles_match(active, "smedley") or _profiles_match(active, "biggy")):
+                return bad(handler, "active profile must be smedley (or biggy coordinating a Smedley review)", 403)
+        review = project.get("review") or {}
+        rag_folder = str(review.get("rag_folder") or "").strip()
+        if not rag_folder:
+            return bad(handler, "project review is missing a valid RAG folder", 400)
+        try:
+            from api.smedley_project_review_extract import extract_project_document
+
+            extracted = extract_project_document(
+                source_path,
+                rag_folder=rag_folder,
+                kind=kind,
+                update_ledger=update_ledger,
+                producer_mode=str(producer_mode).strip() if producer_mode else None,
+                max_pages=max_pages,
+                force_raster_ocr=body.get("force_raster_ocr"),
+            )
+        except ValueError as exc:
+            return bad(handler, str(exc), 400)
+        except Exception as exc:
+            logger.exception("Project review extract failed")
+            return bad(handler, f"project review extract failed: {exc}", 500)
+        from api.jarvis_rag_ingest_events import folder_ingest_readiness
+
+        readiness = folder_ingest_readiness(rag_folder)
+        return j(handler, {
+            "ok": bool(extracted.get("ok")),
+            "tool": "project_review_extract",
+            "mcp_tools": ["project_review_extract_capabilities", "project_review_extract"],
+            "project_id": project_id,
+            "rag_folder": rag_folder,
+            "extract": extracted,
+            "evidence_refs": extracted.get("evidence_refs"),
+            "ingest_readiness": readiness,
+        })
 
     if parsed.path == "/api/projects/create":
         try:
@@ -24718,6 +25516,7 @@ def _return_biggy_fast_voice_route(
         "role": "assistant",
         "content": reply,
         "timestamp": now_ts + 1,
+        "assistant_identity": personality,
         "biggy_fast_voice_route": True,
         "voice_model": str((routed or {}).get("model") or ""),
         "story_response": bool((routed or {}).get("story")),

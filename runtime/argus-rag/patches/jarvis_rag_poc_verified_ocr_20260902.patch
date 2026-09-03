@@ -1,0 +1,69 @@
+*** Begin Patch
+*** Update File: jarvis_rag_poc.py
+@@
+                 print("      [pdf] sidecar OK  %s  -> %s" % (base, os.path.basename(sidecar)), flush=True)
+                 manifest = {
+                     "schema": "jarvis.pdf_extraction.v2", "source": os.path.realpath(path),
+-                    "quality_state": "verified", "extraction_mode": "sidecar",
++                    # Sidecar text is convenience evidence only. Independent OCR/table
++                    # cross-check (or human verification) is required before Project Review
++                    # readiness can treat this as verified.
++                    "quality_state": "needs_review", "extraction_mode": "sidecar",
++                    "ocr_verification_state": "unverified",
+                     "page_count": None, "ocr_pages": [], "text_pages": [],
+-                    "extracted_chars": len(text), "warnings": [],
++                    "extracted_chars": len(text),
++                    "warnings": ["Independent OCR/table verification required for sidecar extractions."],
+                     "sidecar_path": os.path.realpath(sidecar),
+                 }
+                 return text, manifest
+@@
+             if ocr_count and chars < OCR_PAGE_MIN_CHARS * ocr_count:
+                 warnings.append("low OCR yield on pages %s (%d chars)" % (key, chars))
+-        quality = "needs_review" if warnings else "verified"
++        # OCR-derived modes must not auto-promote to verified. Native text can.
++        if mode in {"full_ocr", "mixed_selective_ocr"}:
++            quality = "needs_review"
++            if "Independent OCR/table verification required." not in warnings:
++                warnings.append("Independent OCR/table verification required.")
++        else:
++            quality = "needs_review" if warnings else "verified"
+     return {
+         "schema": "jarvis.pdf_extraction.v2",
+         "source": os.path.realpath(path),
+         "fingerprint": os.path.basename(_ocr_cache_path(path))[:-3],
+         "quality_state": quality,
+         "extraction_mode": mode,
++        "ocr_verification_state": (
++            "unverified" if mode in {"full_ocr", "mixed_selective_ocr", "sidecar"} else "not_applicable"
++        ),
+         "page_count": len(profiles),
+         "ocr_pages": ocr_pages,
+         "text_pages": text_pages,
+         "extracted_chars": len(str(text or "")),
+         "table_rows": sum(1 for line in str(text or "").splitlines() if line.lstrip().startswith("|")),
+         "warnings": warnings,
+         "cache_hit": bool(cache_hit),
+         "pages": profiles,
+         "run_chars": run_chars or {},
+         "manifest_path": _ocr_manifest_path(path),
+     }
+@@
+     machine = {
+         "chunks": n,
+         "quality_state": manifest.get("quality_state", "failed"),
+         "extraction_mode": manifest.get("extraction_mode"),
++        "ocr_verification_state": manifest.get("ocr_verification_state"),
+         "page_count": manifest.get("page_count"),
+         "ocr_pages": manifest.get("ocr_pages", []),
+         "text_pages": manifest.get("text_pages", []),
+         "extracted_chars": manifest.get("extracted_chars", 0),
+         "table_rows": manifest.get("table_rows", 0),
+         "warnings": manifest.get("warnings", []),
+         "manifest_path": manifest.get("manifest_path"),
+     }
+*** End Patch
+
+# Apply against:
+#   /Users/rick/Mounts/Z/DATA/n8n_share/Staging/RAG-build/jarvis_rag_poc.py
+# This file is staged in hermes-webui only. Owner/Codex must apply outside-repo.

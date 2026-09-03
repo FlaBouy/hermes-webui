@@ -459,7 +459,7 @@
       String(initial).split('|').forEach((value) => {
         const option = el('option');
         option.value = value;
-        option.textContent = value || '—';
+        option.textContent = ({raceway:'Raceway / conduit', aluminum_ladder_tray:'Aluminum cable tray — ladder, 9-inch rungs', individual:'Individual conductors', tc_er:'TC-ER multiconductor cable', southwire_45253:'Southwire SPEC45253 — copper XHHW-2/CPE', allied_custom:'Allied — part-specific data required', none:'Without cover', ventilated:'With ventilated cover', solid:'With solid, unventilated cover'})[value] || value || '—';
         control.appendChild(option);
       });
     } else if (type === 'textarea') {
@@ -501,7 +501,7 @@
 
   let activeToolClose = null;
 
-  function openTool(tool) {
+  function openTool(tool, options = {}) {
     if (activeToolClose) activeToolClose();
 
     const toolId = tool[0];
@@ -519,7 +519,62 @@
       'smedley-engineering-result',
       '<div class="smedley-engineering-result-empty">Enter parameters — results update live.</div>',
     );
+    const installationFields = [
+      ['installation_method', 'Installation / support', 'select', 'raceway|aluminum_ladder_tray'],
+      ['cable_construction', 'Conductor / cable construction', 'select', 'individual|tc_er'],
+      ['cable_series', 'TC-ER reference series', 'select', 'southwire_45253|allied_custom'],
+      ['rung_spacing_in', 'Aluminum tray rung spacing (in)', 'select', '9'],
+      ['tray_cover', 'Tray cover', 'select', 'none|ventilated|solid'],
+      ['covered_length_ft', 'Continuous solid-cover length (ft)', 'number', '0'],
+    ];
+    const category = el('fieldset', 'smedley-installation-fields');
+    const legend = el('legend'); legend.textContent = 'CONDUIT / CABLE TRAY & CONDUCTORS'; category.appendChild(legend);
+    installationFields.forEach(field => category.appendChild(fieldControl(field)));
+    const note = el('small');
+    note.textContent = 'TC-ER: Southwire SPEC45253, 3C copper XHHW-2 + ground. Allied needs a part-specific datasheet; no brand substitution. Tray material is not conductor material.';
+    category.appendChild(note); form.appendChild(category);
     (FIELDS[toolId] || []).forEach((field) => form.appendChild(fieldControl(field)));
+    if (['conduit-fill', 'cable-tray-fill'].includes(toolId)) {
+      form.appendChild(fieldControl(['tc_er_size', 'TC-ER conductor size (AWG / kcmil)', 'select', '8|6|4|2|1/0|3/0|4/0|250|350|600|750']));
+      form.appendChild(fieldControl(['cable_count', 'Whole TC-ER cable count', 'number', '1']));
+    }
+    if (['voltage-drop', 'feeder-size', 'conductor-sets', 'motor-circuit', 'vfd-circuit'].includes(toolId)) form.appendChild(fieldControl(['target_vd_pct', 'Voltage-drop target (%) — owner default 2.5', 'number', '2.5']));
+    const updateInstallation = () => {
+      const tray = form.elements.installation_method.value === 'aluminum_ladder_tray';
+      const tc = form.elements.cable_construction.value === 'tc_er';
+      ['rung_spacing_in', 'tray_cover', 'covered_length_ft'].forEach(name => { form.elements[name].closest('label').hidden = !tray; });
+      form.elements.cable_series.closest('label').hidden = !tc;
+      if (form.elements.conduit_type) form.elements.conduit_type.closest('label').hidden = tc && toolId !== 'conduit-fill';
+      ['tc_er_size','cable_count'].forEach(name => { if (form.elements[name]) form.elements[name].closest('label').hidden = !tc; });
+      if (toolId === 'conduit-fill') ['conductor_size','num_current_carrying','ocpd_amps'].forEach(name => { form.elements[name].closest('label').hidden = tc; });
+      if (toolId === 'cable-tray-fill') {
+        ['cables','cable_type'].forEach(name => { form.elements[name].closest('label').hidden = tc; });
+      }
+    };
+    form.elements.installation_method.addEventListener('change', () => {
+      if (form.elements.installation_method.value === 'aluminum_ladder_tray') {
+        form.elements.cable_construction.value = 'tc_er';
+        if (form.elements.tray_style) form.elements.tray_style.value = 'ladder';
+      }
+      updateInstallation();
+    });
+    form.elements.cable_construction.addEventListener('change', updateInstallation);
+    // Prefill only controls this calculator owns, before its first calculation.
+    for (const [key, value] of Object.entries(options.params || {})) {
+      const control = form.elements[key];
+      if (control && value !== null && value !== undefined) {
+        if (control.tagName !== 'SELECT' || Array.from(control.options).some(o => o.value === String(value))) control.value = String(value);
+      }
+    }
+    if (form.elements._fla_src) {
+      const source = ['amps', 'nameplate_fla', 'hp'].find(key => options.params?.[key] !== undefined);
+      if (source) { form.elements._fla_src.value = source; form.elements._fla_val.value = String(options.params[source]); }
+    }
+    updateInstallation();
+    if (typeof options.onReturn === 'function') {
+      const back = el('button', 'smedley-return-review'); back.type = 'button'; back.textContent = 'BACK TO SMEDLEY';
+      back.addEventListener('click', () => { const params = collectParams(); close(); options.onReturn(params); }); head.insertBefore(back, head.querySelector('button'));
+    }
     const run = el('button', 'smedley-engineering-primary');
     run.type = 'button';
     run.textContent = 'RECALCULATE';
@@ -542,7 +597,7 @@
       backdrop.remove();
     };
     activeToolClose = close;
-    head.querySelector('button').addEventListener('click', close);
+    head.querySelector('button[aria-label="Close"]').addEventListener('click', close);
     backdrop.addEventListener('mousedown', (event) => {
       if (event.target === backdrop) close();
     });
@@ -562,6 +617,7 @@
         delete params._fla_src;
         delete params._fla_val;
       }
+      if (toolId === 'cable-tray-fill' && params.cable_construction === 'tc_er') params.cables = [{conductor_awg: params.tc_er_size, count: params.cable_count}];
       return params;
     };
 
@@ -590,6 +646,8 @@
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
+        ...Object.fromEntries(installationFields.map(([key]) => [key, params[key]])),
+        target_vd_pct: params.target_vd_pct,
         voltage: Number(params.voltage),
         phase: Number(params.phase),
         amps: Number(params.amps),
@@ -606,7 +664,8 @@
     const renderConductorComparison = (data) => {
       if (toolId !== 'voltage-drop' || !voltageDropBaseline?.result) return;
       const sizing = window.SmedleyVoltageDropSizing;
-      const sizes = Array.isArray(sizing?.CONDUCTORS) ? sizing.CONDUCTORS : [];
+      const allSizes = Array.isArray(sizing?.CONDUCTORS) ? sizing.CONDUCTORS : [];
+      const sizes = form.elements.cable_construction.value === 'tc_er' ? allSizes.filter(size => ['8','6','4','2','1/0','3/0','4/0','250','350','600','750'].includes(size)) : allSizes;
       const recommended = String(voltageDropBaseline.result.recommended_size || '');
       const current = String(data?.result?.comparison_size || recommended);
       const currentIndex = sizes.indexOf(current);
@@ -674,6 +733,7 @@
               governing_explanation: baseline.result.governing_explanation,
               design_amps: baseline.result.design_amps,
               derated_ampacity_A: baseline.result.derated_ampacity_A,
+              derated_ampacity_basis_size: baseline.result.derated_ampacity_basis_size,
               ampacity_pass_fail: ampacityPass ? 'PASS' : 'FAIL',
               voltage_drop_pass_fail: voltageDropPass ? 'PASS' : 'FAIL',
               pass_fail: ampacityPass && voltageDropPass ? 'PASS' : 'FAIL',
@@ -1587,10 +1647,10 @@
   // but do not build Smedley's rails, panes, or composer a second time.
   window.SmedleyEngineeringTools=Object.freeze({
     tools:TOOLS.map(([id,label,group])=>Object.freeze({id,label,group})),
-    open(toolId){
+    open(toolId, options = {}){
       const tool=TOOLS.find(([id])=>id===String(toolId||''));
       if(!tool)throw new Error(`Unknown Smedley engineering tool: ${toolId}`);
-      return openTool(tool);
+      return openTool(tool, options);
     },
   });
   if(!TOOLS_ONLY_EMBED){

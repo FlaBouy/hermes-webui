@@ -134,8 +134,14 @@
     return null;
   }
 
+  function installationParams(input) {
+    return Object.fromEntries(['installation_method', 'cable_construction', 'cable_series',
+      'rung_spacing_in', 'tray_cover', 'covered_length_ft', 'target_vd_pct'].filter(key => input[key] !== undefined).map(key => [key, input[key]]));
+  }
+
   function feederParams(input) {
     const params = {
+      ...installationParams(input),
       voltage: Number(input.voltage),
       phase: Number(input.phase),
       amps: Number(input.amps),
@@ -154,6 +160,7 @@
 
   function voltageDropParams(input, conductorAwg) {
     const params = {
+      ...installationParams(input),
       voltage: Number(input.voltage),
       phase: Number(input.phase),
       amps: Number(input.amps),
@@ -178,7 +185,8 @@
 
   async function findMinimumVoltageDropSize(input, request) {
     const floor = parallelMinimumAwg(input.parallel_sets);
-    const candidates = conductorsFrom(floor);
+    const catalog = new Set(['8','6','4','2','1/0','3/0','4/0','250','350','600','750']);
+    const candidates = conductorsFrom(floor).filter(size => input.cable_construction !== 'tc_er' || catalog.has(size));
     for (const size of candidates) {
       const payload = await request('/tools/voltage-drop', voltageDropParams(input, size));
       if (!payload || payload.status !== 'ok') {
@@ -291,7 +299,7 @@
       );
     }
     const assumptions = mergeUnique([
-      feeder.assumptions || [],
+      (feeder.assumptions || []).map(line => recommended !== ampacitySize && /EGC|OCPD/.test(line) ? `For minimum ampacity size ${ampacitySize} AWG only (not upsized recommendation): ${line}` : line),
       vdMin.payload?.assumptions || [],
       finalDrop.assumptions || [],
       parallelAssumptions,
@@ -300,7 +308,7 @@
       ],
     ]);
     const warnings = mergeUnique([
-      feeder.warnings || [],
+      (feeder.warnings || []).map(line => recommended !== ampacitySize && /Voltage drop .*exceeds/.test(line) ? `Minimum ampacity size ${ampacitySize} AWG failed VD; the final ${recommended} AWG result below supersedes that check. ${line}` : line),
       vdMin.payload?.warnings || [],
       finalDrop.warnings || [],
     ]);
@@ -330,6 +338,7 @@
         governing_explanation: governing.governing_explanation,
         design_amps: feeder.result.design_amps,
         derated_ampacity_A: feeder.result.derated_ampacity_A,
+        derated_ampacity_basis_size: ampacitySize,
         combined_cf: feeder.result.combined_cf,
         temp_rating: feeder.result.temp_rating,
       },

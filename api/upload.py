@@ -435,7 +435,12 @@ def handle_transcribe(handler):
             from tools.transcription_tools import transcribe_audio
         except ImportError:
             return j(handler, {'error': 'Speech-to-text is unavailable on this server'}, status=503)
-        result = transcribe_audio(temp_path)
+        if str(fields.get('local_only') or '').lower() == 'true':
+            # Review dictation must never fall through to paid/cloud STT.
+            from tools.transcription_tools import transcribe_audio_local_fallback
+            result = transcribe_audio_local_fallback(temp_path)
+        else:
+            result = transcribe_audio(temp_path)
         if not result.get('success'):
             msg = str(result.get('error') or 'Transcription failed')
             status = 503 if 'unavailable' in msg.lower() or 'not configured' in msg.lower() else 400

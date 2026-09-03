@@ -16,3 +16,9 @@ cryptography>=42.0
 # The workspace file routes return 503 with an install hint when they are absent.
 # Install them only if you want .docx/.xlsx/.pptx preview support:
 #   pip install python-docx>=1.1.2 openpyxl>=3.1.5 python-pptx>=1.0.2
+# OPTIONAL: Smedley Project Review DXF + verified OCR evidence tools.
+#   pip install 'ezdxf>=1.3.0,<2' 'pypdfium2>=4.30.0,<6' 'pytesseract>=0.3.10,<1' \
+#               'rapidocr>=3.8,<4' 'onnxruntime>=1.17,<2'
+# Prefer the Hermes .venv RapidOCR+onnxruntime pin. The jarvis-rag docling-venv
+# may lack onnxruntime even when rapidocr is importable — capabilities probing
+# checks both. Tesseract must be available on PATH as the independent engine B.

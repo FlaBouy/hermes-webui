@@ -1,0 +1,34 @@
+# Staged Smedley profile MCP activation (DO NOT apply to live config automatically)
+#
+# Exact reversible addition for the Smedley Hermes worker MCP servers.
+# Precondition: leave scripts/smedley_rag_mcp.py (rag_search) unchanged.
+#
+# CRITICAL: Project reviews for 26HOS live in Biggy webui-state, not a bare
+# Smedley HERMES_HOME. The MCP process MUST set HERMES_WEBUI_STATE_DIR to the
+# same path as the live Biggy plist:
+#   HERMES_WEBUI_STATE_DIR=/Users/rick/.hermes/profiles/biggy/webui-state
+#
+# Python must be the repo .venv (has ezdxf/pypdfium2/pytesseract/rapidocr),
+# NOT /Users/rick/.hermes/hermes-agent/venv/bin/python (missing those deps).
+#
+# Add under mcp_servers:
+#
+#   smedley_rag:
+#     # existing rag_search server — do not modify its single-tool contract
+#     command: /Users/rick/hermes-webui/.venv/bin/python
+#     args: [/Users/rick/hermes-webui/scripts/smedley_rag_mcp.py]
+#   smedley_project_review:
+#     command: /Users/rick/hermes-webui/.venv/bin/python
+#     args: [/Users/rick/hermes-webui/scripts/smedley_project_review_mcp.py]
+#     env:
+#       HERMES_WEBUI_STATE_DIR: /Users/rick/.hermes/profiles/biggy/webui-state
+#       SMEDLEY_DXF_MAX_BYTES: "268435456"
+#       # optional isolated evidence override for tests:
+#       # SMEDLEY_PROJECT_REVIEW_EVIDENCE_ROOT: /tmp/smedley-project-review-evidence
+#
+# Tools exposed: project_review_extract_capabilities, project_review_extract
+# Known Biggy-owned review example: project_id=bdd341b152a4 name=26HOS-006
+#
+# Rollback: remove only the smedley_project_review block; leave smedley_rag intact.
+# No live apply / restart is performed by the staging worker.
+# See also: runtime/argus-rag/staging/HERMES_WORKER_PROJECT_REVIEW_ACTIVATION.md

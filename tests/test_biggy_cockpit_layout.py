@@ -132,8 +132,8 @@ def test_smedley_project_reviews_use_native_projects_rag_ingest_and_kanban_dispa
     assert "selectedProjectRagFolder" in tools
     assert "makeRagFolder" not in tools
     assert "/ingest-upload?folder=" in tools
-    assert "assignee: 'smedley'" in tools
-    assert "'/api/kanban/tasks'" in tools
+    assert "'/api/biggy/projects/reviews/dispatch'" in tools
+    assert "ingest_readiness" in tools
     assert "OPEN SMEDLEY DIALOG" in tools
     assert "'/api/biggy/projects/reviews/dialog'" in tools
     assert ".biggy-projects-pane{" in BRAND_CSS

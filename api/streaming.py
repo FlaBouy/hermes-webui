@@ -8615,6 +8615,31 @@ def _run_agent_streaming(
             except Exception:
                 _max_iterations_cfg = None
 
+            # Project Review dialog turns may pin a lower between-call budget so
+            # runaway tool loops surface as recoverable stalls instead of
+            # unbounded iteration. Never raise above the profile/global budget.
+            try:
+                from api.biggy_project_review_runtime import get_project_review_turn_binding
+
+                _review_binding = get_project_review_turn_binding(session_id)
+                _review_cap = None
+                if isinstance(_review_binding, dict):
+                    _review_cap = _review_binding.get("max_iterations")
+                if _review_cap is None:
+                    from api.models import get_session as _get_session_for_review_budget
+
+                    _review_sess = _get_session_for_review_budget(session_id)
+                    _review_cap = getattr(_review_sess, "project_review_max_iterations", None)
+                if _review_cap is not None:
+                    _review_cap_i = int(_review_cap)
+                    if _review_cap_i > 0:
+                        if _max_iterations_cfg is None:
+                            _max_iterations_cfg = _review_cap_i
+                        else:
+                            _max_iterations_cfg = min(int(_max_iterations_cfg), _review_cap_i)
+            except Exception:
+                pass
+
             # CLI-parity max output cap: read config.yaml's max_tokens and pass
             # it to AIAgent when supported. Without this WebUI-created agents use
             # provider-native output ceilings (e.g. Claude via OpenRouter can
@@ -8973,14 +8998,36 @@ def _run_agent_streaming(
                     state_messages=_external_state_messages,
                 ) or []
             )
-            _previous_context_messages = _new_turn_context_from_messages(
-                reconciled_state_db_messages_for_session(
-                    s,
-                    prefer_context=True,
-                    state_messages=_external_state_messages,
-                ),
-                msg_text,
-            )
+            # Project Review dialog binds a one-shot compact agent view without
+            # poisoning durable context_messages / display history.
+            try:
+                from api.biggy_project_review_runtime import pop_project_review_turn_binding
+
+                _review_binding = pop_project_review_turn_binding(session_id)
+            except Exception:
+                _review_binding = None
+            if isinstance(_review_binding, dict) and isinstance(
+                _review_binding.get("context_messages"), list
+            ) and _review_binding.get("context_messages"):
+                _previous_context_messages = _new_turn_context_from_messages(
+                    list(_review_binding.get("context_messages") or []),
+                    msg_text,
+                )
+                _review_max = _review_binding.get("max_iterations")
+                if _review_max is not None:
+                    try:
+                        setattr(s, "project_review_max_iterations", int(_review_max))
+                    except Exception:
+                        pass
+            else:
+                _previous_context_messages = _new_turn_context_from_messages(
+                    reconciled_state_db_messages_for_session(
+                        s,
+                        prefer_context=True,
+                        state_messages=_external_state_messages,
+                    ),
+                    msg_text,
+                )
             # Dedup before feeding to agent — merge_session_messages_append_only
             # can produce duplicates when context_messages and state.db share
             # messages with different timestamps.

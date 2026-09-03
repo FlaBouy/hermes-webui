@@ -2979,12 +2979,18 @@ def resolve_model_provider(model_id: str, *, explicitly_picked: bool = False) ->
         # an OpenRouter dropdown selection. Keep the request on the custom provider; the
         # base_url-set sibling of this exception lives earlier in the ``config_base_url``
         # branch (#3872).
+        #
+        # Require an explicit active config provider. With no active provider (empty
+        # profile ``model.provider``), a HuggingFace-style local id such as
+        # ``qwen/qwen3.8-27b`` must NOT be treated as an OpenRouter cross-pick —
+        # that silently selects a paid remote path for local LM Studio sessions.
         _cp_lower_cross = (config_provider or "").strip().lower()
         _is_custom_cross = _cp_lower_cross == "custom" or _cp_lower_cross.startswith("custom:")
         _canon_prefix = _canonicalise_provider_id(prefix)
         _canon_config_provider = _canonicalise_provider_id(config_provider)
         if (
-            _canon_prefix in _PROVIDER_MODELS
+            bool(_cp_lower_cross)
+            and _canon_prefix in _PROVIDER_MODELS
             and _canon_prefix != _canon_config_provider
             and not _is_custom_cross
         ):
