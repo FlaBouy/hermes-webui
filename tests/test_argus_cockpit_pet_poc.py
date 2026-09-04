@@ -45,6 +45,10 @@ def test_state_motion_and_menu_feedback_are_bounded():
     assert '@keyframes tieFlow' in POC_JS
     assert '@keyframes confirmSweep' in POC_JS
     assert '@keyframes successPath' in POC_JS
+    assert '@keyframes warningRing' in POC_JS
+    assert '@keyframes errorRing' in POC_JS
+    assert 'animation:warningRing 1.8s ease-in-out infinite' in POC_JS
+    assert 'animation:errorRing .72s ease-in-out infinite' in POC_JS
     assert 'animation:stepCw 4.8s steps(12,end) infinite' in POC_JS
     assert '.tie.active' in POC_JS
     assert '.node.active' in POC_JS
