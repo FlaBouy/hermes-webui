@@ -8,6 +8,7 @@ Last verified: 2026-09-04 (America/Chicago)
 - Branch: `fix/v6-embed-console-cleanup`
 - Project Review checkpoint: `f66069f5` — `Fix Project Review tool handoff, context, voice and verified extraction`
 - Biggy integration checkpoint: `7d7c2993` — `Finish Biggy pet, conversation, travel and reconnect paths`
+- Multi-object companion checkpoint: `d302e16c` — `Add multi-instance companion object controls`
 - The private branch is the only authorized push destination unless Rick explicitly changes it.
 - Do not reset, clean, checkout, or bulk-stage the working tree. It contains unrelated evidence and staging artifacts belonging to Rick.
 - Treat `tests/fixtures/project_review/native_table_evidence/` as evidence/test output, not verified engineering data.
@@ -43,6 +44,8 @@ Last verified: 2026-09-04 (America/Chicago)
 ## Biggy integration completed after the Project Review checkpoint
 
 - Local Biggy pets are selectable from a PET control at the bottom of the PA right rail. They support on/off, resizing, dragging, keyboard movement, per-pet saved placement, slow/random animation, and reduced-motion behavior without an LLM, voice call, or network polling.
+- The PET manager now supports any number of independent on-screen instances, including multiple copies of the same pet. The catalog and on-screen-object selectors are separate; each instance owns visibility, size, position, and timing, with selected and global show/hide/remove controls. Existing single-pet browser state migrates automatically.
+- The future Orb/menu/dialog POC is defined as one composite cockpit object with a dedicated interactive renderer. It will share the manager lifecycle but will not replace the current Orb or accept menu wiring until its authored action map is verified.
 - Bones and Biggy assets are served through a path-safe local catalog/sprite API. Biggy defaults to the right of the prompt; Bones defaults above it.
 - The stock center transcript is visually suppressed in the Biggy cockpit so the branded left LIVE lane is the single response presentation. HOME hides that lane without deleting its retained turns.
 - Ordinary typed conversation and PTT opinion/story requests stay on Biggy's local V6 fast path. They no longer inherit a prior travel card or wake the heavy A.R.G.U.S. workflow merely because a previous route exists.
