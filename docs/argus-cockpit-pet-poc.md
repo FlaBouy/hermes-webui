@@ -15,6 +15,7 @@ Files:
 - `static/argus-cockpit-pet-poc.html` — isolated visual/interaction preview
 - `tests/test_argus_cockpit_pet_poc.py` — isolation and contract guards
 - `tests/browser_argus_cockpit_pet_poc.cjs` — optional isolated browser harness
+- `scripts/package_argus_cockpit_pet_poc.py` — builds a portable reviewer ZIP
 
 ## Current POC behavior
 
@@ -50,6 +51,17 @@ flashes on a slow 1.8-second cadence. Error keeps its path and text steady while
 the red aperture ring flashes faster at 0.72 seconds. These signals are driven by
 `status` and do not infer completion, severity, or tool progress inside the
 component.
+
+The `label` attribute owns the displayed Orb name. The standalone preview exposes
+an **ORB NAME** field, limits the value to 20 characters, updates the entity
+without reloading, and remembers the tester's choice only in that browser. The
+default remains `A.R.G.U.S.`. Artwork and script references are relative so the
+three runtime files can be moved together without depending on Biggy's `/static`
+route.
+
+The packaging script combines the HTML, JavaScript, Orb PNG, reviewer README, and
+feedback worksheet into one uploadable ZIP. The package remains inert: menu
+events are visible demonstrations only and call no external service.
 
 The sample sheet at
 `Build Docs/Argus V1.0/Graphics/Orb/Codex Image Sep 4, 2026, 06_17_48 AM.png`

@@ -23,6 +23,9 @@ const server = http.createServer((req,res) => {
     await page.waitForFunction(() => customElements.get('argus-cockpit-pet'));
     assert.equal(await page.locator('argus-cockpit-pet').count(), 1);
     assert.equal(await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelectorAll('button').length), 12);
+    await page.locator('#orb-name').fill('WATCHTOWER');
+    assert.equal(await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelector('.name').textContent), 'WATCHTOWER');
+    assert.equal(await page.locator('argus-cockpit-pet').getAttribute('label'), 'WATCHTOWER');
     const before = await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.getElementById('eye').style.translate);
     await page.mouse.move(1320, 80); await page.waitForTimeout(180);
     const after = await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.getElementById('eye').style.translate);
@@ -45,6 +48,6 @@ const server = http.createServer((req,res) => {
       assert.equal(await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelector('.entity').dataset.state), state);
     }
     assert.deepEqual(errors, []);
-    console.log('PASS: isolated cockpit-pet, state animation, menu path feedback, bounded cursor-tracking eye');
+    console.log('PASS: portable cockpit-pet, editable label, state animation, menu path feedback, bounded cursor-tracking eye');
   } finally { await browser.close(); server.close(); }
 })().catch(error => { console.error(error); process.exitCode=1; });

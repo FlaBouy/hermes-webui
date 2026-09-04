@@ -3,13 +3,15 @@
   'use strict';
   if (customElements.get('argus-cockpit-pet')) return;
 
+  const ORB_ART_URL = new URL('argus-orb-template.png', document.currentScript?.src || document.baseURI).href;
+
   const MODULES = [
     ['CHAT', 'left'], ['TASKS', 'left'], ['KANBAN', 'left'], ['SKILLS', 'left'], ['MEMORY', 'left'], ['SPACES', 'left'],
     ['PROFILES', 'right'], ['TODOS', 'right'], ['INSIGHTS', 'right'], ['LOGS', 'right'], ['SETTINGS', 'right'], ['TOOLS', 'right'],
   ];
 
   class ArgusCockpitPet extends HTMLElement {
-    static get observedAttributes() { return ['model', 'status', 'tracking']; }
+    static get observedAttributes() { return ['label', 'model', 'status', 'tracking']; }
 
     constructor() {
       super();
@@ -39,7 +41,7 @@
           .tie.active{stroke:#fff;stroke-width:2.7;opacity:1;animation:tieFlow 1.8s linear infinite;filter:drop-shadow(0 0 4px rgba(255,255,255,.7))}.node.active{fill:#34d399;stroke:#fff;filter:drop-shadow(0 0 5px rgba(52,211,153,.9))}
           button{position:absolute;width:84px;height:27px;transform:translate(-50%,-50%);border:1px solid #303b48;border-radius:5px;background:rgba(8,15,23,.94);color:#aab5c3;font:800 10px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.05em;cursor:pointer;z-index:2}
           button:hover,button:focus-visible{color:#eafcff;border-color:#35d9ff;outline:none;box-shadow:0 0 7px rgba(53,217,255,.18)}button.active{color:#69efcd;border-color:#34d399;background:#082018;box-shadow:0 0 10px rgba(52,211,153,.3)}
-          .name{position:absolute;left:50%;bottom:37px;transform:translateX(-50%);color:#fff;font:900 17px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.2em;text-shadow:0 0 8px rgba(112,225,255,.72)}
+          .name{position:absolute;left:50%;bottom:37px;transform:translateX(-50%);max-width:54%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font:900 17px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.2em;text-shadow:0 0 8px rgba(112,225,255,.72)}
           .readout{position:absolute;left:50%;bottom:4px;transform:translateX(-50%);width:224px;padding:5px 10px;display:flex;justify-content:center;gap:12px;border:1px solid rgba(52,211,153,.42);border-radius:999px;background:rgba(5,16,14,.88);font-size:10px;font-weight:800;letter-spacing:.09em;color:#34d399;white-space:nowrap}
           .state::before{content:"";display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor}.state{min-width:74px;text-align:center;transition:color .2s ease,text-shadow .2s ease}
           .entity[data-state="thinking"] .solid{animation-duration:7s}.entity[data-state="thinking"] .dash{animation-duration:10s}.entity[data-state="thinking"] .state{color:#f6bd43;text-shadow:0 0 7px rgba(246,189,67,.58)}
@@ -72,8 +74,8 @@
               <mask id="lamps" maskUnits="userSpaceOnUse" x="320" y="120" width="560" height="560"><rect x="320" y="120" width="560" height="560" fill="black"/><circle cx="596" cy="404" r="255" fill="white"/><circle cx="596" cy="404" r="205" fill="black"/></mask>
             </defs>
             <circle class="profile" cx="596" cy="404" r="252" fill="url(#mask)"/>
-            <image href="/static/argus-orb-template.png" x="238.5" y="159" width="723" height="482" preserveAspectRatio="xMidYMid meet"/>
-            <image class="lamp" href="/static/argus-orb-template.png" x="238.5" y="159" width="723" height="482" preserveAspectRatio="xMidYMid meet" mask="url(#lamps)"/>
+            <image href="${ORB_ART_URL}" x="238.5" y="159" width="723" height="482" preserveAspectRatio="xMidYMid meet"/>
+            <image class="lamp" href="${ORB_ART_URL}" x="238.5" y="159" width="723" height="482" preserveAspectRatio="xMidYMid meet" mask="url(#lamps)"/>
             <g class="solid" fill="none" stroke="#55ddff"><circle cx="596" cy="404" r="91" stroke-width="2.5" opacity=".82"/><circle cx="596" cy="313" r="4" fill="#c8f8ff" stroke="none" filter="url(#glow)"/></g>
             <circle class="dash" cx="596" cy="404" r="112" pathLength="703" fill="none" stroke="#30bfe9" stroke-width="2.5" stroke-dasharray="11 8" opacity=".78"/>
             <circle class="lamp" cx="596" cy="404" r="150" fill="none" stroke="#42dcff" stroke-width="8" opacity=".32" filter="url(#glow)"/>
@@ -161,6 +163,8 @@
       if (!this.shadowRoot) return;
       const model = this.getAttribute('model') || 'GPT-OSS-120B';
       const status = (this.getAttribute('status') || 'ONLINE').toUpperCase();
+      const label = (this.getAttribute('label') || 'A.R.G.U.S.').trim().slice(0, 20) || 'A.R.G.U.S.';
+      this.shadowRoot.querySelector('.name').textContent = label;
       this.shadowRoot.querySelector('.model').textContent = `◆ ${model}`;
       this.shadowRoot.querySelector('.state').textContent = status;
       const visualStates = new Set(['THINKING', 'SPEAKING', 'WORKING', 'SUCCESS', 'WARNING', 'ERROR']);

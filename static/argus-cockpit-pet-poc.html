@@ -7,20 +7,32 @@
   <style>
     :root{color-scheme:dark}*{box-sizing:border-box}html,body{height:100%;margin:0}body{display:grid;place-items:center;overflow:hidden;background:#01040a;color:#93a4b7;font-family:"SF Mono",ui-monospace,monospace}
     body::before{content:"";position:fixed;inset:0;opacity:.55;background-image:radial-gradient(circle at 12% 18%,#9fc4ff 0 1px,transparent 1.4px),radial-gradient(circle at 76% 32%,#6fa2e8 0 1px,transparent 1.4px),radial-gradient(circle at 42% 74%,#b9d2ff 0 1px,transparent 1.4px);background-size:113px 127px,179px 151px,211px 193px}
-    main{position:relative;z-index:1;display:grid;justify-items:center;gap:6px}.tag{font-size:10px;letter-spacing:.18em;color:#5f8099;text-transform:uppercase}.hint{font-size:10px;color:#536675}.states{display:flex;gap:6px}.states button{border:1px solid #263747;border-radius:5px;background:#071019;color:#8ea1b4;padding:5px 10px;font:800 9px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.08em;cursor:pointer}.states button.active{color:#68efce;border-color:#34d399;background:#082018;box-shadow:0 0 8px rgba(52,211,153,.22)}
+    main{position:relative;z-index:1;display:grid;justify-items:center;gap:6px}.tag{font-size:10px;letter-spacing:.18em;color:#5f8099;text-transform:uppercase}.hint{font-size:10px;color:#536675}.states,.personalize{display:flex;align-items:center;gap:6px}.states button,.personalize button,.personalize input{border:1px solid #263747;border-radius:5px;background:#071019;color:#8ea1b4;padding:5px 10px;font:800 9px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.08em}.states button,.personalize button{cursor:pointer}.states button.active{color:#68efce;border-color:#34d399;background:#082018;box-shadow:0 0 8px rgba(52,211,153,.22)}.personalize label{font-size:9px;letter-spacing:.12em;color:#71879a}.personalize input{width:184px;color:#eefcff;border-color:#315166;outline:none}.personalize input:focus{border-color:#35d9ff;box-shadow:0 0 7px rgba(53,217,255,.2)}
   </style>
-  <script src="/static/argus-cockpit-pet-poc.js" defer></script>
+  <script src="./argus-cockpit-pet-poc.js" defer></script>
 </head>
 <body>
   <main>
     <div class="tag">Isolated cockpit-pet proof of concept — no production wiring</div>
+    <div class="personalize"><label for="orb-name">ORB NAME</label><input id="orb-name" maxlength="20" value="A.R.G.U.S." autocomplete="off" spellcheck="false"><button id="reset-name" type="button">RESET</button></div>
     <div class="states" aria-label="POC state simulator"><button type="button" data-state="online" class="active">IDLE</button><button type="button" data-state="thinking">THINKING</button><button type="button" data-state="speaking">SPEAKING</button><button type="button" data-state="working">WORKING</button><button type="button" data-state="success">SUCCESS</button><button type="button" data-state="warning">WARNING</button><button type="button" data-state="error">ERROR</button></div>
-    <argus-cockpit-pet id="poc" model="GPT-OSS-120B" status="online"></argus-cockpit-pet>
+    <argus-cockpit-pet id="poc" label="A.R.G.U.S." model="GPT-OSS-120B" status="online"></argus-cockpit-pet>
     <div class="hint">Move the pointer to aim the eye. Hover or select a menu path, then try the state simulator.</div>
   </main>
   <script>
     addEventListener('DOMContentLoaded', () => {
       const pet = document.getElementById('poc');
+      const nameInput = document.getElementById('orb-name');
+      const nameKey = 'argus-cockpit-poc-label';
+      const applyName = value => {
+        const label = String(value || '').slice(0, 20);
+        nameInput.value = label;
+        pet.setAttribute('label', label);
+        try { label.trim() ? localStorage.setItem(nameKey, label) : localStorage.removeItem(nameKey); } catch (_) {}
+      };
+      try { applyName(localStorage.getItem(nameKey) || 'A.R.G.U.S.'); } catch (_) { applyName('A.R.G.U.S.'); }
+      nameInput.addEventListener('input', () => applyName(nameInput.value));
+      document.getElementById('reset-name').addEventListener('click', () => applyName('A.R.G.U.S.'));
       pet.addEventListener('argus-cockpit-action', event => {
         const active = pet._previewActive === event.detail.action ? null : event.detail.action;
         pet._previewActive = active;
