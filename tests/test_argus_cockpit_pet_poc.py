@@ -21,11 +21,13 @@ def test_cockpit_pet_exposes_future_rewire_contract():
 
 
 def test_eye_tracking_is_bounded_and_centerable():
-    assert "* 14 * strength" in POC_JS
-    assert "* 10 * strength" in POC_JS
+    assert "* 11 * strength" in POC_JS
+    assert "* 8 * strength" in POC_JS
     assert "centerEye()" in POC_JS
     assert "this._eyeNode.style.translate" in POC_JS
     assert "document.addEventListener('pointermove'" in POC_JS
+    assert 'clipPath id="eyeAperture"' in POC_JS
+    assert '<ellipse cx="596" cy="404" rx="13" ry="24"' in POC_JS
 
 
 def test_existing_orb_artwork_and_complete_menu_are_reused():

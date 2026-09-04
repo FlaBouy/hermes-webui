@@ -27,7 +27,7 @@ const server = http.createServer((req,res) => {
     await page.mouse.move(1320, 80); await page.waitForTimeout(180);
     const after = await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.getElementById('eye').style.translate);
     assert.notEqual(after, before, 'Eye follows pointer direction');
-    const [x,y] = after.split(' ').map(Number); assert.ok(x > 0 && y < 0); assert.ok(Math.abs(x)<=14.1 && Math.abs(y)<=10.1);
+    const [x,y] = after.split(' ').map(Number); assert.ok(x > 0 && y < 0); assert.ok(Math.abs(x)<=11.1 && Math.abs(y)<=8.1);
     const action = await page.locator('argus-cockpit-pet').evaluate(el => new Promise(resolve => { el.addEventListener('argus-cockpit-action', e => resolve(e.detail.action), {once:true}); el.shadowRoot.querySelector('[data-action="chat"]').click(); }));
     assert.equal(action, 'chat');
     await page.locator('argus-cockpit-pet').evaluate(el => { el.model='ignored'; el.setAttribute('model','POC-MODEL'); el.setAttribute('status','thinking'); });

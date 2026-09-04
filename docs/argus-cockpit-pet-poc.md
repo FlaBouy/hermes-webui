@@ -20,11 +20,13 @@ Files:
 
 The entity reuses the accepted transparent Orb artwork and preserves the current
 twelve-button geometry, A.R.G.U.S. label, model label, and online/state indicator.
-The red bulb and its two red halo layers form one bounded “eye.” Pointer movement
-anywhere in the document moves only that eye toward the pointer, up to 14 pixels
-horizontally and 10 pixels vertically, with eased motion. The blue rings, outer
-shell, lamps, menu buttons, and readout do not move. Mouse exit or window blur
-returns the eye to center.
+The center is a glass sensor eye rather than a concentric illuminated button. A
+fixed dark aperture and faint breathing rim contain a mobile textured red iris,
+vertical pupil, and asymmetric lens highlights. Pointer movement anywhere in the
+document moves only the iris/pupil toward the pointer, up to 11 pixels horizontally
+and 8 pixels vertically, with eased motion. The aperture, blue rings, outer shell,
+lamps, menu buttons, and readout do not move. Mouse exit or window blur returns the
+gaze to center.
 
 The sample sheet at
 `Build Docs/Argus V1.0/Graphics/Orb/Codex Image Sep 4, 2026, 06_17_48 AM.png`
