@@ -17,8 +17,10 @@ body{margin:0;background:#05070b}#composerWrap{position:fixed;bottom:12px;width:
 #biggyCategoryRail{position:fixed;right:0;top:0;bottom:0;width:48px;display:flex;flex-direction:column;z-index:119}
 #mainChat:not(.biggy-pa-rail-open) #biggyCategoryRail{visibility:hidden}
 #biggyArgusConversationLane{position:fixed;left:20px;top:50px;width:300px;height:400px}
+#biggyArgusReactor{position:fixed;left:430px;top:300px;width:560px;height:336px}
+#j-orb{display:block;width:100%;height:100%}
 </style><link rel="stylesheet" href="/static/biggy-pets.css">
-<div id="mainChat" class="biggy-brand-iwo biggy-pa-rail-open"><nav id="biggyCategoryRail"></nav><div id="biggyArgusConversationLane"></div><div id="composerWrap"><div id="biggyPromptDeck" class="biggy-prompt-deck"><textarea id="composerBox" aria-label="Message"></textarea></div></div></div>
+<div id="mainChat" class="biggy-brand-iwo biggy-pa-rail-open"><nav id="biggyCategoryRail"></nav><div id="biggyArgusConversationLane"></div><div id="biggyArgusReactor"><argus-cockpit-pet id="j-orb"></argus-cockpit-pet></div><div id="composerWrap"><div id="biggyPromptDeck" class="biggy-prompt-deck"><textarea id="composerBox" aria-label="Message"></textarea></div></div></div>
 <script src="/static/biggy-pets.js"></script><script>BiggyPets.mount(document.getElementById('biggyPromptDeck'));</script>`;
 const server = http.createServer((req,res) => {
   if(req.url === '/api/biggy/pets') {res.writeHead(fail?503:200, {'Content-Type':'application/json'});return res.end(JSON.stringify(catalog));}
@@ -46,7 +48,10 @@ const server = http.createServer((req,res) => {
     await page.waitForFunction(()=>document.querySelector('#biggyPetPanel [role="status"]').textContent.startsWith('Local objects'));
     assert.equal(await page.locator('.biggy-pet-sprite').count(),0);
     const before = await page.locator('#composerBox').boundingBox();
-    await page.getByRole('button',{name:'Animated object controls: 0 visible',exact:true}).click();
+    await page.getByRole('button',{name:'Animated object controls: 1 visible',exact:true}).click();
+    assert.equal(await page.locator('#biggyPetInstanceSelect').inputValue(),'__argus_orb__');
+    assert.equal(await page.getByRole('button',{name:'Always on',exact:true}).isDisabled(),true);
+    assert.equal(await page.getByRole('button',{name:'Remove selected',exact:true}).isDisabled(),true);
     await page.getByRole('button',{name:'Add object',exact:true}).click();
     await page.waitForFunction(()=>document.querySelectorAll('.biggy-pet-sprite:not([hidden])').length===1);
     const firstId=await page.locator('#biggyPetInstanceSelect').inputValue();
@@ -169,7 +174,7 @@ const server = http.createServer((req,res) => {
     await page.reload();
     await page.waitForFunction(()=>document.querySelectorAll('.biggy-pet-sprite:not([hidden])').length===1);
     assert.equal((await page.locator('.biggy-pet-sprite').boundingBox()).height,136,'Single-pet state migrates to one object instance');
-    await page.getByRole('button',{name:'Animated object controls: 1 visible',exact:true}).click();
+    await page.getByRole('button',{name:'Animated object controls: 2 visible',exact:true}).click();
     assert.equal(await page.locator('#biggyPetSpeed').inputValue(),'75');
     assert.equal(await page.locator('#biggyPetPause').inputValue(),'3');
     assert.deepEqual(errors,[]);

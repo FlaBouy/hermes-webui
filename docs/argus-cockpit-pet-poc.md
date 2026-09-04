@@ -1,12 +1,17 @@
-# A.R.G.U.S. cockpit-object POC
+# A.R.G.U.S. cockpit Object
 
-## Production boundary
+## Production cut-in
 
-The POC is a standalone custom element and preview page. Production does not
-import it, the local object catalog does not list it, and none of its menu or
-composer events call a live Hermes control. The existing Orb, menu, readout,
-prompt, and dialog remain the production owners until an explicit accepted
-cutover.
+The accepted custom Orb is now mounted in production as one composite Object.
+It owns the Orb artwork, eye, menu geometry, tie-ins, editable name, model label,
+and online/state indicator. The existing hidden Hermes controls remain the sole
+function owners; the Object relays its twelve allowlisted action IDs to those
+controls and reflects their active state. The independent Biggy prompt remains a
+fixed page anchor outside the Object.
+
+The Orb is permanently mounted on glass. ANI may select, move, resize, or center
+it, but cannot hide or remove it. **Show all**, **Hide all**, and **Remove
+selected** apply only to the other animated Objects.
 
 Preview: `http://127.0.0.1:8790/static/argus-cockpit-pet-poc.html`
 
@@ -19,7 +24,7 @@ Files:
 - `tests/browser_argus_cockpit_pet_poc.cjs` — optional isolated browser harness
 - `scripts/package_argus_cockpit_pet_poc.py` — builds a portable reviewer ZIP
 
-## Current POC behavior
+## Current Object behavior
 
 The entity reuses the accepted transparent Orb artwork and preserves the current
 twelve-button geometry, A.R.G.U.S. label, model label, and online/state indicator.
@@ -138,7 +143,7 @@ awareness, and expanded interaction. It is an RGB reference image with its
 checkerboard baked into the pixels, so it is not used as production transparency
 or as a runtime sprite source.
 
-## Future wiring contract
+## Production wiring contract
 
 `model`, `status`, and `tracking` are attributes. `setActiveActions()` paints an
 allowlisted set of active menu buttons. A menu press emits one
@@ -147,20 +152,20 @@ action ID. The independent composer emits `argus-cockpit-control`; Enter and Sen
 emit `argus-cockpit-submit` with the current field text. The POC never interprets
 or executes any of those events.
 
-After visual acceptance, the integration sequence is:
+The accepted integration is:
 
-1. Add a dedicated cockpit-object adapter to the multi-object manager.
+1. Load the shared Object renderer in the production shell.
    The PA right-rail entry is labeled **ANI**, and all user-facing cutover
-   documentation and labels use **Objects** rather than the retired PET term.
-2. Map the twelve emitted action IDs to the existing Hermes-owned controls.
-3. Map the existing model, online, thinking, speaking, tool, and error state to
-   the entity attributes without creating a second state owner.
-4. Keep the existing prompt owner as an independent static anchor and map only
-   its in-place state styling; separately verify the response-dialog behavior at
-   the physical display sizes.
-5. Run parity tests for every button, active line, indicator, dialog, pulse, and
-   mutual-exclusion rule.
-6. Only after parity acceptance, remove the existing Orb/menu/readout DOM.
+   documentation and labels use **Objects** throughout.
+2. Relay the twelve action IDs to the existing Hermes-owned controls.
+3. Feed model, online, thinking, speaking, tool, and error state into Object
+   attributes without creating a second state owner.
+4. Keep the existing prompt as an independent static anchor.
+5. Let ANI control permanent Orb position and size while disabling removal and
+   visibility controls for that Object.
+6. Keep the retired Orb iframe, cloned menu, external name, and external readout
+   out of production.
 
-Rollback during POC development is simply closing the preview page or removing
-the standalone files; production has no dependency on them.
+The standalone preview and adapter remain inert reviewer fixtures. Compatibility
+filenames and the internal custom-element tag retain their original identifiers;
+all visible controls and product documentation call the feature **Objects**.

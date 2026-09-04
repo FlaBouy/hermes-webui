@@ -1,16 +1,21 @@
-# Biggy animated object controls
+# Biggy animated Objects
 
 The **ANI** button sits at the bottom of the PA right sidebar. Open PA, then ANI.
 Closing PA hides the settings popup and ANI button, not the enabled object. The popup
 is outside the rail's clipping area. The Orb and prompt axis are unchanged.
 
-Open ANI to add any number of local object instances. The control separates the
+The A.R.G.U.S. Orb is always mounted on glass as the protected first Object.
+Selecting it exposes size, drag placement, and **Center Orb**. Its visibility
+toggle reads **Always on**, and both that toggle and **Remove selected** are
+disabled. Global show/hide controls never affect the Orb.
+
+Open ANI to add any number of other local Object instances. The control separates the
 available catalog from the **On-screen objects** list, so two copies of the same
 object can remain visible and still have independent size, placement, visibility,
 and animation timing. **Show all** and **Hide all** are global display controls;
 **Show/Hide selected** and **Remove selected** affect only the chosen instance.
 State persists in this browser's `biggy:pets:v2` local storage independently of
-chat sessions. Existing `biggy:pets:v1` single-pet state migrates once into one
+chat sessions. Existing `biggy:pets:v1` single-object state migrates once into one
 object instance. A missing catalog entry is retained but hidden and returns when
 that catalog entry becomes available again; it is never replaced silently.
 
@@ -55,25 +60,24 @@ order, so the reach/sip/lower sequence remains coherent. Zero pause means contin
 Bones retains its original speed and continuous idle until changed. All controls
 persist per instance and add no model or voice calls.
 
-## Future Orb / menu / dialog object
+## Production Orb Object
 
-The rebuilt Orb, menu buttons, and response dialog will enter this manager as one
-composite **cockpit object**, not as three unrelated objects and not as a passive
-sprite. The current control vocabulary uses **Add object** and
-**On-screen objects** for that reason. The POC integration will add a dedicated
-cockpit renderer behind the same instance lifecycle:
+The rebuilt Orb, menu buttons, label, and model/online indicators are one
+composite **cockpit Object**, not unrelated controls and not a passive sprite.
+The control vocabulary therefore uses **Add Object** and **On-screen Objects**:
 
 - one object identity owns the Orb, its menu buttons, and its dialog geometry;
 - moving or resizing the object preserves their authored relationships;
 - interactive hit regions expose stable action IDs that relay to the existing
   Hermes controls after the POC is accepted;
-- the cockpit object gets the same select/show/hide/position lifecycle as other
-  objects, while sprite animation controls are replaced by cockpit-specific controls;
-- replacing the legacy Orb is an explicit cutover: mount the accepted object,
-  rewire and verify every menu/dialog action, then retire the old DOM. The current
-  Orb remains authoritative until that cutover is complete.
+- the cockpit Object is selectable, movable, and resizable, but permanently
+  mounted and protected from every hide/remove command;
+- each other animated Object retains independent selection, visibility, removal,
+  position, size, speed, pause, and random-timing controls;
+- the accepted Object is wired to the existing production function owners, and
+  the legacy Orb/menu/readout DOM has been retired.
 
-The future renderer must be code-backed (HTML/SVG/canvas with an allowlisted
+The renderer is code-backed (HTML/SVG with an allowlisted
 action map), even if its artwork arrives as a raster asset. A bitmap manifest
 alone will never be allowed to invent or execute menu actions.
 
@@ -88,7 +92,7 @@ Manifest example:
 }
 ```
 
-Pet directory names and IDs must match and use lowercase letters, digits,
+Object directory names and IDs must match and use lowercase letters, digits,
 underscores or hyphens. Sprite paths must be simple PNG/WebP filenames.
 Symlinks, traversal paths, active formats, malformed manifests and unsupported
 versions are rejected. Files are size-bounded and opened relative to held directory
@@ -104,7 +108,7 @@ browser refresh can pick up a replacement without an application restart.
 
 No LLM, TTS, microphone, external request, or recurring catalog polling is used.
 Each instance uses its own frame-specific timer only while enabled and the page
-is visible. Reduced-motion preferences stop every animation. Disabled pets have no
+is visible. Reduced-motion preferences stop every animation. Disabled Objects have no
 animation timer. Each sprite accepts pointer input only within its own bounding
 box for dragging; place it clear of controls you need to click. Its default position
 clears the prompt and it moves clear of the open resize/settings panel. Unmount releases timers,
@@ -115,17 +119,17 @@ observers, pending catalog requests and listeners.
 - `./scripts/test.sh tests/test_biggy_pets.py`: catalog, multiple pets, missing
   files, version/path/symlink guards, replacement invalidation.
 - `node tests/browser_biggy_pets.cjs` with Playwright available: multiple copies
-  of one pet, independent selection/visibility/sizing/timing, show/hide-all,
+  of one Object, independent selection/visibility/sizing/timing, show/hide-all,
   drag/keyboard movement, saved position, v1 migration, unchanged composer geometry,
-  reduced motion, missing selected pet, empty/error recovery and teardown.
+  reduced motion, missing selected Object, empty/error recovery and teardown.
   Isolated harness widths: 1920, 1366 and 390. This is responsive coverage of the
-  pet component, not a claim that every existing Biggy panel is mobile-ready.
+  Object component, not a claim that every existing Biggy panel is mobile-ready.
 - Set `BIGGY_TEST_CHROMIUM` to an installed Chromium executable if necessary;
   `BIGGY_PET_TEST_SPRITE` optionally uses a supplied local sprite instead of the
   generated test fixture. No production credentials or agent calls are used.
 - Live Chrome verification: ANI control at the PA sidebar bottom, Biggy preview,
   on/off and popup controls. Unauthorized catalog/sprite requests return 401.
 
-Rollback: remove the pet loader from `applyShell` in `biggy-brand.js` and the
+Rollback: remove the Object loader from `applyShell` in `biggy-brand.js` and the
 two `/api/biggy/pets` GET branches. Local sprite files and chat sessions need not
 be removed. No changes to speech, routing, electrical calculations or review state.

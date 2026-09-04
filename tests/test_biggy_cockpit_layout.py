@@ -34,32 +34,22 @@ def test_filter_stays_functional_but_is_removed_from_right_rail():
 
 def test_orb_is_bottom_docked_and_cockpit_and_fleet_share_top_center():
     assert ".biggy-argus-reactor{" in BRAND_CSS
-    assert "width:min(560px,calc(100vw - 136px))" in BRAND_CSS
-    assert "aspect-ratio:1200/714" in BRAND_CSS
+    assert "width:min(var(--argus-object-width,560px),calc(100vw - 136px))" in BRAND_CSS
+    assert "aspect-ratio:1200/720" in BRAND_CSS
     assert ".biggy-top-rail-group{" in BRAND_CSS
     assert "position:absolute;left:50%;top:20px" in BRAND_CSS
     assert "group.prepend(strip)" in BRAND
     assert "group.appendChild(strip)" in BRAND
-    assert "reactorDock.appendChild(modelStatus)" in BRAND
     assert "composer.appendChild(reactorDock)" in BRAND
 
 
-def test_reactor_model_badge_remains_single_line_after_bottom_dock_move():
-    chip_rule = BRAND_CSS[BRAND_CSS.index("#j-brain-chip{"):BRAND_CSS.index(".biggy-brand-controls")]
-    assert "white-space:nowrap" in chip_rule
-    assert "text-overflow:ellipsis" in chip_rule
-    assert "border:0" in chip_rule
-    assert "background:transparent" in chip_rule
-    assert "backdrop-filter:none" in chip_rule
-    panel_rule = BRAND_CSS[BRAND_CSS.index("#j-state-panel{"):BRAND_CSS.index("#j-state{")]
-    assert "width:224px" in panel_rule
-    assert "max-width:224px" in panel_rule
-    assert "bottom:0" in panel_rule
-    assert "overflow:hidden" in panel_rule
-    state_rule = BRAND_CSS[BRAND_CSS.index("#j-state{"):BRAND_CSS.index("#j-state-txt{")]
-    assert "max-width:92px" in state_rule
-    assert "white-space:nowrap" in state_rule
-    assert "overflow:hidden" in state_rule
+def test_reactor_model_and_state_are_owned_by_the_mounted_object():
+    assert "orb.setAttribute('model', short || '—')" in BRAND
+    assert "orb.setAttribute('status', next === 'tool-running' ? 'TOOL RUNNING' : next)" in BRAND
+    assert "orb.setAttribute('beat', String(level))" in BRAND
+    assert "orb.setAttribute('beat', '0')" in BRAND
+    assert "#j-state-panel{" not in BRAND_CSS
+    assert "#j-brain-chip{" not in BRAND_CSS
     status_rule = BRAND_CSS[BRAND_CSS.index(".biggy-brand-status{"):BRAND_CSS.index(".biggy-brand-meta{")]
     assert "width:max-content" in status_rule
 

@@ -1032,10 +1032,12 @@
     // axis and place its bottom edge immediately above the prompt deck.
     const reactor = document.getElementById('biggyArgusReactor');
     if (reactor && reactor.offsetParent) {
-      const parentRect = reactor.offsetParent.getBoundingClientRect();
-      reactor.style.left = `${masterX - parentRect.left}px`;
-      reactor.style.top = `${Math.round(axisRect.top - parentRect.top - reactor.offsetHeight - 8)}px`;
-      reactor.style.bottom = 'auto';
+      if (reactor.dataset.objectPositioned !== '1') {
+        const parentRect = reactor.offsetParent.getBoundingClientRect();
+        reactor.style.left = `${masterX - parentRect.left}px`;
+        reactor.style.top = `${Math.round(axisRect.top - parentRect.top - reactor.offsetHeight - 8)}px`;
+        reactor.style.bottom = 'auto';
+      }
     }
     const frame = document.getElementById('biggyV6World');
     if (frame && frame.contentWindow) {
@@ -1049,6 +1051,7 @@
     if (sharedCenterlineTimer !== null) clearTimeout(sharedCenterlineTimer);
     sharedCenterlineTimer = setTimeout(syncBiggySharedCenterline, 80);
   }
+  window.scheduleBiggySharedCenterline = scheduleBiggySharedCenterline;
 
   function installBiggyDeckLayoutObserver(mainChat) {
     if (sharedCenterlineLayoutObserver) sharedCenterlineLayoutObserver.disconnect();
@@ -1190,46 +1193,25 @@
   function syncArgusOrbMenuFromHermes() {
     const dock = document.getElementById('biggyArgusReactor');
     const strip = document.getElementById('biggyHermesStrip');
-    const menu = dock && dock.querySelector('#j-orb-menu');
-    if (!dock || !strip || !menu) return;
-    menu.replaceChildren();
+    const orb = dock && dock.querySelector('#j-orb');
+    if (!dock || !strip || !orb) return;
     const sources = Array.from(strip.querySelectorAll('.biggy-hermes-panel'));
-    const uniformWidth = Math.max(0, ...sources.map((source) => Math.ceil(source.getBoundingClientRect().width)));
-    sources.forEach((source, index) => {
-      const clone = source.cloneNode(true);
-      clone.removeAttribute('id');
-      clone.removeAttribute('data-panel');
-      clone.removeAttribute('aria-hidden');
-      clone.tabIndex = 0;
-      clone.classList.remove('biggy-hermes-tools');
-      clone.classList.add('biggy-orb-menu-tab');
-      clone.classList.add(index < 6 ? 'biggy-orb-menu-left' : 'biggy-orb-menu-right');
-      clone.setAttribute('aria-label', source.title || source.textContent.trim());
-      clone.querySelector('.biggy-fleet-state')?.remove();
-      if (uniformWidth) {
-        clone.style.width = `${uniformWidth}px`;
-        clone.style.minWidth = `${uniformWidth}px`;
-      }
-      const row = index % 6;
-      const inwardIndex = [40, 20, 0, 0, 20, 40][row];
-      const nodeX = index < 6 ? 250 + inwardIndex : 950 - inwardIndex;
-      clone.style.left = `${(nodeX / 1200) * 100}%`;
-      clone.style.top = `${26.5625 + row * 9.375}%`;
-      clone.addEventListener('click', (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        source.click();
+    if (orb.dataset.actionBound !== '1') {
+      orb.dataset.actionBound = '1';
+      orb.addEventListener('argus-cockpit-action', (event) => {
+        const action = String(event.detail?.action || '').trim().toLowerCase();
+        const owner = Array.from(document.querySelectorAll('#biggyHermesStrip .biggy-hermes-panel'))
+          .find((source) => source.textContent.trim().toLowerCase() === action);
+        if (!owner) return;
+        owner.click();
         window.setTimeout(syncArgusOrbMenuFromHermes, 0);
         window.setTimeout(syncArgusOrbMenuFromHermes, 160);
       });
-      menu.appendChild(clone);
-    });
-    const visual = document.getElementById('j-orb-frame');
-    if (visual?.contentWindow) {
-      const active = sources.filter((source) => source.classList.contains('active') || source.getAttribute('aria-pressed') === 'true')
-        .map((source) => source.textContent.trim().toUpperCase());
-      try { visual.contentWindow.postMessage({ type: 'biggy-argus-orb-menu-state', active }, window.location.origin); } catch (_) {}
     }
+    const active = sources
+      .filter((source) => source.classList.contains('active') || source.getAttribute('aria-pressed') === 'true')
+      .map((source) => source.textContent.trim().toLowerCase());
+    if (typeof orb.setActiveActions === 'function') orb.setActiveActions(active);
   }
 
   let smedleyToolsLoadPromise = null;
@@ -3020,17 +3002,6 @@
   let argusHealthTimer = null;
   let argusOrbState = 'offline';
 
-  // Mirrors V6's own STATE_STYLE table (3d.html) — label, css color, pulse —
-  // extended with offline/tool-running/error, which the standalone V6 orb
-  // never needs to represent (it's only ever reachable when V6 is up).
-  const REACTOR_STATE_STYLE = Object.freeze({
-    offline: ['OFFLINE', '#ff6b6b', 0],
-    online: ['ONLINE', '#34d399', 0],
-    thinking: ['THINKING', '#ffd06a', 1],
-    speaking: ['SPEAKING', '#7dffd9', 1],
-    'tool-running': ['TOOL RUNNING', '#caa6ff', 1],
-    error: ['ERROR', '#ff6b6b', 1],
-  });
   // Maps bridge states onto V6's own is-listen/is-think/is-speak orb
   // classes (colour-only, no pulsing — same rule V6 itself follows) plus
   // two additions (is-offline/is-error) for states V6's own orb never has
@@ -3059,23 +3030,10 @@
     const orb = document.getElementById('j-orb');
     if (!orb) return;
     orb.className = REACTOR_ORB_CLASS[next] || '';
-    const visual = document.getElementById('j-orb-frame');
-    if (visual && visual.contentWindow) {
-      try {
-        visual.contentWindow.postMessage({ type: 'biggy-argus-orb-state', state: next }, window.location.origin);
-      } catch (_) {}
-    }
+    orb.setAttribute('status', next === 'tool-running' ? 'TOOL RUNNING' : next);
     const label = detail ? `${next}: ${detail}` : next;
     orb.setAttribute('title', `A.R.G.U.S. ${label}`);
     orb.setAttribute('aria-label', `A.R.G.U.S. ${label}`);
-    const st = document.getElementById('j-state');
-    const stTxt = document.getElementById('j-state-txt');
-    if (st && stTxt) {
-      const [text, color, pulse] = REACTOR_STATE_STYLE[next];
-      stTxt.textContent = text;
-      st.style.color = color;
-      st.classList.toggle('pulse', !!pulse);
-    }
   }
 
   let argusSpeechPulseFrame = null;
@@ -3139,10 +3097,7 @@
       orb.style.setProperty('--beat', '0');
       orb.style.setProperty('--orb-scale', '1');
     }
-    const visual = document.getElementById('j-orb-frame');
-    if (visual && visual.contentWindow) {
-      try { visual.contentWindow.postMessage({ type: 'biggy-argus-orb-beat', beat: 0 }, window.location.origin); } catch (_) {}
-    }
+    if (orb) orb.setAttribute('beat', '0');
   }
 
   function renderArgusSpeechFrame() {
@@ -3162,10 +3117,7 @@
     // is allowed to reach 2x so the tuner produces a plainly visible change.
     orb.style.setProperty('--beat', String(level * .82));
     orb.style.setProperty('--orb-scale', String(1 + (level * .028)));
-    const visual = document.getElementById('j-orb-frame');
-    if (visual && visual.contentWindow) {
-      try { visual.contentWindow.postMessage({ type: 'biggy-argus-orb-beat', beat: level }, window.location.origin); } catch (_) {}
-    }
+    orb.setAttribute('beat', String(level));
     argusSpeechPulseFrame = requestAnimationFrame(renderArgusSpeechFrame);
   }
 
@@ -3212,13 +3164,13 @@
       saveArgusSpeechSyncSettings();
       render();
       if (!argusSpeechPulseSignature) {
-        const visual = document.getElementById('j-orb-frame');
-        if (visual && visual.contentWindow) {
-          try { visual.contentWindow.postMessage({ type: 'biggy-argus-orb-beat', beat: argusSpeechPulseGain }, window.location.origin); } catch (_) {}
+        const visual = document.getElementById('j-orb');
+        if (visual) {
+          visual.setAttribute('beat', String(argusSpeechPulseGain));
           if (argusSpeechGainPreviewTimer) clearTimeout(argusSpeechGainPreviewTimer);
           argusSpeechGainPreviewTimer = setTimeout(() => {
             if (!argusSpeechPulseSignature) {
-              try { visual.contentWindow.postMessage({ type: 'biggy-argus-orb-beat', beat: 0 }, window.location.origin); } catch (_) {}
+              visual.setAttribute('beat', '0');
             }
             argusSpeechGainPreviewTimer = null;
           }, 320);
@@ -3239,11 +3191,9 @@
   }
 
   function setReactorModelChip(model) {
-    const chip = document.getElementById('j-brain-chip');
-    if (!chip) return;
+    const orb = document.getElementById('j-orb');
     const short = formatReactorModel(model);
-    chip.textContent = short ? `\u25c6 ${short}` : '\u2014';
-    chip.title = model ? String(model) : '';
+    if (orb) orb.setAttribute('model', short || '—');
   }
 
   function buildReactorHud() {
@@ -4670,28 +4620,21 @@
     return header;
   }
 
-  // New A.R.G.U.S. graphical-layer POC. Its SVG and inert module placements
-  // stay isolated in a same-origin frame; Biggy retains the production model,
-  // state, accessibility, and speech-envelope ownership in the host DOM.
+  // Accepted A.R.G.U.S. cockpit Object. The custom element owns the Orb,
+  // menu, name, and readout geometry while Biggy remains the state and action
+  // owner. The prompt bar remains an independent fixed page anchor.
   function makeReactorDock() {
     const dock = el('div', 'biggy-argus-reactor');
     dock.id = 'biggyArgusReactor';
     dock.dataset.biggyLayer = 'reactor';
     dock.setAttribute('data-testid', 'biggy-reactor-dock');
     dock.innerHTML =
-      `<div id="j-orb" data-testid="biggy-argus-orb" role="status" aria-live="polite" aria-label="A.R.G.U.S. offline">` +
-      `<iframe id="j-orb-frame" data-testid="biggy-argus-orb-poc" src="/static/argus-orb-graphic-layer.html" title="A.R.G.U.S. graphical layer" tabindex="-1" aria-hidden="true" allowtransparency="true"></iframe>` +
-      `<div id="j-orb-menu" aria-hidden="true"></div>` +
-      `</div>` +
-      `<div id="j-argus-name" data-testid="biggy-argus-name">A.R.G.U.S.</div>` +
-      `<div id="j-state-panel" data-testid="biggy-argus-readout">` +
-      `<div id="j-brain"><span id="j-brain-chip" data-testid="biggy-argus-model">—</span></div>` +
-      `<div id="j-state" data-testid="biggy-argus-state"><span class="dot"></span><span id="j-state-txt">OFFLINE</span></div>` +
-      `</div>`;
-    const visual = dock.querySelector('#j-orb-frame');
-    if (visual) visual.addEventListener('load', () => {
+      `<argus-cockpit-pet id="j-orb" data-testid="biggy-argus-orb-object" role="status" aria-live="polite" aria-label="A.R.G.U.S. offline" label="A.R.G.U.S." model="—" status="offline" tracking="on"></argus-cockpit-pet>`;
+    customElements.whenDefined('argus-cockpit-pet').then(() => {
       setArgusOrbState(argusOrbState);
       syncArgusOrbMenuFromHermes();
+      scheduleBiggySharedCenterline();
+      window.BiggyPets?.mount(document.getElementById('biggyPromptDeck'));
     });
     return dock;
   }
@@ -7680,6 +7623,13 @@
     const mainChat = document.getElementById('mainChat');
     if (!mainChat) return false;
     document.body.classList.add(BODY_CLASS);
+    if (!customElements.get('argus-cockpit-pet') && !document.getElementById('argusCockpitObjectRuntime')) {
+      const objectScript = document.createElement('script');
+      objectScript.id = 'argusCockpitObjectRuntime';
+      objectScript.src = `/static/argus-cockpit-pet-poc.js?v=${BUILD_ID}`;
+      objectScript.onerror = () => objectScript.remove();
+      document.head.appendChild(objectScript);
+    }
     // Apply IWO + native-transcript suppression in the same turn so HOME/init
     // cannot flash the central Hermes message column before the lane exists.
     mainChat.classList.add(IWO_CLASS);

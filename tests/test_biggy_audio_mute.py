@@ -128,7 +128,8 @@ def test_argus_orb_renders_measured_audio_level_and_cleans_up():
 const vm = require('vm');
 let now = 100000;
 const style = {{values: {{}}, setProperty(k, v) {{ this.values[k] = String(v); }}}};
-const orb = {{style}};
+const attributes = {{}};
+const orb = {{style, setAttribute(k, v) {{ attributes[k] = String(v); }}}};
 let frames = [];
 const sandbox = {{
   console,
@@ -157,10 +158,10 @@ vm.runInContext(`startArgusSpeechPulse({{
 }})`, sandbox);
 now = 100000;
 frames.shift()();
-const during = {{...style.values}};
+const during = {{...style.values, beatAttribute: attributes.beat}};
 now = 100200;
 frames.shift()();
-const after = {{...style.values}};
+const after = {{...style.values, beatAttribute: attributes.beat}};
 process.stdout.write(JSON.stringify({{during, after}}));
 """
     completed = subprocess.run(
@@ -173,14 +174,16 @@ process.stdout.write(JSON.stringify({{during, after}}));
     result = json.loads(completed.stdout)
     assert float(result["during"]["--beat"]) == 0.615
     assert float(result["during"]["--orb-scale"]) == 1.021
+    assert result["during"]["beatAttribute"] == "0.75"
     assert result["after"]["--beat"] == "0"
     assert result["after"]["--orb-scale"] == "1"
+    assert result["after"]["beatAttribute"] == "0"
 
 
 def test_speech_gain_has_a_visible_two_x_range_and_live_preview():
     brand = (ROOT / "static" / "biggy-brand.js").read_text(encoding="utf-8")
-    graphic = (ROOT / "static" / "argus-orb-graphic-layer.html").read_text(encoding="utf-8")
+    graphic = (ROOT / "static" / "argus-cockpit-pet-poc.js").read_text(encoding="utf-8")
     assert "Math.min(2, rawLevel * argusSpeechPulseGain)" in brand
-    assert "beat: argusSpeechPulseGain" in brand
-    assert "var(--speech-beat) * .09" in graphic
-    assert "var(--speech-beat) * .025" in graphic
+    assert "visual.setAttribute('beat', String(argusSpeechPulseGain))" in brand
+    assert "1 + beat * .055" in graphic
+    assert "1 + beat * .2" in graphic

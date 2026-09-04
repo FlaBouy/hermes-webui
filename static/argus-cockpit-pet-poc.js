@@ -1,4 +1,4 @@
-/* Isolated A.R.G.U.S. cockpit-pet POC. It is not imported by the production GUI. */
+/* A.R.G.U.S. cockpit Object renderer, shared by the standalone preview and production host. */
 (() => {
   'use strict';
   if (customElements.get('argus-cockpit-pet')) return;
@@ -11,7 +11,7 @@
   ];
 
   class ArgusCockpitPet extends HTMLElement {
-    static get observedAttributes() { return ['label', 'model', 'size', 'status', 'tracking']; }
+    static get observedAttributes() { return ['beat', 'label', 'model', 'size', 'status', 'tracking']; }
 
     constructor() {
       super();
@@ -27,7 +27,7 @@
       this.shadowRoot.innerHTML = `
         <style>
           :host{display:block;width:min(var(--pet-width,720px),96vw,120vh);aspect-ratio:1200/720;contain:layout style;container-type:inline-size;user-select:none;color:#b9c4d2;font-family:"SF Mono",ui-monospace,monospace}
-          *{box-sizing:border-box}.entity{position:relative;width:100%;height:100%;overflow:visible}
+          *{box-sizing:border-box}.entity{position:relative;width:100%;height:100%;overflow:visible;--speech-beat:0}
           svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;filter:drop-shadow(0 0 14px rgba(22,188,237,.15))}
           .profile{fill:#01060b;opacity:.99}
           .solid,.dash{transform-box:view-box;transform-origin:596px 404px;will-change:transform}
@@ -35,8 +35,8 @@
           .eye-glow,.confirmation-sweep{transform-box:view-box;transform-origin:596px 404px}
           .eye-glow{animation:eyeBreathe 5.6s ease-in-out infinite}
           .confirmation-sweep{fill:none;stroke:#5eead4;stroke-width:5;stroke-linecap:round;stroke-dasharray:0 830;opacity:0;pointer-events:none}
-          .lamp{animation:lampIdle 5.6s ease-in-out infinite}
-          .eye{transform-box:view-box;transform-origin:596px 404px;will-change:transform}
+          .lamp{animation:lampIdle 5.6s ease-in-out infinite;filter:brightness(var(--speech-brightness,1))}
+          .eye{transform-box:view-box;transform-origin:596px 404px;will-change:transform;scale:var(--speech-scale,1)}
           .tie{fill:none;stroke:#35d9ff;stroke-width:1.9;stroke-dasharray:3 5;opacity:.8;transition:stroke .18s ease,stroke-width .18s ease,opacity .18s ease,filter .18s ease}
           .signal-trail,.signal-head{fill:none;stroke:#eafcff;stroke-linecap:round;opacity:0;pointer-events:none;filter:drop-shadow(0 0 6px rgba(104,235,255,1))}
           .signal-trail{stroke-width:3.5;stroke-dasharray:1 3 1 6 1 10 1 177}.signal-head{stroke-width:7;stroke-dasharray:1 199}
@@ -197,13 +197,19 @@
       const label = (this.getAttribute('label') || 'A.R.G.U.S.').trim().slice(0, 20) || 'A.R.G.U.S.';
       const requestedSize = Number(this.getAttribute('size') || 100);
       const size = Math.min(140, Math.max(60, Number.isFinite(requestedSize) ? requestedSize : 100));
+      const requestedBeat = Number(this.getAttribute('beat') || 0);
+      const beat = Math.min(2, Math.max(0, Number.isFinite(requestedBeat) ? requestedBeat : 0));
       this.style.setProperty('--pet-width', `${720 * size / 100}px`);
       this.shadowRoot.querySelector('.name').textContent = label;
       this.shadowRoot.querySelector('.model').textContent = `◆ ${model}`;
       this.shadowRoot.querySelector('.state').textContent = status;
       const visualStates = new Set(['LISTENING', 'THINKING', 'SPEAKING', 'DISPATCH', 'WORKING', 'SUCCESS', 'WARNING', 'ERROR', 'SLEEP']);
-      const visualState = visualStates.has(status) ? status.toLowerCase() : 'idle';
-      this.shadowRoot.querySelector('.entity').dataset.state = visualState;
+      const visualState = status === 'OFFLINE' ? 'error' : (status === 'TOOL RUNNING' ? 'working' : (visualStates.has(status) ? status.toLowerCase() : 'idle'));
+      const entity = this.shadowRoot.querySelector('.entity');
+      entity.dataset.state = visualState;
+      entity.style.setProperty('--speech-beat', String(beat));
+      entity.style.setProperty('--speech-scale', String(1 + beat * .055));
+      entity.style.setProperty('--speech-brightness', String(1 + beat * .2));
     }
 
     track(clientX, clientY) {

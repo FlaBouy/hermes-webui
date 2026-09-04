@@ -11,9 +11,11 @@ POC_HTML = (ROOT / "static" / "argus-cockpit-pet-poc.html").read_text(encoding="
 PRODUCTION = (ROOT / "static" / "biggy-brand.js").read_text(encoding="utf-8")
 
 
-def test_cockpit_pet_poc_is_not_loaded_by_production():
-    assert "argus-cockpit-pet-poc" not in PRODUCTION
+def test_cockpit_object_renderer_is_loaded_by_production_without_the_preview_adapter():
+    assert "argus-cockpit-pet-poc.js" in PRODUCTION
     assert "argus-cockpit-pet-poc-adapter" not in PRODUCTION
+    assert '<argus-cockpit-pet id="j-orb"' in PRODUCTION
+    assert 'data-testid="biggy-argus-orb-object"' in PRODUCTION
     assert '<argus-cockpit-pet' in POC_HTML
     assert "no production wiring" in POC_HTML.lower()
     assert '<title>A.R.G.U.S. Cockpit Orb POC</title>' in POC_HTML
@@ -26,7 +28,7 @@ def test_cockpit_pet_exposes_future_rewire_contract():
     assert "argus-cockpit-control" in POC_HTML
     assert "argus-cockpit-submit" in POC_HTML
     assert "setActiveActions(actions = [])" in POC_JS
-    assert "['label', 'model', 'size', 'status', 'tracking']" in POC_JS
+    assert "['beat', 'label', 'model', 'size', 'status', 'tracking']" in POC_JS
     assert 'data-state="idle"' in POC_JS
     assert "['LISTENING', 'THINKING', 'SPEAKING', 'DISPATCH', 'WORKING', 'SUCCESS', 'WARNING', 'ERROR', 'SLEEP']" in POC_JS
 

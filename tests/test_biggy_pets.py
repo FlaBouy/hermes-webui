@@ -113,3 +113,13 @@ def test_object_manager_uses_ani_user_facing_labels():
     assert "Animated object controls" in manager
     assert "},'PET')" not in manager
     assert "ADD PET / OBJECT" not in manager
+
+
+def test_orb_is_a_protected_permanent_object_in_ani():
+    manager = (ROOT / "static" / "biggy-pets.js").read_text(encoding="utf-8")
+    assert "const ORB_OBJECT_ID='__argus_orb__'" in manager
+    assert "'A.R.G.U.S. Orb — always on'" in manager
+    assert "toggle.textContent='Always on'" in manager
+    assert "toggle.disabled=true" in manager
+    assert "removeButton.disabled=true" in manager
+    assert "resetPosition.textContent='Center Orb'" in manager
