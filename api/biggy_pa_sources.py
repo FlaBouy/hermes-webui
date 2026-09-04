@@ -23,7 +23,7 @@ from email.utils import getaddresses, parseaddr
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlparse
 from urllib.request import Request, urlopen
 
 
@@ -91,6 +91,65 @@ def _token_scopes() -> set[str]:
 
 def _missing_write_scopes() -> list[str]:
     return sorted(REQUIRED_WRITE_SCOPES - _token_scopes())
+
+
+def _reconnect_required(error: Any) -> bool:
+    text = str(error or "").lower()
+    return any(marker in text for marker in (
+        "invalid_grant", "expired or revoked", "token has been expired",
+        "authorization must be refreshed", "token is invalid",
+    ))
+
+
+def begin_google_reconnect() -> dict[str, Any]:
+    """Create a new profile-scoped Google consent URL without exposing secrets."""
+    script, _token, client = _google_paths()
+    setup = script.with_name("setup.py")
+    if not setup.is_file() or not client.is_file():
+        raise RuntimeError("Biggy's Google OAuth client is not configured")
+    proc = subprocess.run(
+        [sys.executable, str(setup), "--auth-url"],
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=False,
+        env={**os.environ, "HERMES_HOME": str(_hermes_home())},
+    )
+    url = next((line.strip() for line in reversed((proc.stdout or "").splitlines())
+                if line.strip().startswith("https://accounts.google.com/")), "")
+    if proc.returncode != 0 or not url:
+        raise RuntimeError("Google reconnect could not be started")
+    return {"ok": True, "auth_url": url, "profile": _hermes_home().name}
+
+
+def complete_google_reconnect(code: Any) -> dict[str, Any]:
+    """Exchange the owner-provided OAuth code or callback URL in Biggy's profile."""
+    value = str(code or "").strip()
+    if "://" in value:
+        # Preserve the complete callback URL. The profile-scoped setup helper
+        # validates OAuth state and records the scopes Google actually granted;
+        # reducing it to the code would discard both protections. Browsers may
+        # refuse to load localhost:1, but the URL remains available to copy.
+        parsed = urlparse(value)
+        if parsed.scheme not in {"http", "https"} or not parse_qs(parsed.query).get("code"):
+            raise ValueError("authorization callback URL is invalid")
+    if not value or len(value) > 4096 or "\x00" in value:
+        raise ValueError("authorization code is required")
+    script, _token, _client = _google_paths()
+    setup = script.with_name("setup.py")
+    proc = subprocess.run(
+        [sys.executable, str(setup), "--auth-code", value],
+        capture_output=True,
+        text=True,
+        timeout=45,
+        check=False,
+        env={**os.environ, "HERMES_HOME": str(_hermes_home())},
+    )
+    if proc.returncode != 0:
+        raise RuntimeError("Google authorization was not accepted")
+    with _LOCK:
+        _CACHE.clear()
+    return {"ok": True, "connected": True, "profile": _hermes_home().name}
 
 
 def _invalidate(*keys: str) -> None:
@@ -558,6 +617,16 @@ def calendar_snapshot(
                 rows.sort(key=lambda row: str(row.get("start") or ""))
             except Exception as exc:
                 error = str(exc)
+        if _reconnect_required(error) or _reconnect_required(overlay_error):
+            connection = {
+                **connection,
+                "connected": False,
+                "write_ready": False,
+                "reason": "token_expired_or_revoked",
+                "reconnect_required": True,
+            }
+            error = "Google authorization expired. Reconnect Biggy to Google."
+            overlay_error = ""
         return {
             "schema": "biggy.pa.calendar.v3",
             **connection,

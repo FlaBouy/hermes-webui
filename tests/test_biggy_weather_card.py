@@ -170,3 +170,69 @@ def test_legacy_trip_followup_recovers_destination_zip_from_map_label():
 
     assert objective is not None
     assert "Destination ZIP is 30313" in objective
+
+
+def test_game_opinion_does_not_reopen_prior_travel_task():
+    from api.routes import _argus_travel_followup_objective
+
+    class Session:
+        messages = [
+            {
+                "role": "assistant",
+                "ask_jarvis_hard_bind": True,
+                "map_view_model": {
+                    "destination": {
+                        "label": "Jordan-Hare Stadium, Auburn, AL 36849",
+                    }
+                },
+            }
+        ]
+
+    assert _argus_travel_followup_objective(
+        Session(),
+        "Okay, then what's your thoughts on the upcoming Auburn versus Baylor game this weekend?",
+    ) is None
+
+
+def test_biggy_story_lock_does_not_reopen_prior_travel_task():
+    from api.routes import _argus_travel_followup_objective
+
+    class Session:
+        messages = [
+            {
+                "role": "assistant",
+                "ask_jarvis_hard_bind": True,
+                "map_view_model": {
+                    "destination": {
+                        "label": "Jordan-Hare Stadium, Auburn, AL 36849",
+                    }
+                },
+            }
+        ]
+
+    assert _argus_travel_followup_objective(
+        Session(),
+        "Tell me a story about the Auburn versus Baylor game this weekend.",
+    ) is None
+
+
+def test_biggy_opinion_lock_does_not_reopen_prior_travel_task():
+    from api.routes import _argus_travel_followup_objective
+
+    class Session:
+        messages = [
+            {
+                "role": "assistant",
+                "ask_jarvis_hard_bind": True,
+                "map_view_model": {
+                    "destination": {
+                        "label": "Jordan-Hare Stadium, Auburn, AL 36849",
+                    }
+                },
+            }
+        ]
+
+    assert _argus_travel_followup_objective(
+        Session(),
+        "What's your opinion of the Auburn versus Baylor game this weekend?",
+    ) is None

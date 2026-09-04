@@ -1495,7 +1495,13 @@ def try_argus(message: str, *, biggy_ingress_ts: float | None = None, correlatio
     # Travel interpretation/defaulting lives in n8n B1 — not here.
     pre_compact = spoken_text
     is_travel_package = bool(
-        (isinstance(mvm, dict) and str(mvm.get("schema") or "").startswith(("argus.map_view_model", "jarvis.map_view_model")))
+        (
+            isinstance(mvm, dict)
+            and (
+                str(mvm.get("schema") or "").startswith(("argus.map_view_model", "jarvis.map_view_model"))
+                or bool(mvm.get("destination") or mvm.get("origin") or mvm.get("route") or mvm.get("geometry"))
+            )
+        )
         or (isinstance(lvm, dict) and str(lvm.get("schema") or "").startswith(("argus.lodging_view_model", "jarvis.lodging_view_model")))
         or (isinstance(rvm, dict) and (rvm.get("category") or rvm.get("schema")))
     )

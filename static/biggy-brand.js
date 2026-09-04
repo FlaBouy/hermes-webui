@@ -849,12 +849,14 @@
 
     // HOME is a presentation reset, not a transcript mutation. Hide the
     // conversation stack at its current signature while leaving every turn
-    // in Hermes session history. A later turn changes the signature and
-    // automatically brings the lane back for the new exchange.
+    // in Hermes session history. Native central transcript stays suppressed
+    // for the whole cockpit lifetime — HOME must not re-reveal it.
+    // A later turn clears homeHidden and brings the left lane back only.
     const conversationLane = document.getElementById('biggyArgusConversationLane');
     if (conversationLane) {
       conversationLane.dataset.homeHidden = '1';
       conversationLane.hidden = true;
+      syncNativeTranscriptPresentation(conversationLane);
     }
 
     const dlg = document.getElementById('biggyTravelMapDialog');
@@ -3685,6 +3687,22 @@
     requestAnimationFrame(() => syncArgusConversationLaneBoundary());
   }
 
+  function syncNativeTranscriptPresentation(lane, host) {
+    // Biggy IWO cockpit owns chat *presentation* for its whole lifetime:
+    // suppress the native central transcript whether the left LIVE lane is
+    // visible, HOME-hidden, empty, or still initializing. History/DOM stay.
+    // Non-Biggy Hermes/Smedley (no IWO class) are unaffected.
+    host = host || document.getElementById('mainChat');
+    if (!host) return;
+    const cockpitOwns = host.classList.contains(IWO_CLASS);
+    host.classList.toggle('biggy-conversation-lane-owns', cockpitOwns);
+    const shell = host.querySelector('.messages-shell');
+    if (shell) {
+      if (cockpitOwns) shell.setAttribute('aria-hidden', 'true');
+      else shell.removeAttribute('aria-hidden');
+    }
+  }
+
   function ensureArgusConversationLane(mainChat) {
     const host = mainChat || document.getElementById('mainChat');
     if (!host) return null;
@@ -3814,6 +3832,7 @@
     const signature = JSON.stringify(turns.map((turn) => [turn.identity.key, turn.pending, turn.text]));
     if (lane.dataset.signature === signature) {
       if (lane.dataset.homeHidden === '1') lane.hidden = true;
+      syncNativeTranscriptPresentation(lane);
       return;
     }
     lane.dataset.signature = signature;
@@ -3821,6 +3840,7 @@
     // the visible transcript actually changed, never on the background
     // heartbeat while the 3D canvas is rendering.
     lane.hidden = turns.length === 0 || lane.dataset.homeHidden === '1';
+    syncNativeTranscriptPresentation(lane);
     syncArgusConversationLaneBoundary(lane);
     const body = lane.querySelector('.biggy-argus-conversation-turns');
     if (!body) return;
@@ -5612,7 +5632,30 @@
     }
 
     if (!calendar.connected) {
-      appendOperatorRow(panel, 'Biggy local Google authorization is required.', calendar.oauth_ready ? 'OAuth client is ready for account approval.' : 'Biggy needs its profile-scoped Google OAuth connection.', 'warning');
+      appendOperatorRow(panel, 'Biggy needs to reconnect to Google.', calendar.oauth_ready ? 'The saved Google approval expired or was revoked.' : 'Biggy needs its profile-scoped Google OAuth connection.', 'warning');
+      if (calendar.oauth_ready) {
+        const reconnect = operatorButton('Reconnect Google', 'primary');
+        panel.appendChild(reconnect);
+        reconnect.addEventListener('click', async () => {
+          reconnect.disabled = true;
+          try {
+            const started = await operatorFetch('/api/biggy/pa/google/reconnect');
+            window.open(String(started.auth_url || ''), '_blank', 'noopener,noreferrer');
+            const code = typeof showPromptDialog === 'function' ? await showPromptDialog({
+              title: 'Complete Google reconnect',
+              message: 'Approve Biggy in the Google window. If localhost:1 is blocked, copy the complete URL from that page\'s address bar and paste it here.',
+              placeholder: 'Authorization callback URL or code',
+              confirmLabel: 'Reconnect',
+            }) : '';
+            if (!code) { reconnect.disabled = false; return; }
+            await operatorFetch('/api/biggy/pa/google/reconnect/complete', { method: 'POST', body: { code } });
+            await refreshOperatorPanel(dlg, 'calendar');
+          } catch (error) {
+            appendOperatorRow(panel, 'Google reconnect failed.', String(error && error.message || 'Try again.'), 'warning');
+            reconnect.disabled = false;
+          }
+        });
+      }
       return;
     }
 
@@ -7626,7 +7669,12 @@
     const mainChat = document.getElementById('mainChat');
     if (!mainChat) return false;
     document.body.classList.add(BODY_CLASS);
+    // Apply IWO + native-transcript suppression in the same turn so HOME/init
+    // cannot flash the central Hermes message column before the lane exists.
     mainChat.classList.add(IWO_CLASS);
+    mainChat.classList.add('biggy-conversation-lane-owns');
+    const bootShell = mainChat.querySelector('.messages-shell');
+    if (bootShell) bootShell.setAttribute('aria-hidden', 'true');
     document.querySelectorAll('.biggy-brand-header').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-argus-reactor').forEach((node) => node.remove());
     document.querySelectorAll('.biggy-composer-controls').forEach((node) => node.remove());
@@ -7683,6 +7731,19 @@
     updateIdentityChip();
     ensureTravelMapDialog();
     installPaRailToggle(mainChat);
+    if (window.BiggyPets) window.BiggyPets.mount(document.getElementById('biggyPromptDeck'));
+    else if (!document.getElementById('biggyPetsRuntime')) {
+      const css = document.createElement('link');
+      css.rel = 'stylesheet';
+      css.href = `/static/biggy-pets.css?v=${BUILD_ID}`;
+      document.head.appendChild(css);
+      const script = document.createElement('script');
+      script.id = 'biggyPetsRuntime';
+      script.src = `/static/biggy-pets.js?v=${BUILD_ID}`;
+      script.onload = () => window.BiggyPets?.mount(document.getElementById('biggyPromptDeck'));
+      script.onerror = () => script.remove();
+      document.head.appendChild(script);
+    }
     if (typeof window.closeWorkspacePanel === 'function') window.closeWorkspacePanel();
     installActiveSessionCompletionReconciler();
     return true;

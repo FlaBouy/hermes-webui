@@ -2,6 +2,8 @@
 
 from api import argus_travel
 from api import argus_travel as travel
+import threading
+import time
 
 
 def test_resolve_place_accepts_named_destination_without_address(monkeypatch):
@@ -166,3 +168,47 @@ def test_trip_recommendations_are_all_local_to_destination(monkeypatch):
     assert all((lon, lat) == (destination["lon"], destination["lat"]) for _, lon, lat in calls)
     fuel = next(model for model in result["recommendation_view_models"] if model["category"] == "fuel")
     assert fuel["title"].startswith("Fuel near Mercedes-Benz Stadium")
+
+
+def test_trip_endpoint_geocodes_run_in_parallel(monkeypatch):
+    barrier = threading.Barrier(2)
+
+    def geocode(query):
+        barrier.wait(timeout=1)
+        return {"label": query, "lon": -85.0 if query == "origin" else -84.0, "lat": 30.0}
+
+    monkeypatch.setattr(travel, "_geocode", geocode)
+    monkeypatch.setattr(travel, "_get_json", lambda *_a, **_k: {
+        "routes": [{"distance": 1, "duration": 1, "geometry": {"type": "LineString", "coordinates": []}}]
+    })
+    monkeypatch.setattr(travel, "_category_pois", lambda *_a, **_k: [])
+
+    assert travel.plan_trip(origin="origin", destination="destination")["ok"] is True
+
+
+def test_route_and_recommendation_reads_overlap(monkeypatch):
+    origin = {"label": "origin", "lon": -85.0, "lat": 30.0}
+    destination = {"label": "destination", "lon": -84.0, "lat": 31.0}
+    monkeypatch.setattr(travel, "_geocode", lambda query: origin if query == "origin" else destination)
+    started = threading.Barrier(2)
+
+    def route(*_a, **_k):
+        started.wait(timeout=1)
+        return {"routes": [{"distance": 1, "duration": 1, "geometry": {"type": "LineString", "coordinates": []}}]}
+
+    first = True
+    lock = threading.Lock()
+
+    def category(*_a, **_k):
+        nonlocal first
+        with lock:
+            wait = first
+            first = False
+        if wait:
+            started.wait(timeout=1)
+        return []
+
+    monkeypatch.setattr(travel, "_get_json", route)
+    monkeypatch.setattr(travel, "_category_pois", category)
+
+    assert travel.plan_trip(origin="origin", destination="destination")["ok"] is True

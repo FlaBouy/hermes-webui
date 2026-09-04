@@ -13292,6 +13292,31 @@ def handle_get(handler, parsed) -> bool:
     if parsed.path == "/api/realtime/status":
         return _handle_realtime_voice_status(handler)
 
+    if parsed.path == "/api/biggy/pets":
+        from api.biggy_pets import catalog
+        try:
+            return j(handler, catalog())
+        except OSError:
+            return j(handler, {"error": "Local pets folder unavailable"}, status=503)
+
+    if parsed.path.startswith("/api/biggy/pets/"):
+        from api.biggy_pets import sprite
+        parts = parsed.path.split("/")
+        if len(parts) != 6 or parts[-1] != "sprite":
+            return j(handler, {"error": "not found"}, status=404)
+        try:
+            data, mime = sprite(parts[4])
+        except ValueError:
+            return j(handler, {"error": "Pet sprite unavailable"}, status=404)
+        handler.send_response(200)
+        handler.send_header("Content-Type", mime)
+        handler.send_header("Content-Length", str(len(data)))
+        handler.send_header("Cache-Control", "private, no-cache")
+        handler.send_header("X-Content-Type-Options", "nosniff")
+        handler.end_headers()
+        handler.wfile.write(data)
+        return True
+
     if parsed.path == "/api/biggy/fleet/status":
         try:
             from api.biggy_fleet import fleet_status
@@ -13334,6 +13359,15 @@ def handle_get(handler, parsed) -> bool:
         except Exception:
             logger.exception("biggy calendar source failed")
             return j(handler, {"schema": "biggy.pa.calendar.v3", "connected": False, "events": [], "error": "calendar unavailable"}, status=200)
+
+    if parsed.path == "/api/biggy/pa/google/reconnect":
+        try:
+            from api.biggy_pa_sources import begin_google_reconnect
+
+            return j(handler, begin_google_reconnect(), status=200)
+        except Exception:
+            logger.exception("biggy Google reconnect start failed")
+            return j(handler, {"ok": False, "error": "Google reconnect could not be started"}, status=502)
 
     if parsed.path == "/api/biggy/pa/weather":
         try:
@@ -15179,6 +15213,18 @@ def handle_post(handler, parsed) -> bool:
         "/api/biggy/pa/calendar/update": ("update_calendar_event", "calendar update"),
         "/api/biggy/pa/calendar/delete": ("delete_calendar_event", "calendar delete"),
     }
+    if parsed.path == "/api/biggy/pa/google/reconnect/complete":
+        try:
+            body = _read_json_request_body(handler, max_bytes=8 * 1024)
+            from api.biggy_pa_sources import complete_google_reconnect
+
+            return j(handler, complete_google_reconnect(body.get("code")), status=200)
+        except ValueError as exc:
+            return bad(handler, _sanitize_error(exc), 400)
+        except Exception:
+            logger.exception("biggy Google reconnect completion failed")
+            return bad(handler, "Google authorization was not accepted", 502)
+
     if parsed.path in pa_google_actions:
         function_name, action_name = pa_google_actions[parsed.path]
         try:
@@ -24189,6 +24235,46 @@ def _handle_chat_start(handler, body, diag=None):
             return bad(handler, "message is required")
         diag.stage("normalize_attachments") if diag else None
         attachments = _normalize_chat_attachments(body.get("attachments") or [])[:20]
+        # Biggy is a coordinator, not a tax on ordinary conversation.  Typed
+        # small-talk and direct questions use the same warm V6 lane as voice;
+        # explicit tool/RAG/engineering/repository work continues below on the
+        # governed paths.  This happens before document probing so an innocent
+        # mention of a drawing does not wake the whole machine unless Rick asks
+        # Smedley to work on it.
+        try:
+            from api.biggy_voice_route import (
+                request_fast_voice_reply,
+                resolve_fast_voice_personality,
+                should_use_fast_conversation_route,
+            )
+
+            conversation_personality = resolve_fast_voice_personality(
+                msg,
+                default=_fast_voice_default_personality(s),
+            )
+            if should_use_fast_conversation_route(
+                msg,
+                profile=_fast_voice_default_personality(s),
+                has_attachments=bool(attachments),
+            ):
+                light = request_fast_voice_reply(
+                    msg,
+                    history=getattr(s, "messages", None),
+                    personality=conversation_personality,
+                )
+                return _return_biggy_fast_voice_route(
+                    handler,
+                    s,
+                    msg,
+                    light,
+                    server_speak=False,
+                    personality=conversation_personality,
+                )
+        except Exception:
+            # The local fast lane is an optimization, never a message sink.
+            logger.exception(
+                "Biggy V6 typed conversation route failed; falling back to governed chat"
+            )
         # The legacy direct-document shortcut remains available only as an
         # operator opt-in.  Explicit Ask-Jarvis requests must normally reach
         # the PA hard-bind below first: that preserves the immediate Biggy
@@ -25650,6 +25736,32 @@ def _argus_travel_followup_objective(session, message: str) -> str | None:
     travel lane instead of falling into engineering RAG.
     """
     text = _owner_text_without_library_appendix(message)
+    biggy_quick_lock = re.search(
+        r"(?i)\b(?:tell\s+me\s+(?:a|the)\s+story|what(?:'s|\s+is)\s+your\s+opinion)\b",
+        text,
+    )
+    if biggy_quick_lock:
+        return None
+    # A prior travel card supplies conversational context, not lifetime
+    # ownership of every later sentence containing "game".  Opinions,
+    # predictions, and general discussion belong to Biggy's fast lane unless
+    # the owner also asks for a live operational result.
+    conversational_opinion = re.search(
+        r"(?i)\b(?:"
+        r"what(?:'s|\s+is|\s+are)?\s+(?:your|argus(?:'s)?)\s+(?:thoughts?|opinion|take)"
+        r"|what\s+do\s+you\s+think"
+        r"|how\s+do\s+you\s+feel"
+        r"|who\s+do\s+you\s+think\s+(?:will|is\s+going\s+to)\s+win"
+        r"|give\s+me\s+your\s+(?:thoughts?|opinion|take|prediction)"
+        r")\b",
+        text,
+    )
+    if conversational_opinion and not re.search(
+        r"(?i)\b(?:check|verify|look\s+up|find|map|route|calendar|schedule|"
+        r"weather|forecast|lodging|hotel|restaurant|meal|fuel|book|reserve)\b",
+        text,
+    ):
+        return None
     if not text or not re.search(
         r"(?i)\b(?:"
         r"route|map(?:ping)?|drive|trip|travel|"
@@ -26603,6 +26715,22 @@ def _handle_chat_sync(handler, body):
         # routed ordinary requests like "tell me a story" into Argus.
         has_display_message = "display_message" in body
         explicit_objective = _is_aj_sync(display_msg)
+        if explicit_objective:
+            try:
+                from api.biggy_voice_route import should_use_fast_conversation_route
+
+                # "Ask Argus what he thinks" selects Argus's personality; it
+                # does not justify waking the PA workflow.  The same classifier
+                # already protects typed chat, so PTT must not invent a second
+                # routing policy.
+                if should_use_fast_conversation_route(
+                    display_msg,
+                    profile=_fast_voice_default_personality(s),
+                    has_attachments=False,
+                ):
+                    explicit_objective = False
+            except Exception:
+                logger.exception("Argus PTT conversational gate failed closed")
         if not has_display_message and not explicit_objective:
             explicit_objective = _is_aj_sync(msg)
         _jarvis_followup_objective = (

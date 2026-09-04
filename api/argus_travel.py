@@ -251,7 +251,7 @@ def _poi_card(feature: dict[str, Any], *, location_label: str) -> dict[str, Any]
 
 def _category_pois(category: str, *, lon: float, lat: float) -> list[dict[str, Any]]:
     try:
-        payload = _get_json(f"https://api.mapbox.com/search/searchbox/v1/category/{urllib.parse.quote(category, safe='_')}", {"proximity": f"{lon},{lat}", "limit": 5, "language": "en"}, timeout=18)
+        payload = _get_json(f"https://api.mapbox.com/search/searchbox/v1/category/{urllib.parse.quote(category, safe='_')}", {"proximity": f"{lon},{lat}", "limit": 5, "language": "en"}, timeout=7)
     except MapboxUnavailable:
         return []
     features = payload.get("features") if isinstance(payload.get("features"), list) else []
@@ -281,20 +281,35 @@ def plan_trip(*, origin: str, destination: str) -> dict[str, Any]:
         raise ValueError("origin must be 1 to 240 characters")
     if not destination or len(destination) > 240:
         raise ValueError("destination must be 1 to 240 characters")
-    origin_place, destination_place = _geocode(origin), _geocode(destination)
+    # The two endpoints are independent. Resolving them serially added a full
+    # Mapbox round trip to every owner request before routing could even begin.
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        origin_future = pool.submit(_geocode, origin)
+        destination_future = pool.submit(_geocode, destination)
+        origin_place = origin_future.result()
+        destination_place = destination_future.result()
     if not origin_place or not destination_place:
         return {"ok": False, "reason": "ENDPOINT_NOT_FOUND", "source": _SOURCE}
     coordinates = f"{origin_place['lon']},{origin_place['lat']};{destination_place['lon']},{destination_place['lat']}"
-    data = _get_json(f"https://api.mapbox.com/directions/v5/mapbox/driving/{coordinates}", {"overview": "full", "geometries": "geojson", "alternatives": "false", "steps": "false"})
+    route_url = f"https://api.mapbox.com/directions/v5/mapbox/driving/{coordinates}"
+    route_params = {"overview": "full", "geometries": "geojson", "alternatives": "false", "steps": "false"}
+    requests = [(category, canonical, destination_place["lon"], destination_place["lat"], destination_place["label"], title, notice) for category, canonical, title, notice in _CATEGORY_SPECS]
+    requests.append(("fuel", "gas_station", destination_place["lon"], destination_place["lat"], destination_place["label"], "Fuel", "Public destination-area POIs only; verify hours and availability directly."))
+    # Route geometry and destination-area cards are independent reads. Start
+    # them together so a slow category lookup never postpones route creation.
+    with ThreadPoolExecutor(max_workers=1 + len(requests)) as pool:
+        route_future = pool.submit(_get_json, route_url, route_params, timeout=8)
+        poi_futures = [
+            pool.submit(_category_pois, item[1], lon=item[2], lat=item[3])
+            for item in requests
+        ]
+        data = route_future.result()
+        groups = [future.result() for future in poi_futures]
     routes = data.get("routes") if isinstance(data.get("routes"), list) else []
     if not routes or not isinstance(routes[0], dict):
         return {"ok": False, "reason": "ROUTE_NOT_FOUND", "source": _SOURCE}
     route = routes[0]
     geometry = route.get("geometry") if isinstance(route.get("geometry"), dict) else None
-    requests = [(category, canonical, destination_place["lon"], destination_place["lat"], destination_place["label"], title, notice) for category, canonical, title, notice in _CATEGORY_SPECS]
-    requests.append(("fuel", "gas_station", destination_place["lon"], destination_place["lat"], destination_place["label"], "Fuel", "Public destination-area POIs only; verify hours and availability directly."))
-    with ThreadPoolExecutor(max_workers=len(requests)) as pool:
-        groups = list(pool.map(lambda item: _category_pois(item[1], lon=item[2], lat=item[3]), requests))
     models = [_recommendation(item[0], item[5], item[6], features, item[4]) for item, features in zip(requests, groups)]
     encoded_origin, encoded_destination = urllib.parse.quote(origin_place["label"], safe=""), urllib.parse.quote(destination_place["label"], safe="")
     map_view_model = {"schema": "argus.map_view_model.v1", "emitted_by": "A.R.G.U.S. PA Tool", "available": True, "origin": origin_place, "destination": destination_place, "route": {"distance_m": route.get("distance"), "duration_min": round(float(route.get("duration") or 0) / 60, 2), "mode": "driving", "geometry": geometry}, "navigation": {"google_maps_url": f"https://www.google.com/maps/dir/?api=1&origin={encoded_origin}&destination={encoded_destination}&travelmode=driving", "waze_url": f"https://www.waze.com/ul?q={encoded_destination}&navigate=yes"}, "source": _SOURCE, "notice": "Mapbox route and temporary public POIs only; verify road conditions and availability before travel."}

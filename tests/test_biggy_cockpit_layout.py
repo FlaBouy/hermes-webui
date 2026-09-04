@@ -322,6 +322,114 @@ def test_home_hides_conversation_without_deleting_session_turns():
     assert "composer.addEventListener('keydown'" in BRAND
     assert "send.addEventListener('click'" in BRAND
     assert ".messages" not in reset
+    # HOME must keep cockpit native suppression (not clear owns on homeHidden).
+    assert "syncNativeTranscriptPresentation(conversationLane)" in reset
+    assert "Native central transcript stays suppressed" in reset
+
+
+def test_native_transcript_suppressed_for_whole_biggy_cockpit_lifetime():
+    """HOME must hide left lane without revealing native central messages."""
+    assert "function syncNativeTranscriptPresentation" in BRAND
+    sync = BRAND[BRAND.index("function syncNativeTranscriptPresentation"):BRAND.index("function ensureArgusConversationLane")]
+    assert "biggy-conversation-lane-owns" in sync
+    assert "cockpitOwns" in sync
+    assert "host.classList.contains(IWO_CLASS)" in sync
+    # Must NOT gate suppression on lane visibility / homeHidden.
+    assert "homeHidden !== '1'" not in sync
+    assert "!lane.hidden" not in sync
+    assert 'shell.setAttribute(\'aria-hidden\', \'true\')' in sync or 'shell.setAttribute("aria-hidden", "true")' in sync
+    assert "syncNativeTranscriptPresentation(lane)" in BRAND
+    apply = BRAND[BRAND.index("function applyShell()"):BRAND.index("async function tryStart()")]
+    # Immediate suppress with IWO — no transient native flash during init.
+    assert apply.index("mainChat.classList.add(IWO_CLASS)") < apply.index(
+        "mainChat.classList.add('biggy-conversation-lane-owns')"
+    )
+    assert "classList.remove('biggy-conversation-lane-owns')" not in apply
+    assert "removeAttribute('aria-hidden')" not in apply
+    # CSS: IWO alone suppresses native (HOME-safe); owns class is belt-and-suspenders.
+    assert "#mainChat.biggy-brand-iwo .messages-shell" in BRAND_CSS
+    assert "visibility:hidden!important" in BRAND_CSS
+    block = BRAND_CSS[
+        BRAND_CSS.index("When Biggy IWO cockpit owns presentation"):BRAND_CSS.index(
+            "#mainChat.biggy-brand-iwo #emptyState"
+        )
+    ]
+    assert "display:none" not in block
+    # The invisible native shell still supplies the flex spacer that docks
+    # the prompt and Orb at the bottom of the cockpit.
+    assert "position:absolute" not in block
+    assert "height:1px" not in block
+    assert "width:1px" not in block
+    assert "body.biggy-brand.biggy-conversation-lane-owns" not in BRAND_CSS
+    assert "#mainChat:not(.biggy-brand-iwo).biggy-conversation-lane-owns" not in BRAND_CSS
+
+
+def test_home_keeps_native_hidden_then_new_turn_shows_left_lane_only():
+    """Behavioral: visible lane → HOME → native still suppressed + left hidden
+    → new response reveals left only (native remains suppressed)."""
+
+    class Host:
+        def __init__(self):
+            self.classes = {"biggy-brand-iwo", "biggy-conversation-lane-owns"}
+            self.shell_aria_hidden = "true"
+
+        def toggle_owns(self, on: bool) -> None:
+            if on:
+                self.classes.add("biggy-conversation-lane-owns")
+                self.shell_aria_hidden = "true"
+            else:
+                self.classes.discard("biggy-conversation-lane-owns")
+                self.shell_aria_hidden = None
+
+        @property
+        def native_suppressed(self) -> bool:
+            # Mirror CSS: IWO alone parks the native column.
+            return "biggy-brand-iwo" in self.classes
+
+        @property
+        def owns_class(self) -> bool:
+            return "biggy-conversation-lane-owns" in self.classes
+
+    class Lane:
+        def __init__(self):
+            self.hidden = False
+            self.home_hidden = False
+
+        def home(self) -> None:
+            self.home_hidden = True
+            self.hidden = True
+
+        def reveal_for_new_turn(self) -> None:
+            self.home_hidden = False
+            self.hidden = False
+
+    def sync(host: Host, _lane: Lane) -> None:
+        # Contract of syncNativeTranscriptPresentation after HOME fix.
+        host.toggle_owns("biggy-brand-iwo" in host.classes)
+
+    host = Host()
+    lane = Lane()
+    # 1) Visible left lane under cockpit.
+    assert not lane.hidden and host.native_suppressed and host.owns_class
+    # 2) HOME: left hidden; native must remain suppressed.
+    lane.home()
+    sync(host, lane)
+    assert lane.hidden is True and lane.home_hidden is True
+    assert host.native_suppressed is True
+    assert host.owns_class is True
+    assert host.shell_aria_hidden == "true"
+    # 3) New response: left visible again; native still suppressed.
+    lane.reveal_for_new_turn()
+    sync(host, lane)
+    assert lane.hidden is False and lane.home_hidden is False
+    assert host.native_suppressed is True
+    assert host.owns_class is True
+    # 4) Non-Biggy host never gets suppression from this path.
+    other = Host()
+    other.classes.clear()
+    sync(other, Lane())
+    assert other.native_suppressed is False
+    assert other.owns_class is False
 
 
 def test_hermes_controls_replace_left_navigation_beneath_prompt():

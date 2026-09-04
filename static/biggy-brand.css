@@ -206,6 +206,26 @@ body.biggy-brand:has(main.main[data-biggy-hermes-panel="todos"]) .layout > .side
 }
 #mainChat.biggy-brand-iwo .messages-shell,
 #mainChat.biggy-brand-iwo .messages{background:transparent!important}
+/* When Biggy IWO cockpit owns presentation, suppress native Hermes transcript
+   *presentation* only (history/DOM remain for hydration). HOME hides the left
+   LIVE lane but must NOT re-reveal the central column. Non-Biggy Hermes/Smedley
+   GUI (no .biggy-brand-iwo) are unaffected. */
+#mainChat.biggy-brand-iwo > .messages-shell,
+#mainChat.biggy-brand-iwo .messages-shell,
+#mainChat.biggy-brand-iwo #messages,
+#mainChat.biggy-brand-iwo .messages,
+#mainChat.biggy-brand-iwo #msgInner,
+#mainChat.biggy-brand-iwo.biggy-conversation-lane-owns > .messages-shell,
+#mainChat.biggy-brand-iwo.biggy-conversation-lane-owns .messages-shell,
+#mainChat.biggy-brand-iwo.biggy-conversation-lane-owns #messages,
+#mainChat.biggy-brand-iwo.biggy-conversation-lane-owns .messages,
+#mainChat.biggy-brand-iwo.biggy-conversation-lane-owns #msgInner{
+  visibility:hidden!important;
+  opacity:0!important;
+  pointer-events:none!important;
+  /* Preserve the native flex spacer: removing it from flow pulls the
+     composer and Orb to the top. Only its presentation is suppressed. */
+}
 #mainChat.biggy-brand-iwo #emptyState{display:none!important}
 #mainChat.biggy-brand-iwo .empty-logo,
 #mainChat.biggy-brand-iwo .empty-logo svg{display:none!important}
@@ -524,8 +544,8 @@ body.biggy-brand:has(#mainSettings[data-biggy-settings-menu="composerReasoningDr
 @media(max-width:760px){.biggy-argus-rag-overview{left:12px;top:56px;width:min(280px,calc(100% - 24px));max-height:calc(100% - 142px);padding:11px 12px}.biggy-argus-ingest-folder-grid,.biggy-argus-ingest-footer-grid{grid-template-columns:1fr}}
 
 /* Live response stack. Hermes remains the conversation owner; this surface
-   mirrors the active turn so Biggy and A.R.G.U.S. responses remain visible
-   while the native message column is suppressed by the cockpit layout. */
+   mirrors the active turn. Native message-column presentation stays suppressed
+   for the whole Biggy IWO lifetime (including HOME-hidden lane / init). */
 .biggy-argus-conversation-lane{
   position:absolute;left:24px;top:380px;bottom:var(--biggy-conversation-bottom,132px);
   z-index:var(--biggy-layer-conversation);width:min(30vw,560px);
@@ -573,9 +593,10 @@ body.biggy-brand:has(#mainSettings[data-biggy-settings-menu="composerReasoningDr
   #mainChat.biggy-brand-iwo.biggy-rag-panel-off .biggy-argus-conversation-lane{top:64px}
 }
 
-/* Readable chat contrast over Iwo */
-#mainChat.biggy-brand-iwo .msg-row[data-role="assistant"] .msg-body,
-#mainChat.biggy-brand-iwo .msg-row[data-role="user"] .msg-body{
+/* Readable chat contrast over Iwo — only when the native column is the
+   visible surface (lane not owning). */
+#mainChat.biggy-brand-iwo:not(.biggy-conversation-lane-owns) .msg-row[data-role="assistant"] .msg-body,
+#mainChat.biggy-brand-iwo:not(.biggy-conversation-lane-owns) .msg-row[data-role="user"] .msg-body{
   background:rgba(15,15,15,.78)!important;
   border-color:rgba(255,215,0,.18)!important;
   backdrop-filter:blur(2px)

@@ -1660,6 +1660,9 @@ async function send(){
   let optimisticMessages;
   try{
     S.messages.push(userMsg);renderMessages();setBusy(true);
+    // Biggy's branded conversation lane is separate from the stock transcript.
+    // Paint the owner's turn there before any network work begins as well.
+    if(typeof window.__biggyRenderArgusConversationLaneNow==='function') window.__biggyRenderArgusConversationLaneNow();
     if(S.session&&!S.session.pending_started_at) S.session.pending_started_at=Date.now()/1000;
     if(typeof ensureLiveWorklogShell==='function') ensureLiveWorklogShell();
     else appendThinking('',{pending:true});
@@ -1718,6 +1721,8 @@ async function send(){
     const message=preStartError&&preStartError.message?preStartError.message:String(preStartError||'unknown error');
     try{console.warn('[webui] pre-start optimistic UI failed; continuing to /api/chat/start', message);}catch(_){ }
     if(!S.messages.includes(userMsg)) S.messages.push(userMsg);
+    if(typeof renderMessages==='function') renderMessages();
+    if(typeof window.__biggyRenderArgusConversationLaneNow==='function') window.__biggyRenderArgusConversationLaneNow();
     optimisticMessages=[...S.messages];
     INFLIGHT[activeSid]={messages:optimisticMessages,uploaded:uploadedNames,toolCalls:[]};
     try{setBusy(true);}catch(_){S.busy=true;}
@@ -1844,6 +1849,33 @@ async function send(){
   }
 
   const startData = postStartData || {};
+  // V6 typed-conversation lane: the server already returned the complete,
+  // persisted turn.  Reconcile from that payload immediately instead of
+  // inventing an SSE stream or paying for a second session fetch.
+  if(startData.biggy_fast_voice_route){
+    S.activeStreamId=null;
+    if(S.session&&S.session.session_id===activeSid) S.session.active_stream_id=null;
+    delete INFLIGHT[activeSid];
+    if(typeof clearInflightState==='function') clearInflightState(activeSid);
+    if(typeof clearOptimisticSessionStreaming==='function') clearOptimisticSessionStreaming(activeSid);
+    const returnedSession=startData.session&&typeof startData.session==='object'?startData.session:null;
+    if(returnedSession){
+      S.session={...(S.session||{}),...returnedSession,active_stream_id:null};
+      if(Array.isArray(returnedSession.messages)) S.messages=returnedSession.messages;
+    }else if(startData.reply){
+      // Defensive compatibility for an older server during a rolling refresh.
+      const alreadyShown=Array.isArray(S.messages)&&S.messages.some((m)=>m&&m.role==='assistant'&&m.biggy_fast_voice_route&&String(m.content||'')===String(startData.reply));
+      if(!alreadyShown&&Array.isArray(S.messages)) S.messages.push({role:'assistant',content:String(startData.reply),biggy_fast_voice_route:true,voice_personality:startData.voice_personality||'biggy'});
+    }
+    removeThinking();
+    if(typeof setBusy==='function') setBusy(false); else S.busy=false;
+    if(typeof updateSendBtn==='function') updateSendBtn();
+    if(typeof renderMessages==='function') renderMessages();
+    if(typeof window.__biggyRenderArgusConversationLaneNow==='function') window.__biggyRenderArgusConversationLaneNow();
+    if(typeof autoReadLastAssistant==='function') setTimeout(()=>autoReadLastAssistant(),0);
+    if(typeof renderSessionList==='function') void renderSessionList();
+    return;
+  }
   // Ask Jarvis hard-bind: deterministic Jarvis PA webhook reply, no agent stream.
   // Two-stage: immediate pending+Austin ack, then poll until final Alistar result.
   if(startData.ask_jarvis_hard_bind){

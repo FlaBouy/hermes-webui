@@ -654,6 +654,37 @@ def test_pa_core_recovers_empty_success_without_replaying_workflow(monkeypatch):
     assert result["map_view_model"]["available"] is True
 
 
+def test_schema_less_live_map_model_still_uses_compact_travel_tts():
+    import api.argus_route as route
+
+    mvm = {
+        "available": True,
+        "origin": {"label": "Lynn Haven, Florida"},
+        "destination": {"label": "Jordan-Hare Stadium, Auburn, Alabama"},
+        "route": {"distance_miles": 202.3},
+    }
+    is_travel_package = bool(
+        isinstance(mvm, dict)
+        and (
+            str(mvm.get("schema") or "").startswith(("argus.map_view_model", "jarvis.map_view_model"))
+            or bool(mvm.get("destination") or mvm.get("origin") or mvm.get("route") or mvm.get("geometry"))
+        )
+    )
+    assert is_travel_package is True
+
+    spoken = route.compact_travel_tts(
+        "I verified the destination as Jordan-Hare Stadium, 251 South Donahue Drive, Auburn, Alabama. "
+        "I mapped the drive from Lynn Haven, Florida to Jordan-Hare Stadium — about 202.3 miles. "
+        "I put public lodging, meals, entertainment, and fuel options on the screen. "
+        "No schedule conflicts were found for the travel window."
+    )
+    assert spoken == (
+        "Venue is Jordan-Hare Stadium. Destination is Auburn, Alabama. "
+        "Route is 202.3 miles. No schedule conflicts for the travel window."
+    )
+    assert len(spoken) < 180
+
+
 def test_short_term_pa_context_is_bounded_and_session_scoped():
     """The continuity window is transient and cannot cross from one Biggy chat to another."""
     from api.jarvis_pa_conversation_memory import record_turn, recent_context

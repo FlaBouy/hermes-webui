@@ -81,4 +81,4 @@ def test_biggy_project_reviews_are_native_projects_with_smedley_governance_metad
     assert 'save_projects(projects)' in ROUTES
     assert 'parsed.path == "/api/biggy/projects/reviews/dialog"' in ROUTES
     assert 'profile="smedley", project_id=project_id' in ROUTES
-    assert 'start_session_turn(session_id, context + "Owner message: " + message, source="project_review")' in ROUTES
+    assert 'start_session_turn(session_id, governed_message, source="project_review")' in ROUTES

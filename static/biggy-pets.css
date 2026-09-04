@@ -1,0 +1,44 @@
+/* Outside the centered prompt footprint; no change to Orb/composer geometry. */
+#mainChat.biggy-brand-iwo .biggy-prompt-deck{position:relative}
+#biggyPets{position:sticky;bottom:0;flex:0 0 auto;margin-top:auto;background:#0d0f0d;z-index:2;pointer-events:auto}
+#mainChat.biggy-brand-iwo > #biggyCategoryRail{overflow-y:auto;scrollbar-width:none}
+.biggy-pets{pointer-events:auto}
+.biggy-pets button,.biggy-pets select{
+  font:700 10px ui-monospace,monospace;color:#aebecb;background:#0a1016;
+  border:1px solid #303c47;border-radius:5px;cursor:pointer;
+}
+.biggy-pets .biggy-pets-button{width:47px;height:44px;color:#69efcd;border-color:#205a50;border-radius:0;letter-spacing:.6px}
+.biggy-pets button.is-active,.biggy-pets button[aria-pressed="true"]{
+  color:#6bffc7;background:#07291f;border-color:#17b888;box-shadow:0 0 9px #17b88833;
+}
+.biggy-pets button:hover{border-color:#69efcd}
+.biggy-pets button:focus-visible,.biggy-pets select:focus-visible,.biggy-pets input:focus-visible{outline:2px solid #69efcd;outline-offset:2px}
+.biggy-pets button:disabled,.biggy-pets select:disabled{opacity:.5;cursor:default}
+.biggy-pet-panel{
+  position:fixed;right:56px;bottom:12px;z-index:125;box-sizing:border-box;
+  width:238px;max-width:calc(100vw - 68px);max-height:calc(100vh - 24px);overflow:auto;padding:12px;background:#071016;
+  border:1px solid #205a50;border-radius:7px;color:#aebecb;box-shadow:0 8px 24px #0008;
+  font:11px/1.5 ui-monospace,monospace;
+}
+.biggy-pet-panel[hidden],.biggy-pet-sprite[hidden]{display:none!important}
+.biggy-pet-panel label{display:block;font-weight:700;color:#69efcd;letter-spacing:.7px}
+.biggy-pet-panel select{width:100%;height:32px;margin:5px 0 10px;padding:4px}
+.biggy-pet-actions{display:flex;gap:8px;margin-bottom:12px}
+.biggy-pet-actions button{flex:1;min-height:32px}
+.biggy-pet-panel input{width:calc(100% - 54px);vertical-align:middle;accent-color:#42dca5}
+.biggy-pet-panel output{padding-left:8px}
+.biggy-pet-reset{width:100%;min-height:30px;margin-top:10px}
+.biggy-pet-reset + label,.biggy-pet-panel output + label{margin-top:10px}
+.biggy-pet-panel .biggy-pet-random{margin-top:10px;letter-spacing:0}
+.biggy-pet-panel input[type="checkbox"]{width:auto;margin-right:5px}
+.biggy-pet-panel p{font-size:10px;margin:9px 0 0;color:#9bb6c4}
+.biggy-pet-sprite{
+  position:fixed;z-index:70;pointer-events:auto;background-repeat:no-repeat;
+  cursor:grab;touch-action:none;user-select:none;
+  contain:layout paint; /* An off pet has no timer and no visible sprite. */
+}
+.biggy-pet-sprite.is-dragging{cursor:grabbing}
+.biggy-pet-sprite:focus-visible{outline:1px dashed #69efcd;outline-offset:3px;border-radius:6px}
+@media(max-width:600px){
+  .biggy-pets .biggy-pets-button{width:47px;min-height:38px}
+}

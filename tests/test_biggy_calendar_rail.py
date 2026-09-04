@@ -37,6 +37,8 @@ def test_calendar_write_controls_are_guarded_and_visible():
     assert "/api/biggy/pa/calendar/create" in BRAND
     assert "/api/biggy/pa/calendar/update" in BRAND
     assert "/api/biggy/pa/calendar/delete" in BRAND
+    assert "Reconnect Google" in BRAND
+    assert "/api/biggy/pa/google/reconnect" in BRAND
 
 
 def test_calendar_month_fits_the_full_docked_panel_height():

@@ -37,6 +37,72 @@ def test_google_sources_fail_closed_without_profile_token(monkeypatch, tmp_path:
     assert calendar["events"] == []
 
 
+def test_revoked_calendar_token_becomes_reconnect_state(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    _write_token(tmp_path)
+    script = tmp_path / "skills" / "productivity" / "google-workspace" / "scripts" / "google_api.py"
+    script.parent.mkdir(parents=True)
+    script.write_text("", encoding="utf-8")
+    monkeypatch.setattr(biggy_pa_sources, "_calendar_sources", lambda: ([], ""))
+    monkeypatch.setattr(biggy_pa_sources, "_run_google", lambda _args: (_ for _ in ()).throw(RuntimeError("invalid_grant: Token has been expired or revoked")))
+    biggy_pa_sources._CACHE.clear()
+
+    result = biggy_pa_sources.calendar_snapshot()
+
+    assert result["connected"] is False
+    assert result["reconnect_required"] is True
+    assert result["reason"] == "token_expired_or_revoked"
+    assert "invalid_grant" not in result["error"]
+
+
+def test_google_reconnect_starts_in_biggy_profile_without_exposing_secrets(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    scripts = tmp_path / "skills" / "productivity" / "google-workspace" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "setup.py").write_text("", encoding="utf-8")
+    (tmp_path / "google_client_secret.json").write_text("{}", encoding="utf-8")
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured.update(command=command, kwargs=kwargs)
+        return SimpleNamespace(returncode=0, stdout="https://accounts.google.com/o/oauth2/auth?state=safe\n", stderr="")
+
+    monkeypatch.setattr(biggy_pa_sources.subprocess, "run", fake_run)
+    result = biggy_pa_sources.begin_google_reconnect()
+
+    assert result == {"ok": True, "auth_url": "https://accounts.google.com/o/oauth2/auth?state=safe", "profile": tmp_path.name}
+    assert captured["command"][-1] == "--auth-url"
+    assert captured["kwargs"]["env"]["HERMES_HOME"] == str(tmp_path)
+    assert "client_secret" not in str(result).lower()
+
+
+def test_google_reconnect_preserves_callback_for_state_and_scope_validation(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    scripts = tmp_path / "skills" / "productivity" / "google-workspace" / "scripts"
+    scripts.mkdir(parents=True)
+    (scripts / "setup.py").write_text("", encoding="utf-8")
+    callback = "http://localhost:1/?state=expected&code=abc123&scope=calendar.events%20gmail.compose"
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured.update(command=command, kwargs=kwargs)
+        return SimpleNamespace(returncode=0, stdout="OK", stderr="")
+
+    monkeypatch.setattr(biggy_pa_sources.subprocess, "run", fake_run)
+    biggy_pa_sources._CACHE["calendar"] = (1.0, {"stale": True})
+    result = biggy_pa_sources.complete_google_reconnect(callback)
+
+    assert result == {"ok": True, "connected": True, "profile": tmp_path.name}
+    assert captured["command"][-2:] == ["--auth-code", callback]
+    assert biggy_pa_sources._CACHE == {}
+
+
+@pytest.mark.parametrize("value", ["https://localhost:1/no-query", "file:///tmp/callback?code=x"])
+def test_google_reconnect_rejects_invalid_callback_urls(value):
+    with pytest.raises(ValueError):
+        biggy_pa_sources.complete_google_reconnect(value)
+
+
 def test_google_source_routes_include_guarded_write_contracts():
     routes = Path("api/routes.py").read_text(encoding="utf-8")
     assert 'parsed.path == "/api/biggy/pa/mail"' in routes
