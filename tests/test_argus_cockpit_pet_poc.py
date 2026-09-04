@@ -1,0 +1,34 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+POC_JS = (ROOT / "static" / "argus-cockpit-pet-poc.js").read_text(encoding="utf-8")
+POC_HTML = (ROOT / "static" / "argus-cockpit-pet-poc.html").read_text(encoding="utf-8")
+PRODUCTION = (ROOT / "static" / "biggy-brand.js").read_text(encoding="utf-8")
+
+
+def test_cockpit_pet_poc_is_not_loaded_by_production():
+    assert "argus-cockpit-pet-poc" not in PRODUCTION
+    assert '<argus-cockpit-pet' in POC_HTML
+    assert "no production wiring" in POC_HTML.lower()
+
+
+def test_cockpit_pet_exposes_future_rewire_contract():
+    assert "customElements.define('argus-cockpit-pet'" in POC_JS
+    assert "argus-cockpit-action" in POC_JS
+    assert "setActiveActions(actions = [])" in POC_JS
+    assert "['model', 'status', 'tracking']" in POC_JS
+
+
+def test_eye_tracking_is_bounded_and_centerable():
+    assert "* 14 * strength" in POC_JS
+    assert "* 10 * strength" in POC_JS
+    assert "centerEye()" in POC_JS
+    assert "this._eyeNode.style.translate" in POC_JS
+    assert "document.addEventListener('pointermove'" in POC_JS
+
+
+def test_existing_orb_artwork_and_complete_menu_are_reused():
+    assert "/static/argus-orb-template.png" in POC_JS
+    for label in ("CHAT", "TASKS", "KANBAN", "SKILLS", "MEMORY", "SPACES", "PROFILES", "TODOS", "INSIGHTS", "LOGS", "SETTINGS", "TOOLS"):
+        assert f"'{label}'" in POC_JS

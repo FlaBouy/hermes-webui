@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>A.R.G.U.S. Cockpit Pet POC</title>
+  <style>
+    :root{color-scheme:dark}*{box-sizing:border-box}html,body{height:100%;margin:0}body{display:grid;place-items:center;overflow:hidden;background:#01040a;color:#93a4b7;font-family:"SF Mono",ui-monospace,monospace}
+    body::before{content:"";position:fixed;inset:0;opacity:.55;background-image:radial-gradient(circle at 12% 18%,#9fc4ff 0 1px,transparent 1.4px),radial-gradient(circle at 76% 32%,#6fa2e8 0 1px,transparent 1.4px),radial-gradient(circle at 42% 74%,#b9d2ff 0 1px,transparent 1.4px);background-size:113px 127px,179px 151px,211px 193px}
+    main{position:relative;z-index:1;display:grid;justify-items:center;gap:6px}.tag{font-size:10px;letter-spacing:.18em;color:#5f8099;text-transform:uppercase}.hint{font-size:10px;color:#536675}
+  </style>
+  <script src="/static/argus-cockpit-pet-poc.js" defer></script>
+</head>
+<body>
+  <main>
+    <div class="tag">Isolated cockpit-pet proof of concept — no production wiring</div>
+    <argus-cockpit-pet id="poc" model="GPT-OSS-120B" status="online"></argus-cockpit-pet>
+    <div class="hint">Move the pointer around the page. Only the red center eye tracks it.</div>
+  </main>
+  <script>
+    addEventListener('DOMContentLoaded', () => {
+      const pet = document.getElementById('poc');
+      pet.addEventListener('argus-cockpit-action', event => {
+        const active = pet._previewActive || new Set();
+        active.has(event.detail.action) ? active.delete(event.detail.action) : active.add(event.detail.action);
+        pet._previewActive = active;
+        pet.setActiveActions(active);
+      });
+    });
+  </script>
+</body>
+</html>
