@@ -18,6 +18,9 @@ def test_cockpit_pet_exposes_future_rewire_contract():
     assert "argus-cockpit-action" in POC_JS
     assert "setActiveActions(actions = [])" in POC_JS
     assert "['model', 'status', 'tracking']" in POC_JS
+    assert 'data-state="idle"' in POC_JS
+    assert "status === 'THINKING'" in POC_JS
+    assert "status === 'SPEAKING'" in POC_JS
 
 
 def test_eye_tracking_is_bounded_and_centerable():
@@ -34,3 +37,16 @@ def test_existing_orb_artwork_and_complete_menu_are_reused():
     assert "/static/argus-orb-template.png" in POC_JS
     for label in ("CHAT", "TASKS", "KANBAN", "SKILLS", "MEMORY", "SPACES", "PROFILES", "TODOS", "INSIGHTS", "LOGS", "SETTINGS", "TOOLS"):
         assert f"'{label}'" in POC_JS
+
+
+def test_state_motion_and_menu_feedback_are_bounded():
+    assert '@keyframes cw' in POC_JS
+    assert '@keyframes ccw' in POC_JS
+    assert '@keyframes speechEye' in POC_JS
+    assert '@keyframes tieFlow' in POC_JS
+    assert '.tie.active' in POC_JS
+    assert '.node.active' in POC_JS
+    assert 'paintActionClass(actionId' in POC_JS
+    assert 'prefers-reduced-motion:reduce' in POC_JS
+    assert 'data-state="thinking"' in POC_HTML
+    assert 'data-state="speaking"' in POC_HTML

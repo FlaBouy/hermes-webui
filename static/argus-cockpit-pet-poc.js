@@ -25,19 +25,32 @@
           :host{display:block;width:min(720px,96vw);aspect-ratio:1200/720;contain:layout style;user-select:none;color:#b9c4d2;font-family:"SF Mono",ui-monospace,monospace}
           *{box-sizing:border-box}.entity{position:relative;width:100%;height:100%;overflow:visible}
           svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;filter:drop-shadow(0 0 14px rgba(22,188,237,.15))}
-          .profile{fill:#01060b;opacity:.99}.solid{transform-origin:596px 404px;animation:cw 9.5s linear infinite}.dash{animation:dash 14s linear infinite}
-          .eye-glow{transform-origin:596px 404px;animation:eyeBreathe 5.6s ease-in-out infinite}.lamp{animation:lamp 5.6s ease-in-out infinite}
+          .profile{fill:#01060b;opacity:.99}
+          .solid,.dash{transform-box:view-box;transform-origin:596px 404px;will-change:transform}
+          .solid{animation:cw 18s linear infinite}.dash{animation:ccw 26s linear infinite}
+          .eye-glow{transform-box:view-box;transform-origin:596px 404px;animation:eyeBreathe 5.6s ease-in-out infinite}
+          .lamp{animation:lampIdle 5.6s ease-in-out infinite}
           .eye{transform-box:view-box;transform-origin:596px 404px;will-change:transform}
-          .tie{fill:none;stroke:#27bce8;stroke-width:1.7;stroke-dasharray:3 5;opacity:.62}.node{fill:#061421;stroke:#33dfff;stroke-width:2}
+          .tie{fill:none;stroke:#27bce8;stroke-width:1.7;stroke-dasharray:3 5;opacity:.62;transition:stroke .18s ease,stroke-width .18s ease,opacity .18s ease,filter .18s ease}
+          .node{fill:#061421;stroke:#33dfff;stroke-width:2;transition:fill .18s ease,stroke .18s ease,filter .18s ease}
+          .tie.hover{stroke:#eafcff;stroke-width:2.1;opacity:.92;filter:drop-shadow(0 0 3px rgba(234,252,255,.45))}.node.hover{stroke:#eafcff;filter:drop-shadow(0 0 3px rgba(234,252,255,.55))}
+          .tie.active{stroke:#fff;stroke-width:2.7;opacity:1;animation:tieFlow 1.8s linear infinite;filter:drop-shadow(0 0 4px rgba(255,255,255,.7))}.node.active{fill:#34d399;stroke:#fff;filter:drop-shadow(0 0 5px rgba(52,211,153,.9))}
           button{position:absolute;width:84px;height:27px;transform:translate(-50%,-50%);border:1px solid #303b48;border-radius:5px;background:rgba(8,15,23,.94);color:#aab5c3;font:800 10px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.05em;cursor:pointer;z-index:2}
-          button:hover,button:focus-visible{color:#eafcff;border-color:#35d9ff;outline:none}button.active{color:#69efcd;border-color:#34d399;background:#082018;box-shadow:0 0 10px rgba(52,211,153,.3)}
+          button:hover,button:focus-visible{color:#eafcff;border-color:#35d9ff;outline:none;box-shadow:0 0 7px rgba(53,217,255,.18)}button.active{color:#69efcd;border-color:#34d399;background:#082018;box-shadow:0 0 10px rgba(52,211,153,.3)}
           .name{position:absolute;left:50%;bottom:37px;transform:translateX(-50%);color:#fff;font:900 17px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.2em;text-shadow:0 0 8px rgba(112,225,255,.72)}
           .readout{position:absolute;left:50%;bottom:4px;transform:translateX(-50%);width:224px;padding:5px 10px;display:flex;justify-content:center;gap:12px;border:1px solid rgba(52,211,153,.42);border-radius:999px;background:rgba(5,16,14,.88);font-size:10px;font-weight:800;letter-spacing:.09em;color:#34d399;white-space:nowrap}
-          .state::before{content:"";display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor}.state{min-width:74px;text-align:center}
-          @keyframes cw{to{transform:rotate(360deg)}}@keyframes dash{to{stroke-dashoffset:190}}@keyframes eyeBreathe{0%,100%{opacity:.38;filter:brightness(.78)}50%{opacity:.82;filter:brightness(1.18) drop-shadow(0 0 9px rgba(255,56,48,.72))}}@keyframes lamp{0%,100%{opacity:.25}50%{opacity:.9}}
-          @media(prefers-reduced-motion:reduce){.solid,.dash,.eye-glow,.lamp{animation:none!important}}
+          .state::before{content:"";display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor}.state{min-width:74px;text-align:center;transition:color .2s ease,text-shadow .2s ease}
+          .entity[data-state="thinking"] .solid{animation-duration:7s}.entity[data-state="thinking"] .dash{animation-duration:10s}.entity[data-state="thinking"] .state{color:#f6bd43;text-shadow:0 0 7px rgba(246,189,67,.58)}
+          .entity[data-state="thinking"] .eye-glow{animation-duration:2.8s}.entity[data-state="thinking"] .lamp{animation-duration:2.8s}
+          .entity[data-state="speaking"] .eye-glow{animation:speechEye 1.35s ease-in-out infinite}.entity[data-state="speaking"] .lamp{animation:speechLamp 1.35s ease-in-out infinite}.entity[data-state="speaking"] .state{color:#67e8f9;text-shadow:0 0 7px rgba(103,232,249,.62)}
+          @keyframes cw{to{transform:rotate(360deg)}}@keyframes ccw{to{transform:rotate(-360deg)}}@keyframes tieFlow{to{stroke-dashoffset:-32}}
+          @keyframes eyeBreathe{0%,100%{opacity:.34;filter:brightness(.78)}50%{opacity:.76;filter:brightness(1.13) drop-shadow(0 0 8px rgba(255,56,48,.62))}}
+          @keyframes lampIdle{0%,100%{opacity:.22}50%{opacity:.58}}
+          @keyframes speechEye{0%,100%{opacity:.42;transform:scale(.985);filter:brightness(.86)}18%{opacity:.9;transform:scale(1.025);filter:brightness(1.28) drop-shadow(0 0 10px rgba(255,56,48,.76))}42%{opacity:.56;transform:scale(.995);filter:brightness(.96)}63%{opacity:1;transform:scale(1.035);filter:brightness(1.38) drop-shadow(0 0 12px rgba(255,56,48,.82))}82%{opacity:.62;transform:scale(1);filter:brightness(1.02)}}
+          @keyframes speechLamp{0%,100%{opacity:.22}18%{opacity:.72}42%{opacity:.36}63%{opacity:.92}82%{opacity:.44}}
+          @media(prefers-reduced-motion:reduce){.solid,.dash,.eye-glow,.lamp,.tie.active{animation:none!important}}
         </style>
-        <div class="entity" part="entity">
+        <div class="entity" part="entity" data-state="idle">
           <svg viewBox="0 60 1200 720" role="img" aria-label="A.R.G.U.S. cockpit pet proof of concept">
             <defs>
               <radialGradient id="iris" cx="38%" cy="34%"><stop stop-color="#ffb1a3"/><stop offset=".16" stop-color="#ff5147"/><stop offset=".5" stop-color="#b5121c"/><stop offset=".82" stop-color="#4e050d"/><stop offset="1" stop-color="#170207"/></radialGradient>
@@ -111,17 +124,27 @@
         const dx = elbow - 596, dy = y - 404, length = Math.hypot(dx, dy) || 1;
         const edgeX = 596 + dx / length * 270, edgeY = 404 + dy / length * 270;
         const path = document.createElementNS(NS, 'path');
-        path.setAttribute('class', 'tie');
-        path.setAttribute('d', `M ${x} ${y} L ${elbow} ${y} L ${edgeX} ${edgeY}`);
+        const actionId = action.toLowerCase();
+        path.setAttribute('class', 'tie'); path.dataset.action = actionId;
+        path.setAttribute('d', `M ${edgeX} ${edgeY} L ${elbow} ${y} L ${x} ${y}`);
         const node = document.createElementNS(NS, 'circle');
-        node.setAttribute('class', 'node'); node.setAttribute('cx', x); node.setAttribute('cy', y); node.setAttribute('r', 7);
+        node.setAttribute('class', 'node'); node.dataset.action = actionId; node.setAttribute('cx', x); node.setAttribute('cy', y); node.setAttribute('r', 7);
         ties.append(path, node);
         const button = document.createElement('button');
-        button.type = 'button'; button.dataset.action = action.toLowerCase(); button.textContent = action;
+        button.type = 'button'; button.dataset.action = actionId; button.textContent = action;
         button.style.left = `${x / 12}%`; button.style.top = `${(y - 60) / 7.2}%`;
+        const paintHover = on => this.paintActionClass(actionId, 'hover', on);
+        button.addEventListener('pointerenter', () => paintHover(true));
+        button.addEventListener('pointerleave', () => paintHover(false));
+        button.addEventListener('focus', () => paintHover(true));
+        button.addEventListener('blur', () => paintHover(false));
         button.addEventListener('click', () => this.dispatchEvent(new CustomEvent('argus-cockpit-action', { bubbles: true, composed: true, detail: { action: button.dataset.action } })));
         buttons.appendChild(button);
       });
+    }
+
+    paintActionClass(action, className, on) {
+      this.shadowRoot.querySelectorAll(`[data-action="${action}"]`).forEach(node => node.classList.toggle(className, on));
     }
 
     syncLabels() {
@@ -130,6 +153,8 @@
       const status = (this.getAttribute('status') || 'ONLINE').toUpperCase();
       this.shadowRoot.querySelector('.model').textContent = `◆ ${model}`;
       this.shadowRoot.querySelector('.state').textContent = status;
+      const visualState = status === 'THINKING' ? 'thinking' : status === 'SPEAKING' ? 'speaking' : 'idle';
+      this.shadowRoot.querySelector('.entity').dataset.state = visualState;
     }
 
     track(clientX, clientY) {
@@ -152,7 +177,7 @@
 
     setActiveActions(actions = []) {
       const active = new Set(Array.from(actions, value => String(value).toLowerCase()));
-      this.shadowRoot.querySelectorAll('button[data-action]').forEach(button => button.classList.toggle('active', active.has(button.dataset.action)));
+      this.shadowRoot.querySelectorAll('[data-action]').forEach(node => node.classList.toggle('active', active.has(node.dataset.action)));
     }
   }
 

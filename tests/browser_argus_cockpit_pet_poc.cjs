@@ -30,10 +30,17 @@ const server = http.createServer((req,res) => {
     const [x,y] = after.split(' ').map(Number); assert.ok(x > 0 && y < 0); assert.ok(Math.abs(x)<=11.1 && Math.abs(y)<=8.1);
     const action = await page.locator('argus-cockpit-pet').evaluate(el => new Promise(resolve => { el.addEventListener('argus-cockpit-action', e => resolve(e.detail.action), {once:true}); el.shadowRoot.querySelector('[data-action="chat"]').click(); }));
     assert.equal(action, 'chat');
+    await page.locator('argus-cockpit-pet').evaluate(el => el.setActiveActions(['chat']));
+    assert.equal(await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelectorAll('[data-action="chat"].active').length), 3);
+    await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelector('button[data-action="tools"]').dispatchEvent(new PointerEvent('pointerenter')));
+    assert.equal(await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelectorAll('[data-action="tools"].hover').length), 3);
     await page.locator('argus-cockpit-pet').evaluate(el => { el.model='ignored'; el.setAttribute('model','POC-MODEL'); el.setAttribute('status','thinking'); });
     assert.equal(await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelector('.model').textContent), '◆ POC-MODEL');
     assert.equal(await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelector('.state').textContent), 'THINKING');
+    assert.equal(await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelector('.entity').dataset.state), 'thinking');
+    await page.locator('argus-cockpit-pet').evaluate(el => el.setAttribute('status','speaking'));
+    assert.equal(await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelector('.entity').dataset.state), 'speaking');
     assert.deepEqual(errors, []);
-    console.log('PASS: isolated cockpit-pet, 12-button event contract, bounded cursor-tracking eye, model/state attributes');
+    console.log('PASS: isolated cockpit-pet, state animation, menu path feedback, bounded cursor-tracking eye');
   } finally { await browser.close(); server.close(); }
 })().catch(error => { console.error(error); process.exitCode=1; });

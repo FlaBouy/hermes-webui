@@ -28,6 +28,20 @@ and 8 pixels vertically, with eased motion. The aperture, blue rings, outer shel
 lamps, menu buttons, and readout do not move. Mouse exit or window blur returns the
 gaze to center.
 
+The first accepted motion vocabulary is implemented without adding decorative
+radar effects. Idle uses a slow clockwise solid ring, slower counter-clockwise
+dashed ring, restrained eye breathing, and low outer-lamp activity. Hovering a
+menu button brightens only that button, its node, and its existing tie-in. An
+active menu selection turns the button green and drives a bold white dotted path
+outward from the Orb. Thinking increases the two ring cadences and changes the
+status indicator to amber. Speaking uses an irregular red-eye and authored blue
+lamp pulse while leaving menu geometry fixed. The preview state simulator can
+switch between Idle, Thinking, and Speaking; menu selection is exclusive.
+
+Only the two centered mechanical ring layers rotate continuously. Reduced-motion
+mode stops rotations, pulses, and traveling tie-in effects while preserving every
+color and state indication.
+
 The sample sheet at
 `Build Docs/Argus V1.0/Graphics/Orb/Codex Image Sep 4, 2026, 06_17_48 AM.png`
 is a useful reference for future state vocabulary—idle, listening/PTT, thinking,
