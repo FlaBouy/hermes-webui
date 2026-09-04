@@ -55,7 +55,7 @@ Last verified: 2026-09-04 (America/Chicago)
 
 - Biggy: `http://127.0.0.1:8790/health` — healthy, no active runs or streams.
 - Electrical tools: `http://127.0.0.1:8801/health` — version 4.0.0; all 11 tools active.
-- Biggy LaunchAgent: `ai.biggy.webui`; the managed listener was restarted after deployment and reports build `argus-v1.0-58-g4052a3a7`. Its PID is ephemeral; verify ownership with LaunchAgent state and port 8790 before any process action.
+- Biggy LaunchAgent: `ai.biggy.webui`; the managed listener was restarted after deployment and reports a HEAD-derived build in its HTTP `Server` header. Its PID is ephemeral; verify ownership with LaunchAgent state and port 8790 before any process action.
 - A second non-listening `server.py` process was observed earlier. Diagnose before terminating; do not assume it is safe merely because it is not listening.
 - LM Studio, Hermes gateway/MCP services, Cursor IDE worker, and the fleet coordination services were running.
 - Local CLIs available: `/Users/rick/.local/bin/cursor`, `/Users/rick/.local/bin/hermes`, `/Users/rick/.local/bin/agent`.
