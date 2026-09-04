@@ -46,7 +46,7 @@ const server = http.createServer((req,res) => {
     await page.waitForFunction(()=>document.querySelector('#biggyPetPanel [role="status"]').textContent.startsWith('Local objects'));
     assert.equal(await page.locator('.biggy-pet-sprite').count(),0);
     const before = await page.locator('#composerBox').boundingBox();
-    await page.getByRole('button',{name:'Pet and object controls: 0 visible',exact:true}).click();
+    await page.getByRole('button',{name:'Animated object controls: 0 visible',exact:true}).click();
     await page.getByRole('button',{name:'Add object',exact:true}).click();
     await page.waitForFunction(()=>document.querySelectorAll('.biggy-pet-sprite:not([hidden])').length===1);
     const firstId=await page.locator('#biggyPetInstanceSelect').inputValue();
@@ -86,7 +86,7 @@ const server = http.createServer((req,res) => {
     await page.mouse.down();await page.mouse.move(100,100,{steps:4});
     await page.keyboard.press('Escape');await page.mouse.up();
     assert.deepEqual(await second.boundingBox(),adjusted,'Escape cancels drag');
-    await page.getByRole('button',{name:/Pet and object controls/}).click();
+    await page.getByRole('button',{name:/Animated object controls/}).click();
     await page.selectOption('#biggyPetInstanceSelect',firstId);
     await page.locator('#biggyPetSize').fill('160');
     assert.equal((await page.locator(`[data-instance-id="${firstId}"]`).boundingBox()).height,160,'Each instance has independent sizing');
@@ -169,7 +169,7 @@ const server = http.createServer((req,res) => {
     await page.reload();
     await page.waitForFunction(()=>document.querySelectorAll('.biggy-pet-sprite:not([hidden])').length===1);
     assert.equal((await page.locator('.biggy-pet-sprite').boundingBox()).height,136,'Single-pet state migrates to one object instance');
-    await page.getByRole('button',{name:'Pet and object controls: 1 visible',exact:true}).click();
+    await page.getByRole('button',{name:'Animated object controls: 1 visible',exact:true}).click();
     assert.equal(await page.locator('#biggyPetSpeed').inputValue(),'75');
     assert.equal(await page.locator('#biggyPetPause').inputValue(),'3');
     assert.deepEqual(errors,[]);

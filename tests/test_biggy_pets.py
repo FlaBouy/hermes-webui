@@ -104,3 +104,12 @@ def test_pet_loader_uses_parent_asset_version_for_cache_busting():
     assert "20260903-review-tool-handoff-57" not in brand
     assert "biggy-pets.js?v=${BUILD_ID}" in brand
     assert "biggy-pets.css?v=${BUILD_ID}" in brand
+
+
+def test_object_manager_uses_ani_user_facing_labels():
+    manager = (ROOT / "static" / "biggy-pets.js").read_text(encoding="utf-8")
+    assert "},'ANI')" in manager
+    assert "'ADD OBJECT'" in manager
+    assert "Animated object controls" in manager
+    assert "},'PET')" not in manager
+    assert "ADD PET / OBJECT" not in manager

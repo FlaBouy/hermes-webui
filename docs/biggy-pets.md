@@ -1,12 +1,12 @@
-# Biggy local pet controls
+# Biggy animated object controls
 
-The **PET** button sits at the bottom of the PA right sidebar. Open PA, then PET.
-Closing PA hides the settings popup and PET button, not the enabled pet. The popup
+The **ANI** button sits at the bottom of the PA right sidebar. Open PA, then ANI.
+Closing PA hides the settings popup and ANI button, not the enabled object. The popup
 is outside the rail's clipping area. The Orb and prompt axis are unchanged.
 
-Open PET to add any number of local pet instances. The control separates the
+Open ANI to add any number of local object instances. The control separates the
 available catalog from the **On-screen objects** list, so two copies of the same
-pet can remain visible and still have independent size, placement, visibility,
+object can remain visible and still have independent size, placement, visibility,
 and animation timing. **Show all** and **Hide all** are global display controls;
 **Show/Hide selected** and **Remove selected** affect only the chosen instance.
 State persists in this browser's `biggy:pets:v2` local storage independently of
@@ -14,17 +14,17 @@ chat sessions. Existing `biggy:pets:v1` single-pet state migrates once into one
 object instance. A missing catalog entry is retained but hidden and returns when
 that catalog entry becomes available again; it is never replaced silently.
 
-Drag any visible pet with a mouse or touch to place it anywhere on screen. Clicking
-or focusing a pet selects that exact instance in the controls. Its position persists
+Drag any visible object with a mouse or touch to place it anywhere on screen. Clicking
+or focusing an object selects that exact instance in the controls. Its position persists
 as viewport-relative coordinates and remains inside the viewport after resizing.
-With the pet focused, arrow keys move it 8 pixels (Shift: 24).
+With the object focused, arrow keys move it 8 pixels (Shift: 24).
 Escape during a drag cancels that movement. **Place above Message Biggy** resets
 Bones to the default spot just above the left edge of the typing field. Biggy's
 **Place right of dialog** defaults to the right of the visible conversation lane,
 bottom-aligned; with no dialog, it falls back to the right of the message prompt.
 Each instance saves its own size, position, visibility, and animation controls. Biggy defaults to
 256px tall; the initial 128px Biggy setting is doubled once during migration.
-Opening PET
+Opening ANI
 temporarily avoids overlap with its controls without replacing the saved position.
 
 ## Local assets
@@ -58,8 +58,8 @@ persist per instance and add no model or voice calls.
 ## Future Orb / menu / dialog object
 
 The rebuilt Orb, menu buttons, and response dialog will enter this manager as one
-composite **cockpit object**, not as three unrelated pets and not as a passive
-sprite. The current control vocabulary already uses **Add pet / object** and
+composite **cockpit object**, not as three unrelated objects and not as a passive
+sprite. The current control vocabulary uses **Add object** and
 **On-screen objects** for that reason. The POC integration will add a dedicated
 cockpit renderer behind the same instance lifecycle:
 
@@ -67,8 +67,8 @@ cockpit renderer behind the same instance lifecycle:
 - moving or resizing the object preserves their authored relationships;
 - interactive hit regions expose stable action IDs that relay to the existing
   Hermes controls after the POC is accepted;
-- the cockpit object gets the same select/show/hide/position lifecycle as pets,
-  while pet-only animation controls are replaced by cockpit-specific controls;
+- the cockpit object gets the same select/show/hide/position lifecycle as other
+  objects, while sprite animation controls are replaced by cockpit-specific controls;
 - replacing the legacy Orb is an explicit cutover: mount the accepted object,
   rewire and verify every menu/dialog action, then retire the old DOM. The current
   Orb remains authoritative until that cutover is complete.
@@ -123,7 +123,7 @@ observers, pending catalog requests and listeners.
 - Set `BIGGY_TEST_CHROMIUM` to an installed Chromium executable if necessary;
   `BIGGY_PET_TEST_SPRITE` optionally uses a supplied local sprite instead of the
   generated test fixture. No production credentials or agent calls are used.
-- Live Chrome verification: PET control at the PA sidebar bottom, Biggy preview,
+- Live Chrome verification: ANI control at the PA sidebar bottom, Biggy preview,
   on/off and popup controls. Unauthorized catalog/sprite requests return 401.
 
 Rollback: remove the pet loader from `applyShell` in `biggy-brand.js` and the

@@ -1,17 +1,19 @@
-# A.R.G.U.S. cockpit-pet POC
+# A.R.G.U.S. cockpit-object POC
 
 ## Production boundary
 
 The POC is a standalone custom element and preview page. Production does not
-import it, the local pet catalog does not list it, and none of its twelve menu
-events call a live Hermes control. The existing Orb, menu, readout, prompt, and
-dialog remain the production owners until an explicit accepted cutover.
+import it, the local object catalog does not list it, and none of its menu or
+composer events call a live Hermes control. The existing Orb, menu, readout,
+prompt, and dialog remain the production owners until an explicit accepted
+cutover.
 
 Preview: `http://127.0.0.1:8790/static/argus-cockpit-pet-poc.html`
 
 Files:
 
 - `static/argus-cockpit-pet-poc.js` — portable `<argus-cockpit-pet>` entity
+- `static/argus-cockpit-pet-poc-adapter.js` — isolated pre-wiring contract adapter
 - `static/argus-cockpit-pet-poc.html` — isolated visual/interaction preview
 - `tests/test_argus_cockpit_pet_poc.py` — isolation and contract guards
 - `tests/browser_argus_cockpit_pet_poc.cjs` — optional isolated browser harness
@@ -33,8 +35,8 @@ The first accepted motion vocabulary is implemented without adding decorative
 radar effects. Idle uses a slow clockwise solid ring, slower counter-clockwise
 dashed ring, restrained eye breathing, and low outer-lamp activity. Hovering a
 menu button brightens only that button, its node, and its existing tie-in. An
-active menu selection turns the button green and drives a bold white dotted path
-outward from the Orb. Thinking increases the two ring cadences and changes the
+active menu selection turns the button green and changes the carrier into a bold
+white solid connection. Thinking increases the two ring cadences and changes the
 status indicator to amber. Speaking uses an irregular red-eye and authored blue
 lamp pulse while leaving menu geometry fixed. The preview state simulator can
 switch between Idle, Thinking, and Speaking; menu selection is exclusive.
@@ -52,6 +54,15 @@ the red aperture ring flashes faster at 0.72 seconds. These signals are driven b
 `status` and do not infer completion, severity, or tool progress inside the
 component.
 
+The remaining authored modes complete the POC state vocabulary. Listening/PTT
+holds a calm teal aperture pulse, measured lamp cadence, and an illuminated
+microphone control on the fixed Biggy bar. Fleet Dispatch accelerates the two
+existing opposed rings and shifts only the active connection, lamps, indicator,
+and fixed bar glow toward a restrained periwinkle signal. Sleep pauses the ring
+layers and dims the shell, eye, menu, tie-ins, indicator, and fixed bar without
+moving or hiding any control. None of these modes add radar sweeps or alter the
+accepted geometry.
+
 The `label` attribute owns the displayed Orb name. The standalone preview exposes
 an **ORB NAME** field, limits the value to 20 characters, updates the entity
 without reloading, and remembers the tester's choice only in that browser. The
@@ -60,17 +71,40 @@ three runtime files can be moved together without depending on Biggy's `/static`
 route.
 
 The packaging script combines the HTML, JavaScript, Orb PNG, reviewer README, and
-feedback worksheet into one uploadable ZIP. The package remains inert: menu
-events are visible demonstrations only and call no external service.
+feedback worksheet into one uploadable ZIP. The package remains inert: menu and
+composer events are visible demonstrations only and call no external service.
 
 The preview treats the Orb, menu buttons, tie-ins, name, and model/state readout
 as one scalable object. The Size control supports 60–140 percent; button boxes,
 labels, borders, glows, and readout geometry use the component's own width as
 their scale reference, so they retain their relationship to the Orb. **Drag to
-Move** repositions the complete entity while keeping it inside the viewport, and
-**Center** restores the 100-percent default position. Layout is saved only in the
-tester's browser. These preview controls are not the future production controls;
-the production multi-object manager remains the eventual state owner.
+Move** repositions the complete Orb entity while keeping it inside the viewport,
+and **Center** restores its 100-percent default position. Layout is saved only in
+the tester's browser. These preview controls are not the future production
+controls; the production multi-object manager remains the eventual state owner.
+
+The production-shaped **Message Biggy…** bar remains an independent, fixed page
+anchor. It does not move or resize with the Orb. Its PA, attachment, bookmark,
+microphone, voice, and send controls retain fixed dimensions while its border and
+glow react in place to the state simulator. The field is editable for layout
+testing, but Enter, Send, and every companion control emit inert page events only.
+Nothing is submitted, recorded, uploaded, or sent to Biggy from the POC.
+
+The response layer is also an independent fixed surface rather than part of the
+Orb transform. Its simulator demonstrates hidden, concise, expanded technical,
+and interrupted states. Concise keeps the conversational answer prominent;
+expanded reveals supporting detail without changing the Biggy bar; interrupted
+uses an explicit recoverable status. These are presentation fixtures only and do
+not create, replay, cancel, or retry a real turn.
+
+An isolated adapter now owns the preview's event choreography. It allowlists all
+twelve stable action IDs, enforces one active menu action at a time, records only
+the name of a composer control and the length of submitted test text, and emits a
+read-only versioned contract snapshot. The visible **PARITY PASS · 12/12 ·
+10/10** readout confirms that all twelve action structures and all ten authored
+state controls loaded, the six fixed composer controls are present, and the
+production-wired flag remains false. It does not claim that any production
+service is connected.
 
 The editable name uses an optical offset rather than ordinary whole-string
 centering: the center of the `G` in the default `A.R.G.U.S.` label aligns to the
@@ -109,16 +143,21 @@ or as a runtime sprite source.
 `model`, `status`, and `tracking` are attributes. `setActiveActions()` paints an
 allowlisted set of active menu buttons. A menu press emits one
 `argus-cockpit-action` event whose detail contains only the stable lower-case
-action ID. The POC never interprets or executes that ID.
+action ID. The independent composer emits `argus-cockpit-control`; Enter and Send
+emit `argus-cockpit-submit` with the current field text. The POC never interprets
+or executes any of those events.
 
 After visual acceptance, the integration sequence is:
 
 1. Add a dedicated cockpit-object adapter to the multi-object manager.
+   The PA right-rail entry is labeled **ANI**, and all user-facing cutover
+   documentation and labels use **Objects** rather than the retired PET term.
 2. Map the twelve emitted action IDs to the existing Hermes-owned controls.
 3. Map the existing model, online, thinking, speaking, tool, and error state to
    the entity attributes without creating a second state owner.
-4. Move the existing response dialog into the same object geometry and verify
-   drag/resize behavior at the physical display sizes.
+4. Keep the existing prompt owner as an independent static anchor and map only
+   its in-place state styling; separately verify the response-dialog behavior at
+   the physical display sizes.
 5. Run parity tests for every button, active line, indicator, dialog, pulse, and
    mutual-exclusion rule.
 6. Only after parity acceptance, remove the existing Orb/menu/readout DOM.

@@ -1,4 +1,4 @@
-# Cockpit-pet POC feedback
+# Cockpit-object POC feedback
 
 - Tester:
 - Date:
@@ -15,6 +15,9 @@
 ## Idle, Thinking, Speaking, and Working motion
 
 
+## Listening/PTT, Fleet Dispatch, and Sleep motion
+
+
 ## Success, Warning, and Error signals
 
 
@@ -24,8 +27,16 @@
 ## Resize, button proportions, and movable placement
 
 
+## Independent Biggy message-bar anchor and state changes
+
+
+## Response card: hidden, concise, expanded, and interrupted states
+
+
+## Twelve-button contract and active-action readout
+
+
 ## Recommended changes
 
 
 ## Accessibility or reduced-motion observations
-

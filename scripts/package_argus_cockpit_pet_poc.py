@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FILES = {
     ROOT / "static" / "argus-cockpit-pet-poc.html": "argus-cockpit-pet-poc.html",
     ROOT / "static" / "argus-cockpit-pet-poc.js": "argus-cockpit-pet-poc.js",
+    ROOT / "static" / "argus-cockpit-pet-poc-adapter.js": "argus-cockpit-pet-poc-adapter.js",
     ROOT / "static" / "argus-orb-template.png": "argus-orb-template.png",
     ROOT / "docs" / "argus-cockpit-pet-poc-share-readme.md": "README.md",
     ROOT / "docs" / "argus-cockpit-pet-poc-feedback.md": "FEEDBACK.md",

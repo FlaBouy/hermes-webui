@@ -8,21 +8,48 @@
     :root{color-scheme:dark}*{box-sizing:border-box}html,body{height:100%;margin:0}body{display:grid;place-items:center;overflow:hidden;background:#01040a;color:#93a4b7;font-family:"SF Mono",ui-monospace,monospace}
     body::before{content:"";position:fixed;inset:0;opacity:.55;background-image:radial-gradient(circle at 12% 18%,#9fc4ff 0 1px,transparent 1.4px),radial-gradient(circle at 76% 32%,#6fa2e8 0 1px,transparent 1.4px),radial-gradient(circle at 42% 74%,#b9d2ff 0 1px,transparent 1.4px);background-size:113px 127px,179px 151px,211px 193px}
     main{position:relative;z-index:1;display:grid;justify-items:center;gap:6px}.tag{font-size:10px;letter-spacing:.18em;color:#5f8099;text-transform:uppercase}.hint{font-size:10px;color:#536675}.states,.personalize,.layout{display:flex;align-items:center;gap:6px}.states button,.personalize button,.personalize input,.layout button{border:1px solid #263747;border-radius:5px;background:#071019;color:#8ea1b4;padding:5px 10px;font:800 9px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.08em}.states button,.personalize button,.layout button{cursor:pointer}.states button.active,.layout button.dragging{color:#68efce;border-color:#34d399;background:#082018;box-shadow:0 0 8px rgba(52,211,153,.22)}.personalize label,.layout label,.layout output{font-size:9px;letter-spacing:.12em;color:#71879a}.personalize input{width:184px;color:#eefcff;border-color:#315166;outline:none}.personalize input:focus{border-color:#35d9ff;box-shadow:0 0 7px rgba(53,217,255,.2)}.layout input{width:150px;accent-color:#34d399}.layout output{width:38px;color:#bceee2}.layout button#move-orb{touch-action:none;cursor:grab}.layout button#move-orb.dragging{cursor:grabbing}#stage{position:relative;transform:translate3d(var(--stage-x,0),var(--stage-y,0),0);will-change:transform}
+    main{padding-bottom:70px}.hint{position:fixed;left:50%;bottom:7px;transform:translateX(-50%);white-space:nowrap}.poc-composer{position:fixed;z-index:3;left:50%;bottom:27px;transform:translateX(-50%);width:min(916px,calc(100vw - 32px));height:42px;display:flex;align-items:stretch;gap:6px}.poc-pa,.poc-control{border:1px solid rgba(52,211,153,.45);background:rgba(5,16,14,.94);color:#69efcd;font:800 9px/1 "SF Mono",ui-monospace,monospace;cursor:pointer}.poc-pa{width:44px;flex:0 0 44px;border-radius:6px;letter-spacing:.08em}.poc-prompt-shell{position:relative;flex:1;min-width:0;border:1px solid rgba(78,204,163,.3);border-radius:6px;background:rgba(5,10,14,.92);box-shadow:0 8px 24px rgba(0,0,0,.25)}.poc-prompt{width:100%;height:100%;border:0;outline:0;background:transparent;color:#eefcff;padding:0 172px 0 12px;font:500 16px/1.2 system-ui,sans-serif}.poc-prompt::placeholder{color:#bcc4cc;opacity:.9}.poc-actions{position:absolute;right:4px;top:50%;transform:translateY(-50%);display:flex;align-items:center;gap:3px}.poc-control{display:grid;place-items:center;width:28px;height:28px;padding:0;border-color:transparent;border-radius:5px;background:transparent;color:#9ba8b3;font-size:12px}.poc-control:hover,.poc-control:focus-visible{outline:none;color:#eafcff;border-color:#315166;background:#0b1720}.poc-control.send{color:#f0c94d;border-color:#7b6410;background:#5d5009}.poc-composer[data-state="listening"]{filter:drop-shadow(0 0 6px rgba(94,234,212,.4))}.poc-composer[data-state="listening"] [data-composer-action="microphone"]{color:#5eead4;border-color:#5eead4;background:#09221d}.poc-composer[data-state="thinking"]{filter:drop-shadow(0 0 5px rgba(246,189,67,.26))}.poc-composer[data-state="speaking"]{filter:drop-shadow(0 0 6px rgba(103,232,249,.34))}.poc-composer[data-state="dispatch"]{filter:drop-shadow(0 0 7px rgba(142,168,255,.42))}.poc-composer[data-state="working"]{filter:drop-shadow(0 0 6px rgba(53,217,255,.34))}.poc-composer[data-state="success"]{filter:drop-shadow(0 0 6px rgba(94,234,212,.4))}.poc-composer[data-state="warning"] .poc-prompt-shell{border-color:#f6bd43}.poc-composer[data-state="error"] .poc-prompt-shell{border-color:#fb5353}.poc-composer[data-state="sleep"]{opacity:.48;filter:saturate(.4)}
+    .response-modes{display:flex;align-items:center;gap:6px}.response-modes>span{font-size:9px;letter-spacing:.12em;color:#71879a}.response-modes button{border:1px solid #263747;border-radius:5px;background:#071019;color:#8ea1b4;padding:5px 10px;font:800 9px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.08em;cursor:pointer}.response-modes button.active{color:#68efce;border-color:#34d399;background:#082018}.contract-status{min-width:205px;margin-left:6px;color:#5eead4;font:800 8px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.07em}.poc-response{position:fixed;z-index:2;left:18px;top:18px;width:min(360px,calc(100vw - 36px));border:1px solid rgba(43,196,226,.36);border-radius:7px;background:rgba(4,14,21,.94);box-shadow:0 12px 32px rgba(0,0,0,.28);overflow:hidden;transition:opacity .16s ease,transform .16s ease,border-color .16s ease}.poc-response[hidden]{display:none}.poc-response-head{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-bottom:1px solid rgba(43,196,226,.2);color:#7de5ff;font:800 10px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.12em}.poc-response-status{color:#34d399;font-size:8px}.poc-response-body{padding:12px;color:#d8f7ff;font:600 12px/1.5 "SF Mono",ui-monospace,monospace}.poc-response-detail{display:none;margin-top:10px;padding-top:10px;border-top:1px solid rgba(43,196,226,.18);color:#91a9ba;font-weight:500}.poc-response[data-mode="expanded"] .poc-response-detail{display:block}.poc-response[data-mode="error"]{border-color:#fb5353;background:rgba(35,7,11,.95)}.poc-response[data-mode="error"] .poc-response-head,.poc-response[data-mode="error"] .poc-response-status{color:#ff7777}.poc-response[data-mode="error"] .poc-response-body{color:#ffd3d3}
+    @media(max-width:1200px){.poc-response{width:230px}.poc-response-body{font-size:10px}}
   </style>
-  <script src="./argus-cockpit-pet-poc.js?v=20260904-0824" defer></script>
+  <script src="./argus-cockpit-pet-poc.js?v=20260904-1132" defer></script>
+  <script src="./argus-cockpit-pet-poc-adapter.js?v=20260904-1208" defer></script>
 </head>
 <body>
   <main>
     <div class="tag">Isolated cockpit-orb proof of concept — no production wiring</div>
     <div class="personalize"><label for="orb-name">ORB NAME</label><input id="orb-name" maxlength="20" value="A.R.G.U.S." autocomplete="off" spellcheck="false"><button id="reset-name" type="button">RESET</button></div>
     <div class="layout"><label for="orb-scale">SIZE</label><input id="orb-scale" type="range" min="60" max="140" step="5" value="100"><output id="scale-value" for="orb-scale">100%</output><button id="move-orb" type="button">DRAG TO MOVE</button><button id="reset-layout" type="button">CENTER</button></div>
-    <div class="states" aria-label="POC state simulator"><button type="button" data-state="online" class="active">IDLE</button><button type="button" data-state="thinking">THINKING</button><button type="button" data-state="speaking">SPEAKING</button><button type="button" data-state="working">WORKING</button><button type="button" data-state="success">SUCCESS</button><button type="button" data-state="warning">WARNING</button><button type="button" data-state="error">ERROR</button></div>
+    <div class="states" aria-label="POC state simulator"><button type="button" data-state="online" class="active">IDLE</button><button type="button" data-state="listening">LISTENING</button><button type="button" data-state="thinking">THINKING</button><button type="button" data-state="speaking">SPEAKING</button><button type="button" data-state="dispatch">DISPATCH</button><button type="button" data-state="working">WORKING</button><button type="button" data-state="success">SUCCESS</button><button type="button" data-state="warning">WARNING</button><button type="button" data-state="error">ERROR</button><button type="button" data-state="sleep">SLEEP</button></div>
+    <div class="response-modes" aria-label="POC response-layer simulator"><span>RESPONSE</span><button type="button" data-response="hidden">HIDDEN</button><button type="button" data-response="concise" class="active">CONCISE</button><button type="button" data-response="expanded">EXPANDED</button><button type="button" data-response="error">ERROR</button><output class="contract-status" id="contract-status">PARITY CHECKING</output></div>
     <div id="stage"><argus-cockpit-pet id="poc" label="A.R.G.U.S." model="GPT-OSS-120B" size="100" status="online"></argus-cockpit-pet></div>
-    <div class="hint">Aim the eye, select a menu path, try the states, resize the whole entity, or drag it to a new position.</div>
+    <div class="hint">The Orb moves and scales independently. The anchored Biggy bar changes state in place.</div>
   </main>
+  <section class="poc-response" id="poc-response" data-mode="concise" aria-label="Independent response preview">
+    <div class="poc-response-head"><span>BIGGY // RESPONSE</span><span class="poc-response-status">READY</span></div>
+    <div class="poc-response-body"><div class="poc-response-summary">All systems are listening. Tragically, that includes me.</div><div class="poc-response-detail">Expanded technical content stays readable in the card while speech remains a short conversational summary. No live response is generated in this proof of concept.</div></div>
+  </section>
+  <div class="poc-composer" id="poc-composer" data-state="online" aria-label="Independent Biggy prompt bar">
+    <button class="poc-pa" type="button" data-composer-action="pa" aria-label="Personal assistant">PA</button>
+    <div class="poc-prompt-shell">
+      <input class="poc-prompt" type="text" aria-label="Message Biggy" placeholder="Message Biggy…" autocomplete="off">
+      <div class="poc-actions">
+        <button class="poc-control" type="button" data-composer-action="attach" aria-label="Attach">⌕</button>
+        <button class="poc-control" type="button" data-composer-action="bookmark" aria-label="Bookmark">◇</button>
+        <button class="poc-control" type="button" data-composer-action="microphone" aria-label="Microphone">◉</button>
+        <button class="poc-control" type="button" data-composer-action="voice" aria-label="Voice">≋</button>
+        <button class="poc-control send" type="button" data-composer-action="send" aria-label="Send">↑</button>
+      </div>
+    </div>
+  </div>
   <script>
     addEventListener('DOMContentLoaded', () => {
       const pet = document.getElementById('poc');
+      const composer = document.getElementById('poc-composer');
+      const promptInput = composer.querySelector('.poc-prompt');
+      const response = document.getElementById('poc-response');
+      const adapter = new ArgusCockpitPocAdapter({ orb: pet, composer, response, statusOutput: document.getElementById('contract-status') }).connect();
+      window.argusCockpitPocAdapter = adapter;
       const nameInput = document.getElementById('orb-name');
       const nameKey = 'argus-cockpit-poc-label';
       const stage = document.getElementById('stage');
@@ -91,13 +118,28 @@
         moveOrb.addEventListener('pointercancel', finish);
       });
       addEventListener('resize', () => applyLayout(false));
-      pet.addEventListener('argus-cockpit-action', event => {
-        const active = pet._previewActive === event.detail.action ? null : event.detail.action;
-        pet._previewActive = active;
-        pet.setActiveActions(active ? [active] : []);
+      const emitComposer = (name, detail) => composer.dispatchEvent(new CustomEvent(name, { bubbles: true, detail }));
+      const submitPrompt = () => emitComposer('argus-cockpit-submit', { text: promptInput.value });
+      composer.querySelectorAll('[data-composer-action]').forEach(button => button.addEventListener('click', () => {
+        button.dataset.composerAction === 'send' ? submitPrompt() : emitComposer('argus-cockpit-control', { control: button.dataset.composerAction });
+      }));
+      promptInput.addEventListener('keydown', event => {
+        if (event.key !== 'Enter' || event.shiftKey || event.isComposing) return;
+        event.preventDefault();
+        submitPrompt();
       });
+      document.querySelectorAll('.response-modes [data-response]').forEach(button => button.addEventListener('click', () => {
+        const mode = button.dataset.response;
+        response.hidden = mode === 'hidden';
+        if (!response.hidden) response.dataset.mode = mode;
+        response.querySelector('.poc-response-status').textContent = mode === 'error' ? 'INTERRUPTED' : mode === 'expanded' ? 'DETAIL' : 'READY';
+        response.querySelector('.poc-response-summary').textContent = mode === 'error' ? 'Response interrupted. The written turn remains available to retry.' : 'All systems are listening. Tragically, that includes me.';
+        document.querySelectorAll('.response-modes [data-response]').forEach(candidate => candidate.classList.toggle('active', candidate === button));
+      }));
       document.querySelectorAll('.states [data-state]').forEach(button => button.addEventListener('click', () => {
         pet.setAttribute('status', button.dataset.state);
+        composer.dataset.state = button.dataset.state;
+        adapter.publish();
         document.querySelectorAll('.states [data-state]').forEach(candidate => candidate.classList.toggle('active', candidate === button));
       }));
     });

@@ -44,18 +44,21 @@
           .tie.hover:not(.active){stroke:#eafcff;stroke-width:2.1;opacity:.92;filter:drop-shadow(0 0 3px rgba(234,252,255,.45))}.signal-trail.hover:not(.active),.signal-head.hover:not(.active){animation:energyToButton 1.15s ease-in-out infinite}.node.hover:not(.active){stroke:#eafcff;animation:hoverNode 1.15s ease-in-out infinite;filter:drop-shadow(0 0 3px rgba(234,252,255,.55))}
           .tie.active{stroke:#fff;stroke-width:2.7;stroke-dasharray:none;opacity:1;animation:selectedPathPulse 3.6s ease-in-out infinite;filter:drop-shadow(0 0 4px rgba(255,255,255,.7))}.signal-trail.selecting,.signal-head.selecting{animation:energyToButton .78s ease-out 1}.node.active{fill:#34d399;stroke:#fff;animation:selectedNodePulse 3.6s ease-in-out infinite;filter:drop-shadow(0 0 5px rgba(52,211,153,.9))}
           .tie.deactivating{animation:pathRetract .5s ease-in 1}.node.deactivating{animation:nodeRetract .5s ease-in 1}
-          button{position:absolute;width:11.667cqw;height:3.75cqw;transform:translate(-50%,-50%);border:max(1px,.139cqw) solid #303b48;border-radius:.694cqw;background:rgba(8,15,23,.94);color:#aab5c3;font:800 1.389cqw/1 "SF Mono",ui-monospace,monospace;letter-spacing:.05em;cursor:pointer;z-index:2}
-          button:hover,button:focus-visible{color:#eafcff;border-color:#35d9ff;outline:none;animation:hoverButton .32s ease-out 1;box-shadow:0 0 .972cqw rgba(53,217,255,.18)}button.active{color:#69efcd;border-color:#34d399;background:#082018;animation:activeButton 2.8s ease-in-out infinite;box-shadow:0 0 1.389cqw rgba(52,211,153,.3)}button.deactivating{animation:buttonRetract .36s ease-in 1}
+          .menu-button{position:absolute;width:11.667cqw;height:3.75cqw;transform:translate(-50%,-50%);border:max(1px,.139cqw) solid #303b48;border-radius:.694cqw;background:rgba(8,15,23,.94);color:#aab5c3;font:800 1.389cqw/1 "SF Mono",ui-monospace,monospace;letter-spacing:.05em;cursor:pointer;z-index:2}
+          .menu-button:hover,.menu-button:focus-visible{color:#eafcff;border-color:#35d9ff;outline:none;animation:hoverButton .32s ease-out 1;box-shadow:0 0 .972cqw rgba(53,217,255,.18)}.menu-button.active{color:#69efcd;border-color:#34d399;background:#082018;animation:activeButton 2.8s ease-in-out infinite;box-shadow:0 0 1.389cqw rgba(52,211,153,.3)}.menu-button.deactivating{animation:buttonRetract .36s ease-in 1}
           .name{position:absolute;left:calc(50% + .94cqw);bottom:5.139cqw;transform:translateX(-50%);max-width:54%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font:900 2.361cqw/1 "SF Mono",ui-monospace,monospace;letter-spacing:.2em;text-shadow:0 0 1.111cqw rgba(112,225,255,.72)}
           .readout{position:absolute;left:50%;bottom:.556cqw;transform:translateX(-50%);width:31.111cqw;padding:.694cqw 1.389cqw;display:flex;justify-content:center;gap:1.667cqw;border:max(1px,.139cqw) solid rgba(52,211,153,.42);border-radius:999px;background:rgba(5,16,14,.88);font-size:1.389cqw;font-weight:800;letter-spacing:.09em;color:#34d399;white-space:nowrap}
           .state::before{content:"";display:inline-block;width:.972cqw;height:.972cqw;margin-right:.833cqw;border-radius:50%;background:currentColor;box-shadow:0 0 1.111cqw currentColor}.state{min-width:10.278cqw;text-align:center;transition:color .2s ease,text-shadow .2s ease}
           .entity[data-state="thinking"] .solid{animation-duration:7s}.entity[data-state="thinking"] .dash{animation-duration:10s}.entity[data-state="thinking"] .state{color:#f6bd43;text-shadow:0 0 7px rgba(246,189,67,.58)}
           .entity[data-state="thinking"] .eye-glow{animation-duration:2.8s}.entity[data-state="thinking"] .lamp{animation-duration:2.8s}
+          .entity[data-state="listening"] .solid{animation-duration:12s}.entity[data-state="listening"] .dash{animation-duration:22s}.entity[data-state="listening"] .eye-glow{stroke:#5eead4;animation:listeningRing 2.4s ease-in-out infinite}.entity[data-state="listening"] .lamp{animation:listeningLamp 2.4s ease-in-out infinite}.entity[data-state="listening"] .state{color:#5eead4;text-shadow:0 0 8px rgba(94,234,212,.68)}
           .entity[data-state="speaking"] .eye-glow{animation:speechEye 1.35s ease-in-out infinite}.entity[data-state="speaking"] .lamp{animation:speechLamp 1.35s ease-in-out infinite}.entity[data-state="speaking"] .state{color:#67e8f9;text-shadow:0 0 7px rgba(103,232,249,.62)}
-          .entity[data-state="working"] .solid{animation:stepCw 4.8s steps(12,end) infinite}.entity[data-state="working"] .dash{animation-duration:18s}.entity[data-state="working"] .state{color:#67e8f9;text-shadow:0 0 7px rgba(103,232,249,.62)}.entity[data-state="working"] button.active{color:#67e8f9;border-color:#35d9ff;animation:workingButton 1.8s ease-in-out infinite}
-          .entity[data-state="success"] .confirmation-sweep{animation:confirmSweep 1.05s ease-out 1}.entity[data-state="success"] .state{color:#5eead4;text-shadow:0 0 8px rgba(94,234,212,.72)}.entity[data-state="success"] .tie.active{stroke:#5eead4}.entity[data-state="success"] .node.active{fill:#5eead4;animation:successNode .9s ease-out 1}.entity[data-state="success"] button.active{color:#5eead4;border-color:#5eead4;animation:successButton .9s ease-out 1}
-          .entity[data-state="warning"] .state,.entity[data-state="warning"] .tie.active{color:#f6bd43;stroke:#f6bd43}.entity[data-state="warning"] .node.active{fill:#f6bd43;stroke:#fff;animation:warningSignal 1.8s ease-in-out infinite}.entity[data-state="warning"] button.active{color:#f6bd43;border-color:#f6bd43;animation:warningButton 1.8s ease-in-out infinite}.entity[data-state="warning"] .eye-glow{stroke:#f59e0b;animation:warningRing 1.8s ease-in-out infinite}
-          .entity[data-state="error"] .state,.entity[data-state="error"] .tie.active{color:#fb5353;stroke:#fb5353}.entity[data-state="error"] .node.active{fill:#fb5353;stroke:#fff;animation:errorSignal .72s ease-in-out infinite}.entity[data-state="error"] button.active{color:#fb5353;border-color:#fb5353;animation:errorButton .72s ease-in-out infinite}.entity[data-state="error"] .eye-glow{stroke:#fb3030;animation:errorRing .72s ease-in-out infinite}
+          .entity[data-state="dispatch"] .solid{animation-duration:5.4s}.entity[data-state="dispatch"] .dash{animation-duration:8.2s}.entity[data-state="dispatch"] .lamp{animation:dispatchLamp 1.6s ease-in-out infinite}.entity[data-state="dispatch"] .state{color:#8ea8ff;text-shadow:0 0 8px rgba(142,168,255,.72)}.entity[data-state="dispatch"] .menu-button.active{color:#b7c5ff;border-color:#8ea8ff;box-shadow:0 0 1.528cqw rgba(142,168,255,.46)}.entity[data-state="dispatch"] .tie.active{stroke:#b7c5ff}.entity[data-state="dispatch"] .node.active{fill:#8ea8ff}
+          .entity[data-state="working"] .solid{animation:stepCw 4.8s steps(12,end) infinite}.entity[data-state="working"] .dash{animation-duration:18s}.entity[data-state="working"] .state{color:#67e8f9;text-shadow:0 0 7px rgba(103,232,249,.62)}.entity[data-state="working"] .menu-button.active{color:#67e8f9;border-color:#35d9ff;animation:workingButton 1.8s ease-in-out infinite}
+          .entity[data-state="success"] .confirmation-sweep{animation:confirmSweep 1.05s ease-out 1}.entity[data-state="success"] .state{color:#5eead4;text-shadow:0 0 8px rgba(94,234,212,.72)}.entity[data-state="success"] .tie.active{stroke:#5eead4}.entity[data-state="success"] .node.active{fill:#5eead4;animation:successNode .9s ease-out 1}.entity[data-state="success"] .menu-button.active{color:#5eead4;border-color:#5eead4;animation:successButton .9s ease-out 1}
+          .entity[data-state="warning"] .state,.entity[data-state="warning"] .tie.active{color:#f6bd43;stroke:#f6bd43}.entity[data-state="warning"] .node.active{fill:#f6bd43;stroke:#fff;animation:warningSignal 1.8s ease-in-out infinite}.entity[data-state="warning"] .menu-button.active{color:#f6bd43;border-color:#f6bd43;animation:warningButton 1.8s ease-in-out infinite}.entity[data-state="warning"] .eye-glow{stroke:#f59e0b;animation:warningRing 1.8s ease-in-out infinite}
+          .entity[data-state="error"] .state,.entity[data-state="error"] .tie.active{color:#fb5353;stroke:#fb5353}.entity[data-state="error"] .node.active{fill:#fb5353;stroke:#fff;animation:errorSignal .72s ease-in-out infinite}.entity[data-state="error"] .menu-button.active{color:#fb5353;border-color:#fb5353;animation:errorButton .72s ease-in-out infinite}.entity[data-state="error"] .eye-glow{stroke:#fb3030;animation:errorRing .72s ease-in-out infinite}
+          .entity[data-state="sleep"] .solid,.entity[data-state="sleep"] .dash,.entity[data-state="sleep"] .lamp{animation-play-state:paused;opacity:.14}.entity[data-state="sleep"] .shell{opacity:.32;filter:saturate(.35) brightness(.55)}.entity[data-state="sleep"] .eye{opacity:.28;transform:scale(.92)}.entity[data-state="sleep"] .eye-glow{animation:none;opacity:.12}.entity[data-state="sleep"] .state{color:#657587;text-shadow:none}.entity[data-state="sleep"] .menu-button{opacity:.5}.entity[data-state="sleep"] .tie,.entity[data-state="sleep"] .node{opacity:.3}
           @keyframes cw{to{transform:rotate(360deg)}}@keyframes ccw{to{transform:rotate(-360deg)}}
           @keyframes energyToButton{0%{stroke-dashoffset:0;opacity:0}12%{opacity:1}80%{opacity:1}100%{stroke-dashoffset:-99;opacity:0}}@keyframes selectedPathPulse{0%,100%{opacity:.72;filter:drop-shadow(0 0 2px rgba(255,255,255,.42))}50%{opacity:1;filter:drop-shadow(0 0 6px rgba(255,255,255,.9))}}@keyframes selectedNodePulse{0%,100%{filter:drop-shadow(0 0 3px rgba(52,211,153,.55))}50%{filter:drop-shadow(0 0 8px rgba(52,211,153,1))}}
           @keyframes hoverNode{0%{opacity:.35}82%{opacity:.35}100%{opacity:1}}@keyframes hoverButton{0%{filter:brightness(.82)}100%{filter:brightness(1)}}
@@ -68,11 +71,13 @@
           @keyframes lampIdle{0%,100%{opacity:.22}50%{opacity:.58}}
           @keyframes speechEye{0%,100%{opacity:.42;transform:scale(.985);filter:brightness(.86)}18%{opacity:.9;transform:scale(1.025);filter:brightness(1.28) drop-shadow(0 0 10px rgba(255,56,48,.76))}42%{opacity:.56;transform:scale(.995);filter:brightness(.96)}63%{opacity:1;transform:scale(1.035);filter:brightness(1.38) drop-shadow(0 0 12px rgba(255,56,48,.82))}82%{opacity:.62;transform:scale(1);filter:brightness(1.02)}}
           @keyframes speechLamp{0%,100%{opacity:.22}18%{opacity:.72}42%{opacity:.36}63%{opacity:.92}82%{opacity:.44}}
+          @keyframes listeningRing{0%,100%{opacity:.38;filter:brightness(.84)}50%{opacity:.9;filter:brightness(1.2) drop-shadow(0 0 8px rgba(94,234,212,.68))}}@keyframes listeningLamp{0%,100%{opacity:.2}50%{opacity:.68}}
+          @keyframes dispatchLamp{0%,100%{opacity:.26;filter:hue-rotate(18deg)}50%{opacity:.82;filter:hue-rotate(34deg) brightness(1.22)}}
           @keyframes warningRing{0%,100%{opacity:.28;filter:brightness(.72)}50%{opacity:1;filter:brightness(1.35) drop-shadow(0 0 9px rgba(245,158,11,.82))}}
           @keyframes errorRing{0%,100%{opacity:.22;filter:brightness(.68)}50%{opacity:1;filter:brightness(1.5) drop-shadow(0 0 12px rgba(251,48,48,.96))}}
           @keyframes warningSignal{0%,100%{opacity:.35;filter:none}50%{opacity:1;filter:drop-shadow(0 0 8px rgba(246,189,67,.95))}}@keyframes warningButton{0%,100%{background:#241b08;box-shadow:0 0 .556cqw rgba(246,189,67,.16)}50%{background:#392707;box-shadow:0 0 1.528cqw rgba(246,189,67,.68)}}
           @keyframes errorSignal{0%,100%{opacity:.28;filter:none}50%{opacity:1;filter:drop-shadow(0 0 10px rgba(251,83,83,1))}}@keyframes errorButton{0%,100%{background:#26090b;box-shadow:0 0 .556cqw rgba(251,83,83,.18)}50%{background:#470b10;box-shadow:0 0 1.667cqw rgba(251,83,83,.82)}}
-          @media(prefers-reduced-motion:reduce){.solid,.dash,.eye-glow,.lamp,.tie,.signal-trail,.signal-head,.node,button,.confirmation-sweep{animation:none!important}}
+          @media(prefers-reduced-motion:reduce){.solid,.dash,.eye-glow,.lamp,.tie,.signal-trail,.signal-head,.node,.menu-button,.confirmation-sweep{animation:none!important}}
         </style>
         <div class="entity" part="entity" data-state="idle">
           <svg viewBox="0 60 1200 720" role="img" aria-label="A.R.G.U.S. cockpit Orb proof of concept">
@@ -87,7 +92,7 @@
               <mask id="lamps" maskUnits="userSpaceOnUse" x="320" y="120" width="560" height="560"><rect x="320" y="120" width="560" height="560" fill="black"/><circle cx="596" cy="404" r="255" fill="white"/><circle cx="596" cy="404" r="205" fill="black"/></mask>
             </defs>
             <circle class="profile" cx="596" cy="404" r="252" fill="url(#mask)"/>
-            <image href="${ORB_ART_URL}" x="238.5" y="159" width="723" height="482" preserveAspectRatio="xMidYMid meet"/>
+            <image class="shell" href="${ORB_ART_URL}" x="238.5" y="159" width="723" height="482" preserveAspectRatio="xMidYMid meet"/>
             <image class="lamp" href="${ORB_ART_URL}" x="238.5" y="159" width="723" height="482" preserveAspectRatio="xMidYMid meet" mask="url(#lamps)"/>
             <g class="solid" fill="none" stroke="#55ddff"><circle cx="596" cy="404" r="91" stroke-width="2.5" opacity=".82"/><circle cx="596" cy="313" r="4" fill="#c8f8ff" stroke="none" filter="url(#glow)"/></g>
             <circle class="dash" cx="596" cy="404" r="112" pathLength="703" fill="none" stroke="#30bfe9" stroke-width="2.5" stroke-dasharray="11 8" opacity=".78"/>
@@ -169,7 +174,7 @@
         node.setAttribute('class', 'node'); node.dataset.action = actionId; node.setAttribute('cx', connectorX); node.setAttribute('cy', y); node.setAttribute('r', 7);
         ties.append(path, signalTrail, signalHead, node);
         const button = document.createElement('button');
-        button.type = 'button'; button.dataset.action = actionId; button.textContent = action;
+        button.type = 'button'; button.className = 'menu-button'; button.dataset.action = actionId; button.textContent = action;
         button.style.left = `${x / 12}%`; button.style.top = `${(y - 60) / 7.2}%`;
         const paintHover = on => this.paintActionClass(actionId, 'hover', on);
         button.addEventListener('pointerenter', () => paintHover(true));
@@ -196,7 +201,7 @@
       this.shadowRoot.querySelector('.name').textContent = label;
       this.shadowRoot.querySelector('.model').textContent = `◆ ${model}`;
       this.shadowRoot.querySelector('.state').textContent = status;
-      const visualStates = new Set(['THINKING', 'SPEAKING', 'WORKING', 'SUCCESS', 'WARNING', 'ERROR']);
+      const visualStates = new Set(['LISTENING', 'THINKING', 'SPEAKING', 'DISPATCH', 'WORKING', 'SUCCESS', 'WARNING', 'ERROR', 'SLEEP']);
       const visualState = visualStates.has(status) ? status.toLowerCase() : 'idle';
       this.shadowRoot.querySelector('.entity').dataset.state = visualState;
     }
@@ -221,7 +226,7 @@
 
     setActiveActions(actions = []) {
       const active = new Set(Array.from(actions, value => String(value).toLowerCase()));
-      const wasActive = new Set(Array.from(this.shadowRoot.querySelectorAll('button.active'), node => node.dataset.action));
+      const wasActive = new Set(Array.from(this.shadowRoot.querySelectorAll('.menu-button.active'), node => node.dataset.action));
       wasActive.forEach(action => {
         if (active.has(action)) return;
         clearTimeout(this._deactivateTimers.get(action));
