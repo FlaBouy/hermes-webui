@@ -4,19 +4,25 @@ The **PET** button sits at the bottom of the PA right sidebar. Open PA, then PET
 Closing PA hides the settings popup and PET button, not the enabled pet. The popup
 is outside the rail's clipping area. The Orb and prompt axis are unchanged.
 
-Open PET to select a local pet, turn it on/off, adjust its height from 64 to
-448 CSS pixels, or refresh the local catalog. Choices persist in this browser's
-`biggy:pets:v1` local storage, independently of chat sessions. A first installation
-is off; a missing selected pet is never silently replaced by an enabled pet.
+Open PET to add any number of local pet instances. The control separates the
+available catalog from the **On-screen objects** list, so two copies of the same
+pet can remain visible and still have independent size, placement, visibility,
+and animation timing. **Show all** and **Hide all** are global display controls;
+**Show/Hide selected** and **Remove selected** affect only the chosen instance.
+State persists in this browser's `biggy:pets:v2` local storage independently of
+chat sessions. Existing `biggy:pets:v1` single-pet state migrates once into one
+object instance. A missing catalog entry is retained but hidden and returns when
+that catalog entry becomes available again; it is never replaced silently.
 
-Drag the visible pet with a mouse or touch to place it anywhere on screen. Its
-position persists as viewport-relative coordinates and remains inside the viewport
-after resizing. With the pet focused, arrow keys move it 8 pixels (Shift: 24).
+Drag any visible pet with a mouse or touch to place it anywhere on screen. Clicking
+or focusing a pet selects that exact instance in the controls. Its position persists
+as viewport-relative coordinates and remains inside the viewport after resizing.
+With the pet focused, arrow keys move it 8 pixels (Shift: 24).
 Escape during a drag cancels that movement. **Place above Message Biggy** resets
 Bones to the default spot just above the left edge of the typing field. Biggy's
 **Place right of dialog** defaults to the right of the visible conversation lane,
 bottom-aligned; with no dialog, it falls back to the right of the message prompt.
-Each pet saves its own size, position, and animation controls. Biggy defaults to
+Each instance saves its own size, position, visibility, and animation controls. Biggy defaults to
 256px tall; the initial 128px Biggy setting is doubled once during migration.
 Opening PET
 temporarily avoids overlap with its controls without replacing the saved position.
@@ -47,7 +53,29 @@ Animation controls: **Animation speed** (25–150%), **Pause between animations*
 pause varied randomly from 4 to 12 seconds. Randomness changes rest time, not frame
 order, so the reach/sip/lower sequence remains coherent. Zero pause means continuous.
 Bones retains its original speed and continuous idle until changed. All controls
-persist per pet and add no model or voice calls.
+persist per instance and add no model or voice calls.
+
+## Future Orb / menu / dialog object
+
+The rebuilt Orb, menu buttons, and response dialog will enter this manager as one
+composite **cockpit object**, not as three unrelated pets and not as a passive
+sprite. The current control vocabulary already uses **Add pet / object** and
+**On-screen objects** for that reason. The POC integration will add a dedicated
+cockpit renderer behind the same instance lifecycle:
+
+- one object identity owns the Orb, its menu buttons, and its dialog geometry;
+- moving or resizing the object preserves their authored relationships;
+- interactive hit regions expose stable action IDs that relay to the existing
+  Hermes controls after the POC is accepted;
+- the cockpit object gets the same select/show/hide/position lifecycle as pets,
+  while pet-only animation controls are replaced by cockpit-specific controls;
+- replacing the legacy Orb is an explicit cutover: mount the accepted object,
+  rewire and verify every menu/dialog action, then retire the old DOM. The current
+  Orb remains authoritative until that cutover is complete.
+
+The future renderer must be code-backed (HTML/SVG/canvas with an allowlisted
+action map), even if its artwork arrives as a raster asset. A bitmap manifest
+alone will never be allowed to invent or execute menu actions.
 
 Manifest example:
 
@@ -75,9 +103,9 @@ browser refresh can pick up a replacement without an application restart.
 ## Performance and lifecycle
 
 No LLM, TTS, microphone, external request, or recurring catalog polling is used.
-The animation uses frame-specific timers only while enabled and the
-page is visible. Reduced-motion preferences stop animation. Disabled pets have no
-animation timer. The sprite accepts pointer input only within its own bounding
+Each instance uses its own frame-specific timer only while enabled and the page
+is visible. Reduced-motion preferences stop every animation. Disabled pets have no
+animation timer. Each sprite accepts pointer input only within its own bounding
 box for dragging; place it clear of controls you need to click. Its default position
 clears the prompt and it moves clear of the open resize/settings panel. Unmount releases timers,
 observers, pending catalog requests and listeners.
@@ -86,8 +114,9 @@ observers, pending catalog requests and listeners.
 
 - `./scripts/test.sh tests/test_biggy_pets.py`: catalog, multiple pets, missing
   files, version/path/symlink guards, replacement invalidation.
-- `node tests/browser_biggy_pets.cjs` with Playwright available: actual frontend
-  selection, visibility, sizing, drag/keyboard movement, saved position, unchanged composer geometry,
+- `node tests/browser_biggy_pets.cjs` with Playwright available: multiple copies
+  of one pet, independent selection/visibility/sizing/timing, show/hide-all,
+  drag/keyboard movement, saved position, v1 migration, unchanged composer geometry,
   reduced motion, missing selected pet, empty/error recovery and teardown.
   Isolated harness widths: 1920, 1366 and 390. This is responsive coverage of the
   pet component, not a claim that every existing Biggy panel is mobile-ready.
