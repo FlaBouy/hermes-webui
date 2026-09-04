@@ -14,7 +14,18 @@
   const GUI_ID = 'biggy';
   const PROFILE_ID = 'biggy';
   const PTT_INSTANCE = 'biggy';
-  const BUILD_ID = '20260903-review-tool-handoff-57';
+  // Reuse the content-version on this loader for every asset it injects.
+  // Keeping a separate hand-maintained value here allowed Chrome to serve an
+  // older pet controller even after biggy-brand.js itself had been refreshed.
+  const BRAND_ASSET_VERSION = (() => {
+    try {
+      return new URL(document.currentScript?.src || '', document.baseURI)
+        .searchParams.get('v') || '';
+    } catch (_) {
+      return '';
+    }
+  })();
+  const BUILD_ID = BRAND_ASSET_VERSION || 'biggy-runtime';
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';

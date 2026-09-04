@@ -1,8 +1,12 @@
 import json
+from pathlib import Path
 
 import pytest
 
 from api import biggy_pets
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def make_pet(root, name="bones", **changes):
@@ -91,3 +95,12 @@ def test_invalid_strip_layout(tmp_path, monkeypatch, changes):
     fields.update(changes)
     make_pet(tmp_path, "biggy", **fields)
     assert biggy_pets.catalog()["pets"] == []
+
+
+def test_pet_loader_uses_parent_asset_version_for_cache_busting():
+    brand = (ROOT / "static" / "biggy-brand.js").read_text(encoding="utf-8")
+    assert "document.currentScript?.src" in brand
+    assert "const BUILD_ID = BRAND_ASSET_VERSION || 'biggy-runtime';" in brand
+    assert "20260903-review-tool-handoff-57" not in brand
+    assert "biggy-pets.js?v=${BUILD_ID}" in brand
+    assert "biggy-pets.css?v=${BUILD_ID}" in brand
