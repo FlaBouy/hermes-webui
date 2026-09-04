@@ -369,12 +369,17 @@ def test_filter_rail_tree_and_iframe_subtree_contracts_are_present():
     assert "if (c === 'filter') return 'filter';" in BIGGY_JS
     assert "biggy-galaxy-filter-toggle" in BIGGY_JS
     assert "childGroup.hidden = !nextExpanded" in BIGGY_JS
+    assert "childGroup.hidden = false" in BIGGY_JS
+    assert "className = 'biggy-galaxy-filter-open'" in BIGGY_JS
+    assert "Focus galaxy on ${path}" in BIGGY_JS
     assert "biggy-galaxy-filter-children[hidden]" in BIGGY_CSS
     runtime = world._TRACE_RUNTIME
     assert "function applyDirectoryFilter(path)" in runtime
     assert "g.nodeVisibility(node =>" in runtime
     assert "g.linkVisibility(link =>" in runtime
-    assert "nodePath(node).startsWith(`${rel}/`)" in runtime
+    assert "candidate.startsWith(`${rel}/`)" in runtime
+    assert "['folder', 'document'].includes" in runtime
+    assert "rel.startsWith(`${candidate}/`)" in runtime
     assert "frameFilteredSubtree(selected, visible)" in runtime
     assert "directoryFilterPath" in runtime
     assert "if (directoryFilterPath && String(node && node.g) === 'folder')" in runtime

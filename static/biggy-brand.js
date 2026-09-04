@@ -4994,7 +4994,9 @@
       button.className = `biggy-galaxy-filter-row is-${kind}`;
       button.setAttribute('data-biggy-filter-path', path);
       button.setAttribute('data-biggy-filter-kind', kind);
-      button.title = kind === 'folder' ? `Focus galaxy on ${path}` : `Open ${path}`;
+      button.title = kind === 'folder'
+        ? `Expand and focus galaxy on ${path}`
+        : `Focus galaxy on ${path}`;
       const marker = document.createElement('span');
       marker.className = 'biggy-galaxy-filter-marker';
       marker.textContent = kind === 'folder' ? '◆' : '·';
@@ -5005,16 +5007,35 @@
       button.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        if (kind === 'document') {
-          openGalaxyFilterDocument(path);
-          return;
+        if (kind === 'folder' && childGroup) {
+          childGroup.hidden = false;
+          const toggle = line.querySelector('.biggy-galaxy-filter-toggle');
+          if (toggle) {
+            toggle.setAttribute('aria-expanded', 'true');
+            toggle.setAttribute('aria-label', `Collapse ${path}`);
+            toggle.textContent = '▾';
+          }
         }
         if (!postGalaxyFilterFocus(path)) {
           const status = document.getElementById('biggyGalaxyFilterStatus');
-          if (status) status.textContent = 'Galaxy is still starting. Try the folder again in a moment.';
+          if (status) status.textContent = 'Galaxy is still starting. Try the selection again in a moment.';
         }
       });
       line.appendChild(button);
+      if (kind === 'document') {
+        const openButton = document.createElement('button');
+        openButton.type = 'button';
+        openButton.className = 'biggy-galaxy-filter-open';
+        openButton.setAttribute('aria-label', `Open ${path}`);
+        openButton.title = `Open ${path}`;
+        openButton.textContent = '↗';
+        openButton.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          openGalaxyFilterDocument(path);
+        });
+        line.appendChild(openButton);
+      }
       entry.appendChild(line);
       if (kind === 'folder' && childGroup) {
         appendGalaxyFilterRows(childGroup, item, depth + 1);

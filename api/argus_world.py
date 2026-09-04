@@ -413,7 +413,7 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
     const rel = canonicalSource(path).replace(/\/+$/, '');
     const data = window.__os && window.__os.data;
     if (!g || !rel || !data || !Array.isArray(data.nodes)) return false;
-    const selected = data.nodes.find(node => String(node && node.g) === 'folder' && nodePath(node) === rel);
+    const selected = data.nodes.find(node => ['folder', 'document'].includes(String(node && node.g)) && nodePath(node) === rel);
     if (!selected) return false;
     traceToken += 1;
     if (destinationTimer) clearTimeout(destinationTimer);
@@ -430,9 +430,17 @@ _TRACE_RUNTIME = r'''<script id="biggy-rag-trace-runtime">
       nativeLinkVisibility = current === undefined ? (() => true) : current;
     }
     const visible = new Set();
+    const documentSelected = String(selected && selected.g) === 'document';
     for (const node of data.nodes) {
       const candidate = nodePath(node);
-      if (candidate === rel || nodePath(node).startsWith(`${rel}/`)) visible.add(idOf(node));
+      if (documentSelected) {
+        const group = String(node && node.g);
+        if (candidate === rel || group === 'prompt' || (group === 'folder' && rel.startsWith(`${candidate}/`))) {
+          visible.add(idOf(node));
+        }
+      } else if (candidate === rel || candidate.startsWith(`${rel}/`)) {
+        visible.add(idOf(node));
+      }
     }
     directoryFilterPath = rel;
     directoryFilterIds = visible;

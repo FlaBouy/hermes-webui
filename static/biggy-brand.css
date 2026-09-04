@@ -888,6 +888,15 @@ body.biggy-brand #btnWorkspacePanelEdgeToggle{display:none!important}
 #mainChat.biggy-brand-iwo .biggy-galaxy-filter-row.is-selected{
   border-left-color:#34d399;background:rgba(6,78,59,.34);color:#6ee7b7;
 }
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-open{
+  appearance:none;box-sizing:border-box;flex:0 0 27px;width:27px;height:27px;margin:0 1px 0 3px;padding:0;
+  border:1px solid transparent;border-radius:3px;background:transparent;color:#64748b;cursor:pointer;
+  font:800 12px/25px ui-monospace,SFMono-Regular,Menlo,monospace;text-align:center;
+}
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-line:hover .biggy-galaxy-filter-open,
+#mainChat.biggy-brand-iwo .biggy-galaxy-filter-open:focus-visible{
+  border-color:rgba(167,139,250,.42);background:rgba(76,29,149,.2);color:#c4b5fd;outline:none;
+}
 #mainChat.biggy-brand-iwo .biggy-galaxy-filter-marker{flex:0 0 10px;color:currentColor;text-align:center}
 #mainChat.biggy-brand-iwo .biggy-galaxy-filter-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #mainChat.biggy-brand-iwo .biggy-operator-state{

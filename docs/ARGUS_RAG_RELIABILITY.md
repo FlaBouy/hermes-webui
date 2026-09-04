@@ -93,6 +93,16 @@ imported module may execute directly from a removable/network mount. This is
 the guard against the macOS SIGBUS crashes caused by force-unmounted mapped
 Python pages.
 
+## Galaxy Filter navigation
+
+The top-rail Filter is a complete indexed-corpus navigator, not a fixed-depth
+folder picker. Clicking a folder row expands that folder and focuses its Galaxy
+subtree in the same action. Clicking a document row focuses the exact indexed
+document and its ancestor route. The separate arrow on a document row opens
+the source without changing this selection contract. HOME restores the full
+Galaxy. Only ledger-known indexed paths are exposed; the Filter never walks the
+NAS or advertises unindexed files.
+
 ## Release gates
 
 Run the independent black-box gate:
