@@ -21,9 +21,11 @@
 ## Menu buttons and tie-in lines
 
 
+## Resize, button proportions, and movable placement
+
+
 ## Recommended changes
 
 
 ## Accessibility or reduced-motion observations
-
 

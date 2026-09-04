@@ -3,27 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>A.R.G.U.S. Cockpit Pet POC</title>
+  <title>A.R.G.U.S. Cockpit Orb POC</title>
   <style>
     :root{color-scheme:dark}*{box-sizing:border-box}html,body{height:100%;margin:0}body{display:grid;place-items:center;overflow:hidden;background:#01040a;color:#93a4b7;font-family:"SF Mono",ui-monospace,monospace}
     body::before{content:"";position:fixed;inset:0;opacity:.55;background-image:radial-gradient(circle at 12% 18%,#9fc4ff 0 1px,transparent 1.4px),radial-gradient(circle at 76% 32%,#6fa2e8 0 1px,transparent 1.4px),radial-gradient(circle at 42% 74%,#b9d2ff 0 1px,transparent 1.4px);background-size:113px 127px,179px 151px,211px 193px}
-    main{position:relative;z-index:1;display:grid;justify-items:center;gap:6px}.tag{font-size:10px;letter-spacing:.18em;color:#5f8099;text-transform:uppercase}.hint{font-size:10px;color:#536675}.states,.personalize{display:flex;align-items:center;gap:6px}.states button,.personalize button,.personalize input{border:1px solid #263747;border-radius:5px;background:#071019;color:#8ea1b4;padding:5px 10px;font:800 9px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.08em}.states button,.personalize button{cursor:pointer}.states button.active{color:#68efce;border-color:#34d399;background:#082018;box-shadow:0 0 8px rgba(52,211,153,.22)}.personalize label{font-size:9px;letter-spacing:.12em;color:#71879a}.personalize input{width:184px;color:#eefcff;border-color:#315166;outline:none}.personalize input:focus{border-color:#35d9ff;box-shadow:0 0 7px rgba(53,217,255,.2)}
+    main{position:relative;z-index:1;display:grid;justify-items:center;gap:6px}.tag{font-size:10px;letter-spacing:.18em;color:#5f8099;text-transform:uppercase}.hint{font-size:10px;color:#536675}.states,.personalize,.layout{display:flex;align-items:center;gap:6px}.states button,.personalize button,.personalize input,.layout button{border:1px solid #263747;border-radius:5px;background:#071019;color:#8ea1b4;padding:5px 10px;font:800 9px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.08em}.states button,.personalize button,.layout button{cursor:pointer}.states button.active,.layout button.dragging{color:#68efce;border-color:#34d399;background:#082018;box-shadow:0 0 8px rgba(52,211,153,.22)}.personalize label,.layout label,.layout output{font-size:9px;letter-spacing:.12em;color:#71879a}.personalize input{width:184px;color:#eefcff;border-color:#315166;outline:none}.personalize input:focus{border-color:#35d9ff;box-shadow:0 0 7px rgba(53,217,255,.2)}.layout input{width:150px;accent-color:#34d399}.layout output{width:38px;color:#bceee2}.layout button#move-orb{touch-action:none;cursor:grab}.layout button#move-orb.dragging{cursor:grabbing}#stage{position:relative;transform:translate3d(var(--stage-x,0),var(--stage-y,0),0);will-change:transform}
   </style>
-  <script src="./argus-cockpit-pet-poc.js" defer></script>
+  <script src="./argus-cockpit-pet-poc.js?v=20260904-0824" defer></script>
 </head>
 <body>
   <main>
-    <div class="tag">Isolated cockpit-pet proof of concept — no production wiring</div>
+    <div class="tag">Isolated cockpit-orb proof of concept — no production wiring</div>
     <div class="personalize"><label for="orb-name">ORB NAME</label><input id="orb-name" maxlength="20" value="A.R.G.U.S." autocomplete="off" spellcheck="false"><button id="reset-name" type="button">RESET</button></div>
+    <div class="layout"><label for="orb-scale">SIZE</label><input id="orb-scale" type="range" min="60" max="140" step="5" value="100"><output id="scale-value" for="orb-scale">100%</output><button id="move-orb" type="button">DRAG TO MOVE</button><button id="reset-layout" type="button">CENTER</button></div>
     <div class="states" aria-label="POC state simulator"><button type="button" data-state="online" class="active">IDLE</button><button type="button" data-state="thinking">THINKING</button><button type="button" data-state="speaking">SPEAKING</button><button type="button" data-state="working">WORKING</button><button type="button" data-state="success">SUCCESS</button><button type="button" data-state="warning">WARNING</button><button type="button" data-state="error">ERROR</button></div>
-    <argus-cockpit-pet id="poc" label="A.R.G.U.S." model="GPT-OSS-120B" status="online"></argus-cockpit-pet>
-    <div class="hint">Move the pointer to aim the eye. Hover or select a menu path, then try the state simulator.</div>
+    <div id="stage"><argus-cockpit-pet id="poc" label="A.R.G.U.S." model="GPT-OSS-120B" size="100" status="online"></argus-cockpit-pet></div>
+    <div class="hint">Aim the eye, select a menu path, try the states, resize the whole entity, or drag it to a new position.</div>
   </main>
   <script>
     addEventListener('DOMContentLoaded', () => {
       const pet = document.getElementById('poc');
       const nameInput = document.getElementById('orb-name');
       const nameKey = 'argus-cockpit-poc-label';
+      const stage = document.getElementById('stage');
+      const scaleInput = document.getElementById('orb-scale');
+      const scaleValue = document.getElementById('scale-value');
+      const moveOrb = document.getElementById('move-orb');
+      const layoutKey = 'argus-cockpit-poc-layout';
+      let layout = { size: 100, x: 0, y: 0 };
       const applyName = value => {
         const label = String(value || '').slice(0, 20);
         nameInput.value = label;
@@ -33,6 +40,57 @@
       try { applyName(localStorage.getItem(nameKey) || 'A.R.G.U.S.'); } catch (_) { applyName('A.R.G.U.S.'); }
       nameInput.addEventListener('input', () => applyName(nameInput.value));
       document.getElementById('reset-name').addEventListener('click', () => applyName('A.R.G.U.S.'));
+      const numberIn = (value, low, high, fallback) => {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? Math.min(high, Math.max(low, parsed)) : fallback;
+      };
+      const saveLayout = () => { try { localStorage.setItem(layoutKey, JSON.stringify(layout)); } catch (_) {} };
+      const applyLayout = (save = true) => {
+        layout.size = numberIn(layout.size, 60, 140, 100);
+        pet.setAttribute('size', layout.size);
+        scaleInput.value = String(layout.size);
+        scaleValue.textContent = `${layout.size}%`;
+        const rect = stage.getBoundingClientRect();
+        const baseLeft = rect.left - layout.x;
+        const baseTop = rect.top - layout.y;
+        const minX = 16 - baseLeft;
+        const maxX = innerWidth - 16 - (baseLeft + rect.width);
+        const minY = 16 - baseTop;
+        const maxY = innerHeight - 16 - (baseTop + rect.height);
+        layout.x = minX <= maxX ? numberIn(layout.x, minX, maxX, 0) : 0;
+        layout.y = minY <= maxY ? numberIn(layout.y, minY, maxY, 0) : 0;
+        stage.style.setProperty('--stage-x', `${layout.x}px`);
+        stage.style.setProperty('--stage-y', `${layout.y}px`);
+        if (save) saveLayout();
+      };
+      try {
+        const saved = JSON.parse(localStorage.getItem(layoutKey) || 'null');
+        if (saved && typeof saved === 'object') layout = { size: saved.size, x: saved.x, y: saved.y };
+      } catch (_) {}
+      applyLayout(false);
+      scaleInput.addEventListener('input', () => { layout.size = Number(scaleInput.value); applyLayout(); });
+      document.getElementById('reset-layout').addEventListener('click', () => { layout = { size: 100, x: 0, y: 0 }; applyLayout(); });
+      moveOrb.addEventListener('pointerdown', event => {
+        const origin = { pointerX: event.clientX, pointerY: event.clientY, x: layout.x, y: layout.y };
+        moveOrb.classList.add('dragging');
+        moveOrb.setPointerCapture(event.pointerId);
+        const drag = moveEvent => {
+          layout.x = origin.x + moveEvent.clientX - origin.pointerX;
+          layout.y = origin.y + moveEvent.clientY - origin.pointerY;
+          applyLayout(false);
+        };
+        const finish = () => {
+          moveOrb.classList.remove('dragging');
+          moveOrb.removeEventListener('pointermove', drag);
+          moveOrb.removeEventListener('pointerup', finish);
+          moveOrb.removeEventListener('pointercancel', finish);
+          saveLayout();
+        };
+        moveOrb.addEventListener('pointermove', drag);
+        moveOrb.addEventListener('pointerup', finish);
+        moveOrb.addEventListener('pointercancel', finish);
+      });
+      addEventListener('resize', () => applyLayout(false));
       pet.addEventListener('argus-cockpit-action', event => {
         const active = pet._previewActive === event.detail.action ? null : event.detail.action;
         pet._previewActive = active;

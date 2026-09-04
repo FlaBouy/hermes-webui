@@ -26,6 +26,16 @@ const server = http.createServer((req,res) => {
     await page.locator('#orb-name').fill('WATCHTOWER');
     assert.equal(await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelector('.name').textContent), 'WATCHTOWER');
     assert.equal(await page.locator('argus-cockpit-pet').getAttribute('label'), 'WATCHTOWER');
+    const beforeWidth = await page.locator('argus-cockpit-pet').evaluate(el => el.getBoundingClientRect().width);
+    await page.locator('#orb-scale').fill('60');
+    const afterWidth = await page.locator('argus-cockpit-pet').evaluate(el => el.getBoundingClientRect().width);
+    assert.ok(afterWidth < beforeWidth);
+    const proportions = await page.locator('argus-cockpit-pet').evaluate(el => {
+      const root = el.shadowRoot; const hostWidth = el.getBoundingClientRect().width; const button = root.querySelector('button').getBoundingClientRect();
+      return { width: button.width / hostWidth, height: button.height / hostWidth };
+    });
+    assert.ok(Math.abs(proportions.width - .11667) < .002);
+    assert.ok(Math.abs(proportions.height - .0375) < .002);
     const before = await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.getElementById('eye').style.translate);
     await page.mouse.move(1320, 80); await page.waitForTimeout(180);
     const after = await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.getElementById('eye').style.translate);
@@ -48,6 +58,6 @@ const server = http.createServer((req,res) => {
       assert.equal(await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelector('.entity').dataset.state), state);
     }
     assert.deepEqual(errors, []);
-    console.log('PASS: portable cockpit-pet, editable label, state animation, menu path feedback, bounded cursor-tracking eye');
+    console.log('PASS: portable cockpit-pet, editable label, unified scaling/placement, state animation, menu path feedback, bounded cursor-tracking eye');
   } finally { await browser.close(); server.close(); }
 })().catch(error => { console.error(error); process.exitCode=1; });

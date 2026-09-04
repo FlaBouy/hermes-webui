@@ -63,6 +63,39 @@ The packaging script combines the HTML, JavaScript, Orb PNG, reviewer README, an
 feedback worksheet into one uploadable ZIP. The package remains inert: menu
 events are visible demonstrations only and call no external service.
 
+The preview treats the Orb, menu buttons, tie-ins, name, and model/state readout
+as one scalable object. The Size control supports 60–140 percent; button boxes,
+labels, borders, glows, and readout geometry use the component's own width as
+their scale reference, so they retain their relationship to the Orb. **Drag to
+Move** repositions the complete entity while keeping it inside the viewport, and
+**Center** restores the 100-percent default position. Layout is saved only in the
+tester's browser. These preview controls are not the future production controls;
+the production multi-object manager remains the eventual state owner.
+
+The editable name uses an optical offset rather than ordinary whole-string
+centering: the center of the `G` in the default `A.R.G.U.S.` label aligns to the
+Orb centerline without moving the model/status readout below it.
+
+Menu feedback is deliberately restrained. A quiet dotted carrier terminates at
+an exposed connector node outside each button—no linework runs beneath a button.
+The two button banks sit far enough outside the Orb to leave the carrier and its
+traveling signal legible at every supported scale while remaining mirrored. Tie
+paths originate at the artwork's visible illuminated outer perimeter rather than
+the PNG's transparent image boundary, so the full enlarged carrier remains
+visible between the Orb and connector. Each elbow sits halfway toward its button,
+softening the indexed break angle and shortening the final horizontal approach.
+Hover repeatedly sends a bright, tapered energy pulse from the Orb to the button
+for as long as pointer hover or keyboard focus is maintained. Once selected, the
+complete carrier becomes a solid highlighted line and breathes slowly with its
+green button and connector node, so a live connection cannot be mistaken for an
+idle dotted path; it does not repeatedly fire a projectile.
+Working breathes cyan;
+success sends one green
+confirmation; warning flashes orange slowly; and error flashes red more urgently.
+Deactivation retracts the path toward the Orb. Only selected paths animate
+continuously, warning/error override hover, and reduced-motion preferences stop
+all nonessential movement while retaining the state colors.
+
 The sample sheet at
 `Build Docs/Argus V1.0/Graphics/Orb/Codex Image Sep 4, 2026, 06_17_48 AM.png`
 is a useful reference for future state vocabulary—idle, listening/PTT, thinking,

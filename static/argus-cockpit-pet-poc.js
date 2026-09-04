@@ -11,7 +11,7 @@
   ];
 
   class ArgusCockpitPet extends HTMLElement {
-    static get observedAttributes() { return ['label', 'model', 'status', 'tracking']; }
+    static get observedAttributes() { return ['label', 'model', 'size', 'status', 'tracking']; }
 
     constructor() {
       super();
@@ -19,12 +19,14 @@
       this._target = { x: 0, y: 0 };
       this._eye = { x: 0, y: 0 };
       this._frame = 0;
+      this._deactivateTimers = new Map();
+      this._selectTimers = new Map();
       this._onPointerMove = event => this.track(event.clientX, event.clientY);
       this._onPointerLeave = () => this.centerEye();
       this._onBlur = () => this.centerEye();
       this.shadowRoot.innerHTML = `
         <style>
-          :host{display:block;width:min(720px,96vw);aspect-ratio:1200/720;contain:layout style;user-select:none;color:#b9c4d2;font-family:"SF Mono",ui-monospace,monospace}
+          :host{display:block;width:min(var(--pet-width,720px),96vw,120vh);aspect-ratio:1200/720;contain:layout style;container-type:inline-size;user-select:none;color:#b9c4d2;font-family:"SF Mono",ui-monospace,monospace}
           *{box-sizing:border-box}.entity{position:relative;width:100%;height:100%;overflow:visible}
           svg{position:absolute;inset:0;width:100%;height:100%;overflow:visible;filter:drop-shadow(0 0 14px rgba(22,188,237,.15))}
           .profile{fill:#01060b;opacity:.99}
@@ -35,34 +37,45 @@
           .confirmation-sweep{fill:none;stroke:#5eead4;stroke-width:5;stroke-linecap:round;stroke-dasharray:0 830;opacity:0;pointer-events:none}
           .lamp{animation:lampIdle 5.6s ease-in-out infinite}
           .eye{transform-box:view-box;transform-origin:596px 404px;will-change:transform}
-          .tie{fill:none;stroke:#27bce8;stroke-width:1.7;stroke-dasharray:3 5;opacity:.62;transition:stroke .18s ease,stroke-width .18s ease,opacity .18s ease,filter .18s ease}
+          .tie{fill:none;stroke:#35d9ff;stroke-width:1.9;stroke-dasharray:3 5;opacity:.8;transition:stroke .18s ease,stroke-width .18s ease,opacity .18s ease,filter .18s ease}
+          .signal-trail,.signal-head{fill:none;stroke:#eafcff;stroke-linecap:round;opacity:0;pointer-events:none;filter:drop-shadow(0 0 6px rgba(104,235,255,1))}
+          .signal-trail{stroke-width:3.5;stroke-dasharray:1 3 1 6 1 10 1 177}.signal-head{stroke-width:7;stroke-dasharray:1 199}
           .node{fill:#061421;stroke:#33dfff;stroke-width:2;transition:fill .18s ease,stroke .18s ease,filter .18s ease}
-          .tie.hover{stroke:#eafcff;stroke-width:2.1;opacity:.92;filter:drop-shadow(0 0 3px rgba(234,252,255,.45))}.node.hover{stroke:#eafcff;filter:drop-shadow(0 0 3px rgba(234,252,255,.55))}
-          .tie.active{stroke:#fff;stroke-width:2.7;opacity:1;animation:tieFlow 1.8s linear infinite;filter:drop-shadow(0 0 4px rgba(255,255,255,.7))}.node.active{fill:#34d399;stroke:#fff;filter:drop-shadow(0 0 5px rgba(52,211,153,.9))}
-          button{position:absolute;width:84px;height:27px;transform:translate(-50%,-50%);border:1px solid #303b48;border-radius:5px;background:rgba(8,15,23,.94);color:#aab5c3;font:800 10px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.05em;cursor:pointer;z-index:2}
-          button:hover,button:focus-visible{color:#eafcff;border-color:#35d9ff;outline:none;box-shadow:0 0 7px rgba(53,217,255,.18)}button.active{color:#69efcd;border-color:#34d399;background:#082018;box-shadow:0 0 10px rgba(52,211,153,.3)}
-          .name{position:absolute;left:50%;bottom:37px;transform:translateX(-50%);max-width:54%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font:900 17px/1 "SF Mono",ui-monospace,monospace;letter-spacing:.2em;text-shadow:0 0 8px rgba(112,225,255,.72)}
-          .readout{position:absolute;left:50%;bottom:4px;transform:translateX(-50%);width:224px;padding:5px 10px;display:flex;justify-content:center;gap:12px;border:1px solid rgba(52,211,153,.42);border-radius:999px;background:rgba(5,16,14,.88);font-size:10px;font-weight:800;letter-spacing:.09em;color:#34d399;white-space:nowrap}
-          .state::before{content:"";display:inline-block;width:7px;height:7px;margin-right:6px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor}.state{min-width:74px;text-align:center;transition:color .2s ease,text-shadow .2s ease}
+          .tie.hover:not(.active){stroke:#eafcff;stroke-width:2.1;opacity:.92;filter:drop-shadow(0 0 3px rgba(234,252,255,.45))}.signal-trail.hover:not(.active),.signal-head.hover:not(.active){animation:energyToButton 1.15s ease-in-out infinite}.node.hover:not(.active){stroke:#eafcff;animation:hoverNode 1.15s ease-in-out infinite;filter:drop-shadow(0 0 3px rgba(234,252,255,.55))}
+          .tie.active{stroke:#fff;stroke-width:2.7;stroke-dasharray:none;opacity:1;animation:selectedPathPulse 3.6s ease-in-out infinite;filter:drop-shadow(0 0 4px rgba(255,255,255,.7))}.signal-trail.selecting,.signal-head.selecting{animation:energyToButton .78s ease-out 1}.node.active{fill:#34d399;stroke:#fff;animation:selectedNodePulse 3.6s ease-in-out infinite;filter:drop-shadow(0 0 5px rgba(52,211,153,.9))}
+          .tie.deactivating{animation:pathRetract .5s ease-in 1}.node.deactivating{animation:nodeRetract .5s ease-in 1}
+          button{position:absolute;width:11.667cqw;height:3.75cqw;transform:translate(-50%,-50%);border:max(1px,.139cqw) solid #303b48;border-radius:.694cqw;background:rgba(8,15,23,.94);color:#aab5c3;font:800 1.389cqw/1 "SF Mono",ui-monospace,monospace;letter-spacing:.05em;cursor:pointer;z-index:2}
+          button:hover,button:focus-visible{color:#eafcff;border-color:#35d9ff;outline:none;animation:hoverButton .32s ease-out 1;box-shadow:0 0 .972cqw rgba(53,217,255,.18)}button.active{color:#69efcd;border-color:#34d399;background:#082018;animation:activeButton 2.8s ease-in-out infinite;box-shadow:0 0 1.389cqw rgba(52,211,153,.3)}button.deactivating{animation:buttonRetract .36s ease-in 1}
+          .name{position:absolute;left:calc(50% + .94cqw);bottom:5.139cqw;transform:translateX(-50%);max-width:54%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#fff;font:900 2.361cqw/1 "SF Mono",ui-monospace,monospace;letter-spacing:.2em;text-shadow:0 0 1.111cqw rgba(112,225,255,.72)}
+          .readout{position:absolute;left:50%;bottom:.556cqw;transform:translateX(-50%);width:31.111cqw;padding:.694cqw 1.389cqw;display:flex;justify-content:center;gap:1.667cqw;border:max(1px,.139cqw) solid rgba(52,211,153,.42);border-radius:999px;background:rgba(5,16,14,.88);font-size:1.389cqw;font-weight:800;letter-spacing:.09em;color:#34d399;white-space:nowrap}
+          .state::before{content:"";display:inline-block;width:.972cqw;height:.972cqw;margin-right:.833cqw;border-radius:50%;background:currentColor;box-shadow:0 0 1.111cqw currentColor}.state{min-width:10.278cqw;text-align:center;transition:color .2s ease,text-shadow .2s ease}
           .entity[data-state="thinking"] .solid{animation-duration:7s}.entity[data-state="thinking"] .dash{animation-duration:10s}.entity[data-state="thinking"] .state{color:#f6bd43;text-shadow:0 0 7px rgba(246,189,67,.58)}
           .entity[data-state="thinking"] .eye-glow{animation-duration:2.8s}.entity[data-state="thinking"] .lamp{animation-duration:2.8s}
           .entity[data-state="speaking"] .eye-glow{animation:speechEye 1.35s ease-in-out infinite}.entity[data-state="speaking"] .lamp{animation:speechLamp 1.35s ease-in-out infinite}.entity[data-state="speaking"] .state{color:#67e8f9;text-shadow:0 0 7px rgba(103,232,249,.62)}
-          .entity[data-state="working"] .solid{animation:stepCw 4.8s steps(12,end) infinite}.entity[data-state="working"] .dash{animation-duration:18s}.entity[data-state="working"] .state{color:#67e8f9;text-shadow:0 0 7px rgba(103,232,249,.62)}
-          .entity[data-state="success"] .confirmation-sweep{animation:confirmSweep 1.05s ease-out 1}.entity[data-state="success"] .state{color:#5eead4;text-shadow:0 0 8px rgba(94,234,212,.72)}.entity[data-state="success"] .tie.active{stroke:#5eead4;animation:successPath .9s ease-out 1}.entity[data-state="success"] .node.active{fill:#5eead4}
-          .entity[data-state="warning"] .state,.entity[data-state="warning"] .tie.active{color:#f6bd43;stroke:#f6bd43}.entity[data-state="warning"] .node.active{fill:#f6bd43;stroke:#fff}.entity[data-state="warning"] .eye-glow{stroke:#f59e0b;animation:warningRing 1.8s ease-in-out infinite}
-          .entity[data-state="error"] .state,.entity[data-state="error"] .tie.active{color:#fb5353;stroke:#fb5353}.entity[data-state="error"] .node.active{fill:#fb5353;stroke:#fff}.entity[data-state="error"] .eye-glow{stroke:#fb3030;animation:errorRing .72s ease-in-out infinite}
-          @keyframes cw{to{transform:rotate(360deg)}}@keyframes ccw{to{transform:rotate(-360deg)}}@keyframes tieFlow{to{stroke-dashoffset:-32}}
-          @keyframes stepCw{to{transform:rotate(360deg)}}@keyframes confirmSweep{0%{opacity:0;stroke-dasharray:0 830;transform:rotate(-90deg)}18%{opacity:1}72%{opacity:1;stroke-dasharray:830 0;transform:rotate(-90deg)}100%{opacity:0;stroke-dasharray:830 0;transform:rotate(-90deg)}}@keyframes successPath{0%{opacity:.35;stroke-dashoffset:32}45%{opacity:1}100%{opacity:1;stroke-dashoffset:-32}}
+          .entity[data-state="working"] .solid{animation:stepCw 4.8s steps(12,end) infinite}.entity[data-state="working"] .dash{animation-duration:18s}.entity[data-state="working"] .state{color:#67e8f9;text-shadow:0 0 7px rgba(103,232,249,.62)}.entity[data-state="working"] button.active{color:#67e8f9;border-color:#35d9ff;animation:workingButton 1.8s ease-in-out infinite}
+          .entity[data-state="success"] .confirmation-sweep{animation:confirmSweep 1.05s ease-out 1}.entity[data-state="success"] .state{color:#5eead4;text-shadow:0 0 8px rgba(94,234,212,.72)}.entity[data-state="success"] .tie.active{stroke:#5eead4}.entity[data-state="success"] .node.active{fill:#5eead4;animation:successNode .9s ease-out 1}.entity[data-state="success"] button.active{color:#5eead4;border-color:#5eead4;animation:successButton .9s ease-out 1}
+          .entity[data-state="warning"] .state,.entity[data-state="warning"] .tie.active{color:#f6bd43;stroke:#f6bd43}.entity[data-state="warning"] .node.active{fill:#f6bd43;stroke:#fff;animation:warningSignal 1.8s ease-in-out infinite}.entity[data-state="warning"] button.active{color:#f6bd43;border-color:#f6bd43;animation:warningButton 1.8s ease-in-out infinite}.entity[data-state="warning"] .eye-glow{stroke:#f59e0b;animation:warningRing 1.8s ease-in-out infinite}
+          .entity[data-state="error"] .state,.entity[data-state="error"] .tie.active{color:#fb5353;stroke:#fb5353}.entity[data-state="error"] .node.active{fill:#fb5353;stroke:#fff;animation:errorSignal .72s ease-in-out infinite}.entity[data-state="error"] button.active{color:#fb5353;border-color:#fb5353;animation:errorButton .72s ease-in-out infinite}.entity[data-state="error"] .eye-glow{stroke:#fb3030;animation:errorRing .72s ease-in-out infinite}
+          @keyframes cw{to{transform:rotate(360deg)}}@keyframes ccw{to{transform:rotate(-360deg)}}
+          @keyframes energyToButton{0%{stroke-dashoffset:0;opacity:0}12%{opacity:1}80%{opacity:1}100%{stroke-dashoffset:-99;opacity:0}}@keyframes selectedPathPulse{0%,100%{opacity:.72;filter:drop-shadow(0 0 2px rgba(255,255,255,.42))}50%{opacity:1;filter:drop-shadow(0 0 6px rgba(255,255,255,.9))}}@keyframes selectedNodePulse{0%,100%{filter:drop-shadow(0 0 3px rgba(52,211,153,.55))}50%{filter:drop-shadow(0 0 8px rgba(52,211,153,1))}}
+          @keyframes hoverNode{0%{opacity:.35}82%{opacity:.35}100%{opacity:1}}@keyframes hoverButton{0%{filter:brightness(.82)}100%{filter:brightness(1)}}
+          @keyframes activeButton{0%,100%{box-shadow:0 0 .833cqw rgba(52,211,153,.2)}50%{box-shadow:0 0 1.389cqw rgba(52,211,153,.42)}}
+          @keyframes workingButton{0%,100%{box-shadow:0 0 .694cqw rgba(53,217,255,.18)}50%{box-shadow:0 0 1.528cqw rgba(53,217,255,.52)}}
+          @keyframes pathRetract{from{stroke:#fff;stroke-width:2.7;opacity:1;stroke-dashoffset:0}to{stroke:#35d9ff;stroke-width:1.9;opacity:.35;stroke-dashoffset:28}}@keyframes nodeRetract{from{fill:#34d399;stroke:#fff}to{fill:#061421;stroke:#33dfff}}@keyframes buttonRetract{from{color:#69efcd;border-color:#34d399;background:#082018;box-shadow:0 0 1.389cqw rgba(52,211,153,.3)}to{color:#aab5c3;border-color:#303b48;background:rgba(8,15,23,.94);box-shadow:none}}
+          @keyframes stepCw{to{transform:rotate(360deg)}}@keyframes confirmSweep{0%{opacity:0;stroke-dasharray:0 830;transform:rotate(-90deg)}18%{opacity:1}72%{opacity:1;stroke-dasharray:830 0;transform:rotate(-90deg)}100%{opacity:0;stroke-dasharray:830 0;transform:rotate(-90deg)}}
+          @keyframes successNode{0%{filter:none}45%{filter:drop-shadow(0 0 9px rgba(94,234,212,1))}100%{filter:drop-shadow(0 0 5px rgba(52,211,153,.9))}}@keyframes successButton{0%{box-shadow:none}45%{box-shadow:0 0 1.806cqw rgba(94,234,212,.72)}100%{box-shadow:0 0 1.389cqw rgba(52,211,153,.3)}}
           @keyframes eyeBreathe{0%,100%{opacity:.34;filter:brightness(.78)}50%{opacity:.76;filter:brightness(1.13) drop-shadow(0 0 8px rgba(255,56,48,.62))}}
           @keyframes lampIdle{0%,100%{opacity:.22}50%{opacity:.58}}
           @keyframes speechEye{0%,100%{opacity:.42;transform:scale(.985);filter:brightness(.86)}18%{opacity:.9;transform:scale(1.025);filter:brightness(1.28) drop-shadow(0 0 10px rgba(255,56,48,.76))}42%{opacity:.56;transform:scale(.995);filter:brightness(.96)}63%{opacity:1;transform:scale(1.035);filter:brightness(1.38) drop-shadow(0 0 12px rgba(255,56,48,.82))}82%{opacity:.62;transform:scale(1);filter:brightness(1.02)}}
           @keyframes speechLamp{0%,100%{opacity:.22}18%{opacity:.72}42%{opacity:.36}63%{opacity:.92}82%{opacity:.44}}
           @keyframes warningRing{0%,100%{opacity:.28;filter:brightness(.72)}50%{opacity:1;filter:brightness(1.35) drop-shadow(0 0 9px rgba(245,158,11,.82))}}
           @keyframes errorRing{0%,100%{opacity:.22;filter:brightness(.68)}50%{opacity:1;filter:brightness(1.5) drop-shadow(0 0 12px rgba(251,48,48,.96))}}
-          @media(prefers-reduced-motion:reduce){.solid,.dash,.eye-glow,.lamp,.tie.active,.confirmation-sweep{animation:none!important}}
+          @keyframes warningSignal{0%,100%{opacity:.35;filter:none}50%{opacity:1;filter:drop-shadow(0 0 8px rgba(246,189,67,.95))}}@keyframes warningButton{0%,100%{background:#241b08;box-shadow:0 0 .556cqw rgba(246,189,67,.16)}50%{background:#392707;box-shadow:0 0 1.528cqw rgba(246,189,67,.68)}}
+          @keyframes errorSignal{0%,100%{opacity:.28;filter:none}50%{opacity:1;filter:drop-shadow(0 0 10px rgba(251,83,83,1))}}@keyframes errorButton{0%,100%{background:#26090b;box-shadow:0 0 .556cqw rgba(251,83,83,.18)}50%{background:#470b10;box-shadow:0 0 1.667cqw rgba(251,83,83,.82)}}
+          @media(prefers-reduced-motion:reduce){.solid,.dash,.eye-glow,.lamp,.tie,.signal-trail,.signal-head,.node,button,.confirmation-sweep{animation:none!important}}
         </style>
         <div class="entity" part="entity" data-state="idle">
-          <svg viewBox="0 60 1200 720" role="img" aria-label="A.R.G.U.S. cockpit pet proof of concept">
+          <svg viewBox="0 60 1200 720" role="img" aria-label="A.R.G.U.S. cockpit Orb proof of concept">
             <defs>
               <radialGradient id="iris" cx="38%" cy="34%"><stop stop-color="#ffb1a3"/><stop offset=".16" stop-color="#ff5147"/><stop offset=".5" stop-color="#b5121c"/><stop offset=".82" stop-color="#4e050d"/><stop offset="1" stop-color="#170207"/></radialGradient>
               <radialGradient id="lens" cx="36%" cy="30%"><stop stop-color="#4b171b"/><stop offset=".48" stop-color="#13070b"/><stop offset="1" stop-color="#020509"/></radialGradient>
@@ -117,6 +130,10 @@
       document.removeEventListener('pointermove', this._onPointerMove);
       document.documentElement.removeEventListener('mouseleave', this._onPointerLeave);
       window.removeEventListener('blur', this._onBlur);
+      this._deactivateTimers.forEach(timer => clearTimeout(timer));
+      this._deactivateTimers.clear();
+      this._selectTimers.forEach(timer => clearTimeout(timer));
+      this._selectTimers.clear();
       cancelAnimationFrame(this._frame);
       this._frame = 0;
     }
@@ -131,17 +148,26 @@
         const row = index % 6;
         const y = 250 + row * 60;
         const inward = [40, 20, 0, 0, 20, 40][row];
-        const x = side === 'left' ? 250 + inward : 950 - inward;
-        const elbow = side === 'left' ? 360 : 840;
-        const dx = elbow - 596, dy = y - 404, length = Math.hypot(dx, dy) || 1;
-        const edgeX = 596 + dx / length * 270, edgeY = 404 + dy / length * 270;
+        const leftX = 100 + inward;
+        const x = side === 'left' ? leftX : 1192 - leftX;
+        const connectorX = x + (side === 'left' ? 78 : -78);
+        const dx = connectorX - 596, dy = y - 404, length = Math.hypot(dx, dy) || 1;
+        const outerRadius = 250;
+        const edgeX = 596 + dx / length * outerRadius, edgeY = 404 + dy / length * outerRadius;
+        const bendX = edgeX + (connectorX - edgeX) * 0.5;
         const path = document.createElementNS(NS, 'path');
         const actionId = action.toLowerCase();
         path.setAttribute('class', 'tie'); path.dataset.action = actionId;
-        path.setAttribute('d', `M ${edgeX} ${edgeY} L ${elbow} ${y} L ${x} ${y}`);
+        path.setAttribute('d', `M ${edgeX} ${edgeY} L ${bendX} ${y} L ${connectorX} ${y}`);
+        const signalTrail = document.createElementNS(NS, 'path');
+        signalTrail.setAttribute('class', 'signal-trail'); signalTrail.dataset.action = actionId; signalTrail.setAttribute('pathLength', 100);
+        signalTrail.setAttribute('d', path.getAttribute('d'));
+        const signalHead = document.createElementNS(NS, 'path');
+        signalHead.setAttribute('class', 'signal-head'); signalHead.dataset.action = actionId; signalHead.setAttribute('pathLength', 100);
+        signalHead.setAttribute('d', path.getAttribute('d'));
         const node = document.createElementNS(NS, 'circle');
-        node.setAttribute('class', 'node'); node.dataset.action = actionId; node.setAttribute('cx', x); node.setAttribute('cy', y); node.setAttribute('r', 7);
-        ties.append(path, node);
+        node.setAttribute('class', 'node'); node.dataset.action = actionId; node.setAttribute('cx', connectorX); node.setAttribute('cy', y); node.setAttribute('r', 7);
+        ties.append(path, signalTrail, signalHead, node);
         const button = document.createElement('button');
         button.type = 'button'; button.dataset.action = actionId; button.textContent = action;
         button.style.left = `${x / 12}%`; button.style.top = `${(y - 60) / 7.2}%`;
@@ -164,6 +190,9 @@
       const model = this.getAttribute('model') || 'GPT-OSS-120B';
       const status = (this.getAttribute('status') || 'ONLINE').toUpperCase();
       const label = (this.getAttribute('label') || 'A.R.G.U.S.').trim().slice(0, 20) || 'A.R.G.U.S.';
+      const requestedSize = Number(this.getAttribute('size') || 100);
+      const size = Math.min(140, Math.max(60, Number.isFinite(requestedSize) ? requestedSize : 100));
+      this.style.setProperty('--pet-width', `${720 * size / 100}px`);
       this.shadowRoot.querySelector('.name').textContent = label;
       this.shadowRoot.querySelector('.model').textContent = `◆ ${model}`;
       this.shadowRoot.querySelector('.state').textContent = status;
@@ -192,6 +221,31 @@
 
     setActiveActions(actions = []) {
       const active = new Set(Array.from(actions, value => String(value).toLowerCase()));
+      const wasActive = new Set(Array.from(this.shadowRoot.querySelectorAll('button.active'), node => node.dataset.action));
+      wasActive.forEach(action => {
+        if (active.has(action)) return;
+        clearTimeout(this._deactivateTimers.get(action));
+        this.paintActionClass(action, 'deactivating', true);
+        const timer = setTimeout(() => {
+          this.paintActionClass(action, 'deactivating', false);
+          this._deactivateTimers.delete(action);
+        }, 520);
+        this._deactivateTimers.set(action, timer);
+      });
+      active.forEach(action => {
+        clearTimeout(this._deactivateTimers.get(action));
+        this._deactivateTimers.delete(action);
+        this.paintActionClass(action, 'deactivating', false);
+        if (!wasActive.has(action)) {
+          clearTimeout(this._selectTimers.get(action));
+          this.paintActionClass(action, 'selecting', true);
+          const timer = setTimeout(() => {
+            this.paintActionClass(action, 'selecting', false);
+            this._selectTimers.delete(action);
+          }, 800);
+          this._selectTimers.set(action, timer);
+        }
+      });
       this.shadowRoot.querySelectorAll('[data-action]').forEach(node => node.classList.toggle('active', active.has(node.dataset.action)));
     }
   }
