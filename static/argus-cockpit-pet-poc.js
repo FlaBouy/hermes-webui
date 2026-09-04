@@ -28,7 +28,9 @@
           .profile{fill:#01060b;opacity:.99}
           .solid,.dash{transform-box:view-box;transform-origin:596px 404px;will-change:transform}
           .solid{animation:cw 18s linear infinite}.dash{animation:ccw 26s linear infinite}
-          .eye-glow{transform-box:view-box;transform-origin:596px 404px;animation:eyeBreathe 5.6s ease-in-out infinite}
+          .eye-glow,.confirmation-sweep{transform-box:view-box;transform-origin:596px 404px}
+          .eye-glow{animation:eyeBreathe 5.6s ease-in-out infinite}
+          .confirmation-sweep{fill:none;stroke:#5eead4;stroke-width:5;stroke-linecap:round;stroke-dasharray:0 830;opacity:0;pointer-events:none}
           .lamp{animation:lampIdle 5.6s ease-in-out infinite}
           .eye{transform-box:view-box;transform-origin:596px 404px;will-change:transform}
           .tie{fill:none;stroke:#27bce8;stroke-width:1.7;stroke-dasharray:3 5;opacity:.62;transition:stroke .18s ease,stroke-width .18s ease,opacity .18s ease,filter .18s ease}
@@ -43,12 +45,17 @@
           .entity[data-state="thinking"] .solid{animation-duration:7s}.entity[data-state="thinking"] .dash{animation-duration:10s}.entity[data-state="thinking"] .state{color:#f6bd43;text-shadow:0 0 7px rgba(246,189,67,.58)}
           .entity[data-state="thinking"] .eye-glow{animation-duration:2.8s}.entity[data-state="thinking"] .lamp{animation-duration:2.8s}
           .entity[data-state="speaking"] .eye-glow{animation:speechEye 1.35s ease-in-out infinite}.entity[data-state="speaking"] .lamp{animation:speechLamp 1.35s ease-in-out infinite}.entity[data-state="speaking"] .state{color:#67e8f9;text-shadow:0 0 7px rgba(103,232,249,.62)}
+          .entity[data-state="working"] .solid{animation:stepCw 4.8s steps(12,end) infinite}.entity[data-state="working"] .dash{animation-duration:18s}.entity[data-state="working"] .state{color:#67e8f9;text-shadow:0 0 7px rgba(103,232,249,.62)}
+          .entity[data-state="success"] .confirmation-sweep{animation:confirmSweep 1.05s ease-out 1}.entity[data-state="success"] .state{color:#5eead4;text-shadow:0 0 8px rgba(94,234,212,.72)}.entity[data-state="success"] .tie.active{stroke:#5eead4;animation:successPath .9s ease-out 1}.entity[data-state="success"] .node.active{fill:#5eead4}
+          .entity[data-state="warning"] .state,.entity[data-state="warning"] .tie.active{color:#f6bd43;stroke:#f6bd43}.entity[data-state="warning"] .node.active{fill:#f6bd43;stroke:#fff}.entity[data-state="warning"] .eye-glow{stroke:#f59e0b;opacity:.82;animation:none;filter:drop-shadow(0 0 7px rgba(245,158,11,.6))}
+          .entity[data-state="error"] .state,.entity[data-state="error"] .tie.active{color:#fb5353;stroke:#fb5353}.entity[data-state="error"] .node.active{fill:#fb5353;stroke:#fff}.entity[data-state="error"] .eye-glow{stroke:#fb3030;opacity:1;animation:none;filter:drop-shadow(0 0 9px rgba(251,48,48,.78))}
           @keyframes cw{to{transform:rotate(360deg)}}@keyframes ccw{to{transform:rotate(-360deg)}}@keyframes tieFlow{to{stroke-dashoffset:-32}}
+          @keyframes stepCw{to{transform:rotate(360deg)}}@keyframes confirmSweep{0%{opacity:0;stroke-dasharray:0 830;transform:rotate(-90deg)}18%{opacity:1}72%{opacity:1;stroke-dasharray:830 0;transform:rotate(-90deg)}100%{opacity:0;stroke-dasharray:830 0;transform:rotate(-90deg)}}@keyframes successPath{0%{opacity:.35;stroke-dashoffset:32}45%{opacity:1}100%{opacity:1;stroke-dashoffset:-32}}
           @keyframes eyeBreathe{0%,100%{opacity:.34;filter:brightness(.78)}50%{opacity:.76;filter:brightness(1.13) drop-shadow(0 0 8px rgba(255,56,48,.62))}}
           @keyframes lampIdle{0%,100%{opacity:.22}50%{opacity:.58}}
           @keyframes speechEye{0%,100%{opacity:.42;transform:scale(.985);filter:brightness(.86)}18%{opacity:.9;transform:scale(1.025);filter:brightness(1.28) drop-shadow(0 0 10px rgba(255,56,48,.76))}42%{opacity:.56;transform:scale(.995);filter:brightness(.96)}63%{opacity:1;transform:scale(1.035);filter:brightness(1.38) drop-shadow(0 0 12px rgba(255,56,48,.82))}82%{opacity:.62;transform:scale(1);filter:brightness(1.02)}}
           @keyframes speechLamp{0%,100%{opacity:.22}18%{opacity:.72}42%{opacity:.36}63%{opacity:.92}82%{opacity:.44}}
-          @media(prefers-reduced-motion:reduce){.solid,.dash,.eye-glow,.lamp,.tie.active{animation:none!important}}
+          @media(prefers-reduced-motion:reduce){.solid,.dash,.eye-glow,.lamp,.tie.active,.confirmation-sweep{animation:none!important}}
         </style>
         <div class="entity" part="entity" data-state="idle">
           <svg viewBox="0 60 1200 720" role="img" aria-label="A.R.G.U.S. cockpit pet proof of concept">
@@ -68,6 +75,7 @@
             <g class="solid" fill="none" stroke="#55ddff"><circle cx="596" cy="404" r="91" stroke-width="2.5" opacity=".82"/><circle cx="596" cy="313" r="4" fill="#c8f8ff" stroke="none" filter="url(#glow)"/></g>
             <circle class="dash" cx="596" cy="404" r="112" pathLength="703" fill="none" stroke="#30bfe9" stroke-width="2.5" stroke-dasharray="11 8" opacity=".78"/>
             <circle class="lamp" cx="596" cy="404" r="150" fill="none" stroke="#42dcff" stroke-width="8" opacity=".32" filter="url(#glow)"/>
+            <circle class="confirmation-sweep" cx="596" cy="404" r="132" pathLength="830"/>
             <circle cx="596" cy="404" r="68" fill="#01050a" opacity=".98"/>
             <circle class="eye-glow" cx="596" cy="404" r="61" fill="none" stroke="#e22b2d" stroke-width="3" opacity=".55" filter="url(#soft)"/>
             <circle cx="596" cy="404" r="55" fill="url(#lens)" stroke="#7e252b" stroke-width="2"/>
@@ -153,7 +161,8 @@
       const status = (this.getAttribute('status') || 'ONLINE').toUpperCase();
       this.shadowRoot.querySelector('.model').textContent = `◆ ${model}`;
       this.shadowRoot.querySelector('.state').textContent = status;
-      const visualState = status === 'THINKING' ? 'thinking' : status === 'SPEAKING' ? 'speaking' : 'idle';
+      const visualStates = new Set(['THINKING', 'SPEAKING', 'WORKING', 'SUCCESS', 'WARNING', 'ERROR']);
+      const visualState = visualStates.has(status) ? status.toLowerCase() : 'idle';
       this.shadowRoot.querySelector('.entity').dataset.state = visualState;
     }
 

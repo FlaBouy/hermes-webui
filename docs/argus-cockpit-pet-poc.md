@@ -42,6 +42,13 @@ Only the two centered mechanical ring layers rotate continuously. Reduced-motion
 mode stops rotations, pulses, and traveling tie-in effects while preserving every
 color and state indication.
 
+The second motion pass adds bounded operational outcomes. Working advances the
+clockwise ring in twelve measured steps while leaving the slower opposing layer
+alone. Success draws one temporary teal confirmation sweep and settles the active
+path green. Warning holds the active path and aperture rim amber; Error holds them
+red. Neither caution state flashes. These signals are driven by `status` and do
+not infer completion, severity, or tool progress inside the component.
+
 The sample sheet at
 `Build Docs/Argus V1.0/Graphics/Orb/Codex Image Sep 4, 2026, 06_17_48 AM.png`
 is a useful reference for future state vocabulary—idle, listening/PTT, thinking,

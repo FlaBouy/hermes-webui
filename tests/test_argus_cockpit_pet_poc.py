@@ -19,8 +19,7 @@ def test_cockpit_pet_exposes_future_rewire_contract():
     assert "setActiveActions(actions = [])" in POC_JS
     assert "['model', 'status', 'tracking']" in POC_JS
     assert 'data-state="idle"' in POC_JS
-    assert "status === 'THINKING'" in POC_JS
-    assert "status === 'SPEAKING'" in POC_JS
+    assert "['THINKING', 'SPEAKING', 'WORKING', 'SUCCESS', 'WARNING', 'ERROR']" in POC_JS
 
 
 def test_eye_tracking_is_bounded_and_centerable():
@@ -44,9 +43,14 @@ def test_state_motion_and_menu_feedback_are_bounded():
     assert '@keyframes ccw' in POC_JS
     assert '@keyframes speechEye' in POC_JS
     assert '@keyframes tieFlow' in POC_JS
+    assert '@keyframes confirmSweep' in POC_JS
+    assert '@keyframes successPath' in POC_JS
+    assert 'animation:stepCw 4.8s steps(12,end) infinite' in POC_JS
     assert '.tie.active' in POC_JS
     assert '.node.active' in POC_JS
     assert 'paintActionClass(actionId' in POC_JS
     assert 'prefers-reduced-motion:reduce' in POC_JS
     assert 'data-state="thinking"' in POC_HTML
     assert 'data-state="speaking"' in POC_HTML
+    for state in ('working', 'success', 'warning', 'error'):
+        assert f'data-state="{state}"' in POC_HTML

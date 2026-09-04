@@ -40,6 +40,10 @@ const server = http.createServer((req,res) => {
     assert.equal(await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelector('.entity').dataset.state), 'thinking');
     await page.locator('argus-cockpit-pet').evaluate(el => el.setAttribute('status','speaking'));
     assert.equal(await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelector('.entity').dataset.state), 'speaking');
+    for (const state of ['working', 'success', 'warning', 'error']) {
+      await page.locator('argus-cockpit-pet').evaluate((el, value) => el.setAttribute('status', value), state);
+      assert.equal(await page.locator('argus-cockpit-pet').evaluate(el => el.shadowRoot.querySelector('.entity').dataset.state), state);
+    }
     assert.deepEqual(errors, []);
     console.log('PASS: isolated cockpit-pet, state animation, menu path feedback, bounded cursor-tracking eye');
   } finally { await browser.close(); server.close(); }
