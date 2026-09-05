@@ -276,7 +276,8 @@ class _DialogHandler:
         return _json.loads(self.wfile.getvalue().decode("utf-8"))
 
 
-def _post_review_dialog(monkeypatch, *, message: str, session, capture: dict):
+def _post_review_dialog(monkeypatch, *, message: str, session, capture: dict, readiness_check=None,
+                        fast_reply=None, request_id=None):
     """ROUTING SIMULATION only — stubs start_session_turn; does not prove tool-loop completion."""
     from urllib.parse import urlparse
 
@@ -288,7 +289,7 @@ def _post_review_dialog(monkeypatch, *, message: str, session, capture: dict):
     monkeypatch.setattr(
         jarvis_rag_ingest_events,
         "folder_ingest_readiness",
-        lambda _folder: {"state": "needs_review", "reason": "OCR needs review", "ready": False},
+        readiness_check or (lambda _folder: {"state": "needs_review", "reason": "OCR needs review", "ready": False}),
     )
 
     def _fast_reply(prompt, history=None, personality="smedley", system_context="", history_rows=4):
@@ -311,7 +312,7 @@ def _post_review_dialog(monkeypatch, *, message: str, session, capture: dict):
 
     import api.biggy_voice_route as voice
 
-    monkeypatch.setattr(voice, "request_fast_voice_reply", _fast_reply)
+    monkeypatch.setattr(voice, "request_fast_voice_reply", fast_reply or _fast_reply)
     monkeypatch.setattr(routes, "start_session_turn", _start_turn)
 
     monkeypatch.setattr(
@@ -326,10 +327,62 @@ def _post_review_dialog(monkeypatch, *, message: str, session, capture: dict):
         },
     )
 
-    handler = _DialogHandler({"project_id": "bdd341b152a4", "message": message})
+    handler = _DialogHandler({"project_id": "bdd341b152a4", "message": message,
+                              "request_id": request_id})
     parsed = urlparse("/api/biggy/projects/reviews/dialog")
     routes.handle_post(handler, parsed)
     return handler, project
+
+
+def test_sync_review_is_durable_before_execution_and_retry_is_idempotent(monkeypatch):
+    import copy
+    saved = []
+    session = SimpleNamespace(session_id="durable-review", profile="smedley", messages=[],
+                              is_streaming=False, active_stream_id=None)
+    session.save = lambda **kw: saved.append(copy.deepcopy(session.messages))
+    calls = []
+    def execute(*args, **kwargs):
+        calls.append(True)
+        assert saved[-1][-1]["review_request_id"] == "durable-test-1"
+        assert saved[-1][-1]["review_turn_state"] == "pending"
+        return {"reply": "Answer", "model": "test"}
+    for _ in range(2):
+        handler, _ = _post_review_dialog(monkeypatch, message="What discrepancy is that?",
+            session=session, capture={"fast_calls": [], "governed_calls": []},
+            fast_reply=execute, request_id="durable-test-1")
+        assert handler.status == 200
+    assert calls == [True]
+    assert [m["role"] for m in session.messages] == ["user", "assistant"]
+    assert session.messages[0]["review_turn_state"] == "completed"
+
+
+def test_readiness_only_runs_for_document_lane(monkeypatch):
+    import api.project_review_electrical as electrical
+
+    monkeypatch.setattr(electrical, "voltage_drop_reply", lambda *args: {"reply": "Calculator result"})
+    for message, should_walk in [
+        ("What discrepancy is that?", False),
+        ("480V 3 phase 10hp motor 1200 ft voltage drop", False),
+        ("Open the conduit fill tool", False),
+        ("Re-run project review using new OCR tools", True),
+    ]:
+        walks = []
+        def readiness_check(folder):
+            walks.append(folder)
+            return {"state": "needs_review", "ready": False, "reason": "Unverified evidence"}
+        session = SimpleNamespace(session_id="lane-readiness-test", profile="smedley",
+                                  messages=[], is_streaming=False, active_stream_id=None,
+                                  save=lambda **kw: None)
+        capture = {"fast_calls": [], "governed_calls": []}
+        handler, _ = _post_review_dialog(monkeypatch, message=message, session=session,
+                                        capture=capture, readiness_check=readiness_check)
+        assert handler.status == 200
+        assert len(walks) == int(should_walk), message
+        if should_walk:
+            assert "NEEDS_REVIEW" in capture["governed_calls"][0]["message"]
+            assert handler.payload()["ingest_readiness"]["ready"] is False
+        else:
+            assert handler.payload()["ingest_readiness"] is None
 
 
 def test_exact_rerun_request_enters_governed_tool_loop_not_fast_promise(monkeypatch):
@@ -483,7 +536,9 @@ def test_fast_dialogue_failure_is_retryable_and_does_not_escalate(monkeypatch):
     assert body.get("lane") == "fast"
     assert "Heavy extraction was not started" in str(body.get("error") or "")
     assert capture["governed_calls"] == []
-    assert session.messages == prior
+    assert session.messages[:-1] == prior
+    assert session.messages[-1]["role"] == "user"
+    assert session.messages[-1]["review_turn_state"] == "failed"
     assert session.is_streaming is False
 
 

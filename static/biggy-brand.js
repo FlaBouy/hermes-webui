@@ -1574,6 +1574,15 @@
     };
     const renderDialog = (payload) => {
       if (payload?.project?.project_id && payload.project.project_id !== dialogProject?.project_id) return;
+      // A reload/ambiguous network failure keeps the same intent ID until a
+      // durable terminal state is observed. Never guess that timeout = unsent.
+      if (payload?.dialog?.request_id && ['completed', 'failed', 'interrupted'].includes(payload.dialog.status)) {
+        try {
+          const key = `biggy-review-intent:${dialogProject?.project_id}`;
+          const intent = JSON.parse(sessionStorage.getItem(key) || 'null');
+          if (intent?.id === payload.dialog.request_id) sessionStorage.removeItem(key);
+        } catch (_) { /* storage unavailable; the server transcript remains authoritative */ }
+      }
       const messages = Array.isArray(payload?.dialog?.messages) ? payload.dialog.messages : [];
       const turns = formatBiggyProjectReviewDialogTurns(messages);
       const list = dialog.querySelector('#biggyProjectDialogMessages');
@@ -1816,6 +1825,14 @@
       if (!message || !dialogProject) return;
       reviewDictation.cancel();
       const sendingProjectId = dialogProject.project_id;
+      const intentKey = `biggy-review-intent:${sendingProjectId}`;
+      let requestId = globalThis.crypto?.randomUUID?.()
+        || `review-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}-${Math.random().toString(36).slice(2)}`;
+      try {
+        const intent = JSON.parse(sessionStorage.getItem(intentKey) || 'null');
+        if (intent?.message === message && intent?.id) requestId = intent.id;
+        sessionStorage.setItem(intentKey, JSON.stringify({id: requestId, message}));
+      } catch (_) { /* the server still persists this request before execution */ }
       reviewSpeechGate.arm(sendingProjectId, dialogSpeechId);
       input.value = '';
       const sendButton = dialog.querySelector('#biggyProjectDialogSend');
@@ -1828,7 +1845,7 @@
       messageList.scrollTop = messageList.scrollHeight;
       sendButton.disabled = true;
       try {
-        const payload = await window.api('/api/biggy/projects/reviews/dialog', { method: 'POST', body: JSON.stringify({ project_id: sendingProjectId, message }) });
+        const payload = await window.api('/api/biggy/projects/reviews/dialog', { method: 'POST', body: JSON.stringify({ project_id: sendingProjectId, message, request_id: requestId }) });
         if (dialog.hidden || dialogProject?.project_id !== sendingProjectId) return;
         renderDialog(payload);
         if (payload.tool_action) {
@@ -1853,7 +1870,8 @@
         const retryHint = /retry|retryable|dialogue reply failed/i.test(errText)
           ? ' You can retry this message.'
           : '';
-        messageList.insertAdjacentHTML('beforeend', `<p class="biggy-project-dialog-empty is-error">Message was not sent: ${esc(errText)}${esc(retryHint)}</p>`);
+        if (!input.value.trim()) input.value = message;
+        messageList.insertAdjacentHTML('beforeend', `<p class="biggy-project-dialog-empty is-error">Reply not confirmed: ${esc(errText)}${esc(retryHint)} Your draft is restored; the saved dialog will show whether the request was accepted.</p>`);
         sendButton.disabled = false;
       }
     });

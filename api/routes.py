@@ -6108,6 +6108,16 @@ def _biggy_project_review_messages_for_payload(session) -> list:
 def _biggy_project_review_dialog_payload(session) -> dict:
     """Return project-review transcript plus an honest server-turn lifecycle."""
     messages = _biggy_project_review_messages_for_payload(session)
+    from api.project_review_turns import sync_turn_status
+    sync_status = sync_turn_status(session)
+    if sync_status is not None:
+        from api.project_review_speech import review_speech_candidate
+        speech = review_speech_candidate({"session_id": session.session_id,
+                                          "messages": messages, **sync_status})
+        return {"session_id": session.session_id, "messages": messages,
+                "progress": {"items": []},
+                "speech": {"id": speech["id"], "mode": speech["mode"]} if speech else None,
+                **sync_status}
     claimed_stream_id = str(getattr(session, "active_stream_id", None) or "").strip() or None
     persisted_streaming = bool(
         getattr(session, "is_streaming", False) or claimed_stream_id
@@ -17517,6 +17527,10 @@ def handle_post(handler, parsed) -> bool:
     if parsed.path == "/api/biggy/projects/reviews/dialog":
         project_id = str(body.get("project_id") or "").strip()
         message = str(body.get("message") or "").strip()
+        request_id = body.get("request_id")
+        if request_id is not None and (not isinstance(request_id, str) or
+                not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", request_id)):
+            return bad(handler, "invalid request_id", 400)
         projects = load_projects()
         project = next((item for item in projects
                         if str(item.get("project_id") or "") == project_id
@@ -17526,9 +17540,6 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, "project review not found", 404)
         review = project.setdefault("review", {})
         readiness = None
-        if message:
-            from api.jarvis_rag_ingest_events import folder_ingest_readiness
-            readiness = folder_ingest_readiness(str(review.get("rag_folder") or ""))
         session_id = str(review.get("session_id") or "").strip()
         session = None
         if session_id:
@@ -17589,6 +17600,12 @@ def handle_post(handler, parsed) -> bool:
             elif requested_calculator:
                 plan = {"lane": "electrical", "reason": "interactive_electrical_tool"}
             lane = str(plan.get("lane") or "governed")
+            # Readiness traverses the project/NAS. Only document work needs
+            # that evidence gate; dialogue and calculators must not wait for it.
+            # No cached verification is substituted on the lightweight lanes.
+            if lane not in {"fast", "electrical", "status"}:
+                from api.jarvis_rag_ingest_events import folder_ingest_readiness
+                readiness = folder_ingest_readiness(str(review.get("rag_folder") or ""))
             if lane == "status":
                 intent = "status_report"
             elif lane == "fast":
@@ -17643,98 +17660,36 @@ def handle_post(handler, parsed) -> bool:
                         409,
                     )
 
-                if lane == "status":
-                    # Deterministic prior-results report — no LLM polish (latency/hallucination).
-                    reply_text = build_status_report_reply(
-                        getattr(session, "messages", None),
-                        owner_message=message,
-                    )
-                    now_ts = int(time.time())
-                    if not isinstance(getattr(session, "messages", None), list):
-                        session.messages = []
-                    session.messages.append({
-                        "role": "user",
-                        "content": "Owner message: " + message,
-                        "timestamp": now_ts,
-                        "source": "project_review",
-                    })
-                    session.messages.append({
-                        "role": "assistant",
-                        "content": reply_text,
-                        "timestamp": now_ts + 1,
-                        "assistant_identity": "smedley",
-                        "project_review_status_route": True,
-                        "project_review_dispatch_reason": plan.get("reason") or "status_inquiry_report_prior",
-                        "voice_model": "",
-                    })
-                    session.is_streaming = False
-                    session.active_stream_id = None
-                    session.save()
-                    sync_done = True
-                elif lane in {"fast", "electrical"}:
-                    try:
-                        # Capability/deferred planning: keep history short so prior
-                        # extract inventories are not re-enumerated. Genuine prior-
-                        # result questions keep a longer conversational window.
-                        history_cap = 4 if planning else 24
-                        routed = (tool_form_reply(requested_calculator, session.messages, message)
-                                  if plan.get("reason") == "interactive_electrical_tool" else
-                                  voltage_drop_reply(session.messages, message)) if lane == "electrical" else request_fast_voice_reply(
-                            message,
-                            system_context=project_context,
-                            history_rows=history_cap,
-                            history=build_review_agent_context_messages(
-                                getattr(session, "messages", None),
-                                max_messages=history_cap,
-                            ),
+                if lane in {"fast", "electrical", "status"}:
+                    from api.project_review_turns import run_sync_review, ReviewTurnError
+                    # Freeze prior context before adding the durable current owner
+                    # row: the prompt is passed separately to the executor.
+                    history = list(getattr(session, "messages", None) or [])
+                    history_cap = 4 if planning else 24
+
+                    def execute_review():
+                        if lane == "status":
+                            return {"reply": build_status_report_reply(history, owner_message=message)}
+                        if lane == "electrical":
+                            return (tool_form_reply(requested_calculator, history, message)
+                                    if plan.get("reason") == "interactive_electrical_tool"
+                                    else voltage_drop_reply(history, message))
+                        return request_fast_voice_reply(
+                            message, system_context=project_context, history_rows=history_cap,
+                            history=build_review_agent_context_messages(history, max_messages=history_cap),
                             personality="smedley",
                         )
-                        now_ts = int(time.time())
-                        if not isinstance(getattr(session, "messages", None), list):
-                            session.messages = []
-                        session.messages.append({
-                            "role": "user",
-                            "content": "Owner message: " + message,
-                            "timestamp": now_ts,
-                            "source": "project_review",
-                        })
-                        session.messages.append({
-                            "role": "assistant",
-                            "content": str(routed.get("reply") or "").strip(),
-                            "timestamp": now_ts + 1,
-                            "assistant_identity": "smedley",
-                            "project_review_fast_route": lane == "fast",
-                            "electrical_inputs": routed.get("electrical_inputs"),
-                            "electrical_result": routed.get("electrical_result"),
-                            "project_review_dispatch_reason": plan.get("reason")
-                            or "informational_transcript_only",
-                            "voice_model": str(routed.get("model") or ""),
-                        })
-                        session.is_streaming = False
-                        session.active_stream_id = None
-                        session.save()
+                    try:
+                        routed = run_sync_review(
+                            session, message=message, request_id=request_id, lane=lane,
+                            execute=execute_review,
+                            metadata={"project_review_dispatch_reason": plan.get("reason")},
+                        )
                         sync_done = True
-                    except Exception:
-                        # Dialogue/fast failures must not silently escalate into the
-                        # heavy tool loop — that is how deferred-parameter questions
-                        # burned 11+ minutes of governed execution.
-                        logger.exception(
-                            "Smedley V6 review dialogue lane failed; not escalating to governed"
-                        )
-                        return j(
-                            handler,
-                            {
-                                "ok": False,
-                                "error": (
-                                    "Smedley dialogue reply failed; retry the message. "
-                                    "Heavy extraction was not started."
-                                ),
-                                "retryable": True,
-                                "lane": "fast",
-                                "dispatch_reason": plan.get("reason") or "dialogue_or_informational",
-                            },
-                            status=503,
-                        )
+                    except ReviewTurnError as exc:
+                        return j(handler, {"ok": False, "error": str(exc), "retryable": True,
+                                           "lane": lane, "request_id": request_id,
+                                           "dialog": _biggy_project_review_dialog_payload(session)}, status=exc.status)
                 else:
                     # Bound agent-facing context for long review transcripts without
                     # mutating the full saved display history (messages) or durable
