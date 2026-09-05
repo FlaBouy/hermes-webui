@@ -59,7 +59,9 @@ def test_bounded_tool_request_and_no_model_math():
     class Response:
         def __enter__(self): return self
         def __exit__(self, *_): pass
-        def read(self): return json.dumps({'status':'ok','inputs':{'fla':14},'result':{'solution_found':True,'selected_size':'4','voltage_drop_volts':8.4,'voltage_drop_pct':1.75}}).encode()
+        def read(self):
+            from api.smedley_cable_tray import normalize_result
+            return json.dumps(normalize_result({'status':'ok','inputs':{'fla':14,'voltage':480,'phase':3,'length_ft':1200,'conduit_type':'pvc'},'result':{'solution_found':True,'selected_size':'4','voltage_drop_volts':8.4,'voltage_drop_pct':1.75,'vd_threshold_pct':2}}, {'material':'copper'}, None)).encode()
     captured = []
     def opener(req, timeout):
         assert timeout == 8

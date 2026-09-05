@@ -6,6 +6,7 @@ Other engineering work remains on its existing governed path.
 import json
 import re
 from urllib.request import Request, urlopen
+from api.smedley_cable_tray import accepted_material
 
 TOOL_LABELS = {
     'voltage-drop': 'Voltage Drop', 'feeder-size': 'Feeder Size',
@@ -47,6 +48,10 @@ def requested_tool(text):
 def tool_form_reply(tool, messages, prompt):
     params = retained_circuit(messages, prompt)
     params.setdefault('target_vd_pct', 2.5)
+    try:
+        params['material'] = accepted_material(params)
+    except ValueError as error:
+        return {'reply': str(error), 'model': 'deterministic-electrical', 'error': 'unsupported_material'}
     return {'reply': f"Use the {TOOL_LABELS[tool]} tool to enter or adjust the parameters. Known circuit inputs are carried forward; missing inputs still need confirmation.",
             'model': 'deterministic-electrical', 'tool_action': {'id': tool, 'params': params}}
 
@@ -64,8 +69,9 @@ def is_voltage_drop_question(text, messages=None):
                 and re.search(r'\d', text)
                 and not re.search(r'\b(?:do not|don.t|never)\s+(?:calculate|run|rerun|re-run)\b', text))
     prior = retained_circuit(messages, '')
-    followup = bool(prior.get('voltage') and prior.get('length_ft') and re.search(r'\d+(?:\.\d+)?\s*%', text)
-                    and re.search(r'\b(?:re-?run|try|target|below|limit|instead|change)\b', text)
+    followup = bool(prior.get('voltage') and prior.get('length_ft')
+                    and (re.search(r'\d+(?:\.\d+)?\s*%', text) or re.search(r'\b(?:copper|alumin[ui]m|material|conduit|raceway)\b', text))
+                    and re.search(r'\b(?:re-?run|try|target|below|limit|instead|change|use|using)\b', text)
                     and not re.search(r'\b(?:do not|don.t|never)\b', text))
     return direct or followup
 
@@ -95,8 +101,11 @@ def retained_circuit(messages, prompt):
             match = re.search(pattern, text, re.I)
             if match:
                 found[key] = float(match[1].replace(',', ''))
-        if 'voltage' in found and ('hp' in found or 'amps' in found):
-            values = {}  # New circuit; never borrow a prior project's design inputs.
+        if 'voltage' in found and ('hp' in found or 'amps' in found) and not re.search(r'\b(?:re-?run|same|instead|change|still)\b', text, re.I):
+            # Restating numbers is not consent to replace an unsupported material.
+            # Only an explicitly new circuit clears that material constraint.
+            retained_material = {key: values[key] for key in ('material',) if key in values}
+            values = {} if re.search(r'\bnew\s+circuit\b', text, re.I) else retained_material
         values.update(found)
         if re.search(r'\btc[- ]?er\b', text, re.I):
             values['cable_construction'] = 'tc_er'
@@ -105,35 +114,37 @@ def retained_circuit(messages, prompt):
             values.update(installation_method='aluminum_ladder_tray', cable_construction='tc_er', rung_spacing_in=9)
         if re.search(r'\b(?:in|using|use)\s+(?:\w+\s+)?(?:conduit|raceway)\b', text, re.I):
             values['installation_method'] = 'raceway'
-        material = re.search(r'\b(copper|aluminum)\s+(?:conductors?|wires?|cabl(?:e|ing))\b(?!\s+tray)', text, re.I)
-        if material:
+        conduit = re.search(r'\b(steel|aluminum|pvc)\s+(?:conduit|raceway)\b', text, re.I)
+        if conduit:
+            values.update(conduit_type=conduit[1].lower(), installation_method='raceway')
+        # Support material edits while excluding aluminum supports/raceways.
+        material = re.search(r'\b(copper|aluminum|aluminium|silver|gold|brass|bronze|cca)\b(?!\s+(?:(?:ladder|cable)\s+)?(?:tray|conduit|raceway)\b)', text, re.I)
+        explicit_material = re.search(r'\b(?:conductor\s+)?material\s*(?:is|=|:|to)\s*([\w-]+)', text, re.I)
+        if explicit_material:
+            values['material'] = explicit_material[1].lower()
+        elif material:
             values['material'] = material[1].lower()
     return values
 
 
 def voltage_drop_reply(messages, prompt, *, opener=urlopen):
     values = retained_circuit(messages, prompt)
+    try:
+        values['material'] = accepted_material(values)
+    except ValueError as error:
+        return {'reply': str(error), 'model': 'deterministic-electrical', 'error': 'unsupported_material'}
     missing = [name for name in ('voltage', 'length_ft') if not values.get(name)]
     if not values.get('hp') and not values.get('amps'):
         missing.append('motor horsepower or load amps')
     if missing:
         return {**tool_form_reply('voltage-drop', messages, prompt), 'reply': 'I need ' + ', '.join(missing) + '. Enter those in the Voltage Drop tool; known inputs are retained.'}
-    assumed = []
-    for key, value, label in [('phase', 3, '3-phase'), ('power_factor', .85, '0.85 running power factor'), ('target_vd_pct', 2.5, 'owner default 2.5% maximum voltage drop')]:
-        if key not in values:
-            values[key] = value
-            assumed.append(label)
+    for key, value in [('phase', 3), ('power_factor', .85), ('target_vd_pct', 2.5)]:
+        values.setdefault(key, value)
     params = dict(circuit_type='branch', continuous_load=True, temp_rating=75, ambient_temp_c=30,
                   num_conductors=3, conduit_type='pvc', installation_method='aluminum_ladder_tray' if values.get('cable_construction') == 'tc_er' else 'raceway',
                   cable_series='southwire_45253', tray_cover='none', rung_spacing_in=9)
     params.update(values)
     params['phase'] = int(values['phase'])
-    assumed.extend([f"{params['temp_rating']}°C terminals", f"{params['ambient_temp_c']}°C ambient",
-                    '125% conductor sizing' if params['continuous_load'] in (True, 'true') else 'non-continuous load sizing'])
-    if values.get('cable_construction') == 'tc_er':
-        assumed.append(f"{params['cable_series']} copper 3C+ground; installation={params['installation_method']}; cover={params['tray_cover']}; 9-inch rungs if tray")
-    else:
-        assumed.append('copper in PVC conduit')
     try:
         req = Request('http://127.0.0.1:8801/tools/conductor-sets', data=json.dumps(params).encode(), headers={'Content-Type': 'application/json'})
         with opener(req, timeout=8) as response:
@@ -141,15 +152,24 @@ def voltage_drop_reply(messages, prompt, *, opener=urlopen):
         result = data.get('result') or {}
         if data.get('status') != 'ok' or not result.get('solution_found'):
             return {**tool_form_reply('conductor-sets', messages, prompt), 'reply': 'The electrical tool did not establish a cable size: ' + str(data.get('error') or 'no supported catalog size met both constraints') + '. Adjust the retained inputs in Conductor Sets; no guessed replacement result was issued.'}
-        size = result['selected_size']
+        normalized = data.get('calculation') or {}
+        required = ('material', 'conductor_size', 'voltage', 'phase', 'current', 'length_ft', 'conduit_type',
+                    'target_vd_pct', 'voltage_drop_pct', 'voltage_drop_volts', 'calculator_family', 'installation')
+        if (any(normalized.get(key) is None for key in required)
+                or accepted_material(normalized) != normalized['material']
+                or data.get('inputs', {}).get('material') != normalized['material']):
+            raise ValueError('Calculator response lacks the accepted-input contract.')
+        size = normalized['conductor_size']
         unit = 'kcmil' if str(size).isdigit() and int(size) >= 250 else 'AWG'
-        reply = (f"At your {values['target_vd_pct']:g}% target, the smallest supported catalog size satisfying ampacity and running voltage drop is {size} {unit} copper: "
-                 f"{result['voltage_drop_volts']:.2f} V drop ({result['voltage_drop_pct']:.2f}%) over {values['length_ft']:g} ft at {values['voltage']:g} V. "
-                 f"Tool load current: {data['inputs']['fla']:g} A.\n\n"
-                 'Calculation assumptions to confirm: ' + '; '.join(assumed) + '. '
+        reply = (f"At the accepted {normalized['target_vd_pct']:g}% target, the smallest supported catalog size satisfying ampacity and running voltage drop is {size} {unit} {normalized['material']}: "
+                 f"{normalized['voltage_drop_volts']:.2f} V drop ({normalized['voltage_drop_pct']:.2f}%) over {normalized['length_ft']:g} ft at {normalized['voltage']:g} V, {normalized['phase']:g}-phase. "
+                 f"Tool load current: {normalized['current']:g} A. Conduit/raceway basis: {normalized['conduit_type']}. "
+                 f"Calculator: {normalized['calculator_family']}; installation: {normalized['installation']['method']}.\n\n"
+                 'Calculation assumptions to confirm: ' + '; '.join(data.get('assumptions') or []) + '. '
                  'This is a provisional running-load calculation, not approval: check starting voltage, tray fill/bonding, installed cable ground size and manufacturer/plant requirements. '
                  'Earlier conversational size estimates are superseded by this tool result.')
-        return {'reply': reply, 'model': 'deterministic-electrical', 'electrical_inputs': params, 'electrical_result': data,
-                'tool_action': {'id': 'voltage-drop', 'params': dict(params, amps=data['inputs']['fla'])}}
+        accepted = dict(params, **data['inputs'], amps=normalized['current'], target_vd_pct=normalized['target_vd_pct'])
+        return {'reply': reply, 'model': 'deterministic-electrical', 'electrical_inputs': accepted, 'electrical_result': data,
+                'tool_action': {'id': 'voltage-drop', 'params': accepted}}
     except Exception:
         return {**tool_form_reply('conductor-sets', messages, prompt), 'reply': 'The electrical calculation service did not return a verified result within this request. Your circuit inputs remain available in Conductor Sets; no heavy agent or substitute estimate was started. Please retry.'}

@@ -15,7 +15,7 @@ NODE = shutil.which("node")
 requires_node = pytest.mark.skipif(NODE is None, reason="node not on PATH")
 
 
-def _run_node(scenario: str, *, parallel_sets: int = 2) -> dict:
+def _run_node(scenario: str, *, parallel_sets: int = 2, response_material='copper') -> dict:
     script = textwrap.dedent(
         f"""
         const fs = require('fs');
@@ -31,6 +31,7 @@ def _run_node(scenario: str, *, parallel_sets: int = 2) -> dict:
           if (path === '/tools/feeder-size') {{
             return {{
               status: 'ok',
+              inputs: {{...params, material: {json.dumps(response_material)}}},
               result: {{
                 conductor_size: {json.dumps('3' if scenario == 'ampacity' else '12')},
                 combined_cf: 0.88,
@@ -46,6 +47,7 @@ def _run_node(scenario: str, *, parallel_sets: int = 2) -> dict:
             const pct = drops[params.conductor_awg] ?? 0.8;
             return {{
               status: 'ok',
+              inputs: {{...params, material: {json.dumps(response_material)}}},
               result: {{
                 voltage_drop_volts: +(params.voltage * pct / 100).toFixed(3),
                 voltage_drop_pct: pct,
@@ -108,7 +110,7 @@ def test_auto_sizing_uses_larger_ampacity_constraint_and_preserves_factors():
     assert feeder_call["params"]["temp_rating"] == 75
     voltage_calls = [call for call in payload["calls"] if call["path"] == "/tools/voltage-drop"]
     assert all(call["params"]["parallel_sets"] == 1 for call in voltage_calls)
-    assert all("material" not in call["params"] for call in voltage_calls)
+    assert all(call["params"]["material"] == "copper" for call in voltage_calls)
 
 
 @requires_node
@@ -171,7 +173,8 @@ def test_parallel_minimum_final_recommendation_never_presents_smaller_than_1_0()
 
 
 @requires_node
-def test_auto_sizing_fails_closed_for_unsupported_material_without_requests():
+@pytest.mark.parametrize('material', ['aluminum', None, '', 'silver', {}, [], False])
+def test_auto_sizing_fails_closed_for_unsupported_material_without_requests(material):
     script = textwrap.dedent(
         f"""
         const fs = require('fs');
@@ -182,7 +185,7 @@ def test_auto_sizing_fails_closed_for_unsupported_material_without_requests():
         let called = false;
         context.window.SmedleyVoltageDropSizing.calculate({{
           voltage: 480, phase: 3, amps: 100, length_ft: 100,
-          material: 'aluminum', temp_rating: 75, circuit_type: 'feeder',
+          material: {json.dumps(material)}, temp_rating: 75, circuit_type: 'feeder',
           continuous_load: true, conduit_type: 'steel', power_factor: 0.85,
           parallel_sets: 1, ambient_temp_c: 30, num_conductors: 3,
         }}, async () => {{ called = true; }}).then((result) => {{
@@ -198,6 +201,15 @@ def test_auto_sizing_fails_closed_for_unsupported_material_without_requests():
     assert payload["called"] is False
     assert payload["result"]["status"] == "error"
     assert "Copper" in payload["result"]["error"]
+
+
+@requires_node
+@pytest.mark.parametrize('material', ['aluminum', None])
+def test_unconfirmed_response_cannot_be_relabeled_copper(material):
+    payload = _run_node('ampacity', response_material=material)
+    assert payload['result']['status'] == 'error'
+    assert len(payload['calls']) == 1
+    assert 'does not confirm' in payload['result']['error']
 
 
 @requires_node

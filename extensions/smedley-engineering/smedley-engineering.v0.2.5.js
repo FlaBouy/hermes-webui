@@ -560,6 +560,20 @@
     });
     form.elements.cable_construction.addEventListener('change', updateInstallation);
     // Prefill only controls this calculator owns, before its first calculation.
+    // Preserve unsupported retained material visibly; never let a select fall
+    // back to copper when an owner asked for a different conductor material.
+    if (!form.elements.material) form.appendChild(fieldControl(['material', 'Conductor material (copper only)', 'select', 'copper']));
+    if (Object.prototype.hasOwnProperty.call(options.params || {}, 'material')) {
+      const supplied = options.params.material;
+      const value = typeof supplied === 'string' ? supplied.trim().toLowerCase() : 'invalid-material';
+      if (value !== 'copper') {
+        const unsupported = document.createElement('option');
+        unsupported.value = value || 'invalid-material';
+        unsupported.textContent = `${value || 'invalid'} — unsupported`;
+        form.elements.material.appendChild(unsupported);
+        form.elements.material.value = unsupported.value;
+      }
+    }
     for (const [key, value] of Object.entries(options.params || {})) {
       const control = form.elements[key];
       if (control && value !== null && value !== undefined) {
@@ -622,6 +636,9 @@
     };
 
     const calculate = async (params) => {
+      if (typeof params.material !== 'string' || params.material.trim().toLowerCase() !== 'copper') {
+        return {status: 'error', error: 'Unsupported conductor material. Only copper is supported; no calculation was performed.', result: null};
+      }
       if (toolId === 'voltage-drop') {
         const sizing = window.SmedleyVoltageDropSizing;
         if (!sizing || typeof sizing.calculate !== 'function') {
@@ -648,6 +665,7 @@
       body: JSON.stringify({
         ...Object.fromEntries(installationFields.map(([key]) => [key, params[key]])),
         target_vd_pct: params.target_vd_pct,
+        material: params.material,
         voltage: Number(params.voltage),
         phase: Number(params.phase),
         amps: Number(params.amps),

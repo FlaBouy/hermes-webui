@@ -100,6 +100,7 @@ ELECTRICAL_REVIEW_POLICY = (
     "Source: https://www.southwire.com/wire-cable/power-control/cu-600-1000v-xlpe-insulation-thermoplastic-cpe-tp-jacket-xhhw-2-ct-rated-sunlight-resistant-for-direct-burial-silicone-free/p/SPEC45253 . "
     "The prior claim that TC-ER cannot be used outdoors was false for this selected product. TC-ER alone does not establish every cable's environmental ratings; Allied substitutions need their exact datasheet. "
     "Do not calculate conductor size or voltage drop by guessing, mental arithmetic, or invented tables. Use the deterministic electrical service at http://127.0.0.1:8801/tools with saved owner inputs and explicit assumptions; never reuse an earlier assistant estimate as verified evidence. "
+    "The validated electrical calculators support copper conductors only. Aluminum conductors are unsupported; do not estimate them or substitute copper. Aluminum tray or conduit is support material, not conductor material. "
     "A short follow-up modifies the prior circuit, not the whole project review. Preserve voltage, load, length, cable and installation conditions unless the owner changes them."
 )
 _PROGRESS_CACHE_LOCK = threading.RLock()

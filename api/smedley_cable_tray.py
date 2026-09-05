@@ -20,7 +20,41 @@ CABLES = {
 ACTIVE = ContextVar('electrical_installation', default=None)
 
 
+def accepted_material(params):
+    """Omission alone defaults to copper; explicit unsupported values never do."""
+    value = params.get('material', 'copper')
+    if isinstance(value, str) and value.strip().lower() == 'copper':
+        return 'copper'
+    if isinstance(value, str) and value.strip().lower() in ('aluminum', 'aluminium'):
+        raise ValueError('Aluminum conductor calculations are not currently supported by the validated voltage-drop calculator.')
+    raise ValueError('Unsupported or malformed conductor material. Only copper is supported; omit material only to accept the documented copper default.')
+
+
+def normalize_result(data, params, selected):
+    """Expose accepted material and service-produced values, never label guesses."""
+    if data.get('status') != 'ok':
+        return data
+    inputs = data.setdefault('inputs', {})
+    inputs['material'] = accepted_material(params)
+    data['calculator_family'] = selected['series'] if selected else 'NEC 2014 copper tables'
+    result = data.get('result') or {}
+    if 'voltage_drop_pct' in result:
+        # These fields originate in the calculator, including defaults and FLA.
+        data['calculation'] = dict(
+            material=inputs['material'],
+            conductor_size=result.get('selected_size', inputs.get('conductor_awg', result.get('conductor_size'))),
+            voltage=inputs.get('voltage'), phase=inputs.get('phase'),
+            current=inputs.get('amps', inputs.get('fla', inputs.get('nec_fla', inputs.get('motor_fla')))),
+            length_ft=inputs.get('length_ft'), conduit_type=inputs.get('conduit_type'),
+            target_vd_pct=result.get('vd_threshold_pct', result.get('threshold_pct')),
+            voltage_drop_pct=result['voltage_drop_pct'], voltage_drop_volts=result.get('voltage_drop_volts'),
+            calculator_family=data['calculator_family'], installation=selected or {'method': 'raceway'},
+        )
+    return data
+
+
 def installation(params):
+    accepted_material(params)
     method = params.get('installation_method', 'raceway')
     cable = params.get('cable_construction', 'individual')
     if method not in ('raceway', 'aluminum_ladder_tray'):
@@ -92,9 +126,12 @@ def install_adapter(namespace):
 
     def dispatch(tool, params):
         try:
+            if not isinstance(params, dict):
+                raise ValueError('Calculation inputs must be an object.')
+            params = dict(params, material=accepted_material(params))
             selected = installation(params)
             if not selected:
-                return namespace['TOOL_HANDLERS'][tool](params)
+                return normalize_result(namespace['TOOL_HANDLERS'][tool](params), params, selected)
             for name in ('amps', 'length_ft', 'voltage', 'parallel_sets', 'num_conductors'):
                 if name in params and (not math.isfinite(float(params[name])) or float(params[name]) <= 0):
                     raise ValueError(f'{name} must be a finite positive number.')
@@ -165,7 +202,7 @@ def install_adapter(namespace):
                 result['warnings'].append('Installation recorded. This tool does not by itself establish tray fill, cable ampacity, or voltage-drop compliance.')
             if result.get('status') == 'ok' and tool != '/tools/cable-tray-fill':
                 result['code_basis'] = str(result.get('code_basis', '')).replace('Ch.9 Table 9', 'Southwire SPEC45253 R/X data')
-            return result
+            return normalize_result(result, params, selected)
         except (ValueError, TypeError, KeyError) as error:
             return namespace['_error'](str(error))
     return dispatch

@@ -356,6 +356,20 @@ def test_sync_review_is_durable_before_execution_and_retry_is_idempotent(monkeyp
     assert session.messages[0]["review_turn_state"] == "completed"
 
 
+def test_aluminum_followup_is_refused_in_review_route_without_agent_or_readiness(monkeypatch):
+    session = SimpleNamespace(session_id="material-contract-review", profile="smedley",
+        messages=[{"role": "user", "content": "480V 14A 1200 ft copper cable voltage drop?"}],
+        is_streaming=False, active_stream_id=None, save=lambda **kw: None)
+    capture = {"fast_calls": [], "governed_calls": []}
+    def no_readiness(*args):
+        raise AssertionError("Electrical follow-up must not scan document readiness")
+    handler, _ = _post_review_dialog(monkeypatch, message="Use aluminum instead", session=session,
+        capture=capture, readiness_check=no_readiness, request_id="material-contract-followup")
+    assert handler.status == 200
+    assert not capture["fast_calls"] and not capture["governed_calls"]
+    assert "Aluminum conductor calculations are not currently supported" in session.messages[-1]['content']
+
+
 def test_readiness_only_runs_for_document_lane(monkeypatch):
     import api.project_review_electrical as electrical
 

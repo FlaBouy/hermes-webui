@@ -14,7 +14,7 @@
     'NEC NFPA 70, 2014 Ed. -- 310.10(H)(1): ordinary parallel conductors shall be 1/0 AWG or larger; no exception workflow in this calculator (fail closed to 1/0 AWG when parallel_sets > 1).';
 
   const REQUIRED = Object.freeze([
-    'voltage', 'phase', 'amps', 'length_ft', 'material', 'temp_rating',
+    'voltage', 'phase', 'amps', 'length_ft', 'temp_rating',
     'circuit_type', 'continuous_load', 'conduit_type', 'parallel_sets',
     'ambient_temp_c', 'num_conductors',
   ]);
@@ -37,7 +37,7 @@
   }
 
   function normalizeMaterial(value) {
-    return String(value || '').trim().toLowerCase();
+    return value === undefined ? 'copper' : (typeof value === 'string' ? value.trim().toLowerCase() : '');
   }
 
   function sizeIndex(size) {
@@ -142,6 +142,7 @@
   function feederParams(input) {
     const params = {
       ...installationParams(input),
+      material: normalizeMaterial(input.material),
       voltage: Number(input.voltage),
       phase: Number(input.phase),
       amps: Number(input.amps),
@@ -161,6 +162,7 @@
   function voltageDropParams(input, conductorAwg) {
     const params = {
       ...installationParams(input),
+      material: normalizeMaterial(input.material),
       voltage: Number(input.voltage),
       phase: Number(input.phase),
       amps: Number(input.amps),
@@ -234,7 +236,14 @@
     };
   }
 
-  async function calculate(input, request) {
+  async function calculate(input, rawRequest) {
+    const request = async (path, params) => {
+      const payload = await rawRequest(path, params);
+      if (payload?.status === 'ok' && payload.inputs?.material !== 'copper') {
+        return errorResult('Calculator response does not confirm the accepted copper material. No verified result is available.');
+      }
+      return payload;
+    };
     if (typeof request !== 'function') {
       return errorResult('Voltage drop sizing request adapter is missing.');
     }
@@ -322,10 +331,12 @@
       status: 'ok',
       tool: 'voltage-drop',
       inputs: {
-        ...feederParams(input),
-        material: 'copper',
+        ...feeder.inputs,
+        ...finalDrop.inputs,
         recommended_size: recommended,
       },
+      calculator_family: finalDrop.calculator_family,
+      calculation: finalDrop.calculation,
       result: {
         ...finalDrop.result,
         conductor_awg: recommended,

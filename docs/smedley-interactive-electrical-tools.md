@@ -9,6 +9,41 @@
 
 ## Electrical installation profile
 
+### Copper-only capability contract — correction pending deployment
+
+The deterministic electrical calculators implement **copper conductors only**.
+The corrected contract accepts the string `copper` (case-insensitive, surrounding
+whitespace ignored). Omitting `material` explicitly selects the documented copper
+default. An explicit null, empty string, non-string, unknown material, aluminum,
+or aluminium is rejected before calculation. No copper substitution or estimated
+aluminum result is permitted. This restriction also applies to direct service API
+requests, not merely the Voltage Drop form.
+
+Aluminum **conduit or tray** remains a separate supported installation selection;
+it does not establish aluminum **conductor** capability. Southwire SPEC45253
+remains copper-specific; Allied still requires its exact datasheet.
+
+Review context retains owner material edits, including unsupported values. A
+follow-up must explicitly change material to copper before calculation can run.
+Merely restating voltage/current does not discard an unsupported material. An
+explicitly new circuit clears the previous material constraint. Forms preserve
+unsupported saved material visibly and do not auto-select copper in its place.
+
+Successful service responses identify `inputs.material` and `calculator_family`.
+Voltage-drop results also expose a `calculation` object containing accepted
+material, conductor size, voltage, phase, current, length, conduit, target,
+calculated voltage drop, and installation/family. Review narratives use those
+normalized values and service assumptions, not reconstructed PVC/copper prose.
+Clients refuse unconfirmed material responses rather than relabeling them.
+
+Deployment must coordinate the tracked adapter `api/smedley_cable_tray.py` with
+its external electrical-service copy and the review/GUI clients. **This correction
+was tested offline; no production deployment or restart was performed.** An old
+service without accepted-material metadata cannot satisfy the new client contract.
+The historical live checks below predate this correction and are not deployment
+evidence for it. Aluminum conductor capability remains absent; future support
+requires validated tables, an approved method, and independent validation.
+
 All eleven forms expose the shared installation category: aluminum ladder tray, nine-inch rungs, no cover / ventilated cover / solid cover, and TC-ER construction. Solid cover requires its continuous covered length. The adapter applies the 95% ampacity factor when an unventilated solid cover exceeds six feet under the retained NEC 2014 basis.
 
 The initial supported manufacturer catalog is Southwire SPEC45253 copper 3C XHHW-2/CPE plus ground. OD, 75°C AC resistance, 60 Hz reactance and ampacity limits come from the product tables. Outdoor/wet/sunlight/direct-burial suitability is product-specific, not a blanket denial of TC-ER. Verify ordered cable markings.
