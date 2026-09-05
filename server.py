@@ -108,6 +108,7 @@ from api.helpers import (
     _CLIENT_DISCONNECT_ERRORS,
 )
 from api.profiles import set_request_profile, clear_request_profile
+from api.project_store import ProjectStoreError
 from api.routes import handle_delete, handle_get, handle_patch, handle_post, handle_put, apply_cors_preflight_headers
 from api.startup import auto_install_agent_deps, fix_credential_permissions
 from api.updates import WEBUI_VERSION
@@ -392,6 +393,8 @@ class Handler(BaseHTTPRequestHandler):
             result = handle_get(self, parsed)
             if result is False:
                 return j(self, {'error': 'not found'}, status=404)
+        except ProjectStoreError as exc:
+            return j(self, {'error': str(exc), 'recoverable': True}, status=exc.status)
         except _CLIENT_DISCONNECT_ERRORS:
             # Expected disconnect path; do not convert it into a misleading server 500.
             return
@@ -420,6 +423,8 @@ class Handler(BaseHTTPRequestHandler):
             result = route_func(self, parsed)
             if result is False:
                 return j(self, {'error': 'not found'}, status=404)
+        except ProjectStoreError as exc:
+            return j(self, {'error': str(exc), 'recoverable': True}, status=exc.status)
         except _CLIENT_DISCONNECT_ERRORS:
             # Expected disconnect path; do not convert it into a misleading server 500.
             return

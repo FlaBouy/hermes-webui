@@ -33,7 +33,8 @@ def test_ensure_webhook_project_creates_dedicated_project():
     from api.models import WEBHOOK_PROJECT_NAME, ensure_webhook_project, load_projects, save_projects
 
     projects = load_projects()
-    save_projects([p for p in projects if p.get("name") != WEBHOOK_PROJECT_NAME])
+    projects[:] = [p for p in projects if p.get("name") != WEBHOOK_PROJECT_NAME]
+    save_projects(projects)
 
     pid1 = ensure_webhook_project()
     pid2 = ensure_webhook_project()

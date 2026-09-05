@@ -25,8 +25,8 @@ def test_ensure_cron_project_creates_project():
 
     # Remove any existing Cron Jobs project to test creation
     projects = load_projects()
-    original = [p for p in projects if p.get('name') != 'Cron Jobs']
-    save_projects(original)
+    projects[:] = [p for p in projects if p.get('name') != 'Cron Jobs']
+    save_projects(projects)
 
     pid = ensure_cron_project()
 
@@ -47,7 +47,8 @@ def test_ensure_cron_project_idempotent():
     from api.models import ensure_cron_project, load_projects, save_projects
 
     projects = load_projects()
-    save_projects([p for p in projects if p.get('name') != 'Cron Jobs'])
+    projects[:] = [p for p in projects if p.get('name') != 'Cron Jobs']
+    save_projects(projects)
 
     pid1 = ensure_cron_project()
     pid2 = ensure_cron_project()

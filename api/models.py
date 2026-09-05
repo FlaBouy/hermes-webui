@@ -6033,12 +6033,10 @@ def load_projects(*, _migrate: bool = True) -> list:
     callsites that want the raw on-disk shape (test fixtures, e.g.).
     """
     global _projects_migrated
-    if not PROJECTS_FILE.exists():
-        return []
-    try:
-        projects = json.loads(PROJECTS_FILE.read_text(encoding='utf-8'))
-    except Exception:
-        return []
+    from api.project_store import read_projects
+    projects = read_projects(PROJECTS_FILE)
+    if projects.revision is None:
+        return projects
     if _migrate and not _projects_migrated:
         with _PROJECTS_MIGRATION_LOCK:
             # Re-check inside the lock — another thread may have raced.
@@ -6049,25 +6047,20 @@ def load_projects(*, _migrate: bool = True) -> list:
                 # version; re-read so the caller doesn't see stale untagged
                 # rows (which a mutation route could then write back,
                 # silently overwriting the migration).
-                try:
-                    return json.loads(PROJECTS_FILE.read_text(encoding='utf-8'))
-                except Exception:
-                    return projects
+                return read_projects(PROJECTS_FILE)
+            projects = read_projects(PROJECTS_FILE)
             if _backfill_project_profiles_if_needed(projects):
-                try:
-                    save_projects(projects)
-                    _projects_migrated = True
-                except Exception:
-                    logger.debug("Failed to persist project profile backfill")
-                    # Leave _projects_migrated False so a future call retries.
+                save_projects(projects)
+                _projects_migrated = True
             else:
                 # Nothing to migrate — already tagged.
                 _projects_migrated = True
     return projects
 
 def save_projects(projects) -> None:
-    """Write project list to disk."""
-    PROJECTS_FILE.write_text(json.dumps(projects, ensure_ascii=False, indent=2), encoding='utf-8')
+    """Atomically save a load_projects snapshot, rejecting stale writers."""
+    from api.project_store import write_projects
+    write_projects(PROJECTS_FILE, projects)
 
 
 CRON_PROJECT_NAME = 'Cron Jobs'

@@ -18023,7 +18023,7 @@ def handle_post(handler, parsed) -> bool:
         active_profile = get_active_profile_name()
         if not _profiles_match(proj.get("profile"), active_profile):
             return bad(handler, "Project not found", 404)
-        projects = [p for p in projects if p["project_id"] != body["project_id"]]
+        projects[:] = [p for p in projects if p["project_id"] != body["project_id"]]
         save_projects(projects)
         # Unassign all sessions that belonged to this project.
         # #3746: this loop is O(N) full-JSON read+save per session, and each
