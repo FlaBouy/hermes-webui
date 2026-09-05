@@ -1136,7 +1136,7 @@ def _build_rag_pool_graph(ledger_path: Path) -> dict[str, Any]:
     groups = {
         "prompt": {"c": "#f4a93a", "r": 22, "glow": 54, "name": "Biggy Prompt", "pace": 0, "pause": 0, "major": True},
         "folder": {"c": "#60a5fa", "r": 7, "glow": 18, "name": "Library folder", "pace": 260, "pause": 360, "major": True},
-        "document": {"c": "#a78bfa", "r": 4, "glow": 11, "name": "Indexed document", "pace": 460, "pause": 560, "major": False},
+        "document": {"c": "#a78bfa", "r": 4, "glow": 11, "name": "Corpus document — ingestion state varies", "pace": 460, "pause": 560, "major": False},
     }
     # The active prompt is the world anchor.  It is pinned at the origin, so
     # the dormant auto-rotation moves the RAG branches around the question
@@ -1181,6 +1181,11 @@ def _build_rag_pool_graph(ledger_path: Path) -> dict[str, Any]:
             add("dir:" + cursor, part, "folder", "dir:" + parent_dir if parent_dir else "prompt:argus")
         parent = "dir:" + rel.rsplit("/", 1)[0] if "/" in rel else "prompt:argus"
         add("doc:" + rel, Path(rel).name, "document", parent)
+        node = nodes[index["doc:" + rel]]
+        phase = str(_row.get("phase") or "unknown")
+        node["ingestion_phase"] = phase
+        node["verification_state"] = "human_verified" if _row.get("human_verified") is True else "not_verified"
+        node["label"] = f"{Path(rel).name} [{phase}]"
     return {"brand": {"name": "RAG POOL", "logo": False}, "groups": groups, "nodes": nodes, "links": links}
 
 
@@ -1263,7 +1268,7 @@ def rag_directory_tree() -> dict[str, Any]:
         if parent is None:
             continue
         parent["children"].append({
-            "name": str(node.get("label") or Path(path).name),
+            "name": Path(path).name,
             "path": path,
             "kind": "document",
         })

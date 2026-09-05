@@ -22,6 +22,7 @@ _MACHINES = (
         "id": "SMEDLEY",
         "label": "SMEDLEY",
         "kind": "hermes",
+        "host": "127.0.0.1",
         "launch_url": "http://192.168.0.15:8787/",
     },
     {
@@ -76,9 +77,6 @@ def _tcp_online(host: str, ports: tuple[int, ...]) -> bool:
 
 def _machine_state(machine: dict, now: float) -> tuple[str, str | None, str | None]:
     machine_id = machine["id"]
-    if machine_id == "SMEDLEY":
-        return "online", "idle", None
-
     worker = _read_worker(machine_id)
     worker_state = str(worker.get("state") or "").strip().lower() or None
     updated_at = worker.get("updated_at")
@@ -102,8 +100,10 @@ def _machine_state(machine: dict, now: float) -> tuple[str, str | None, str | No
     # the useful liveness signal. The same probe is a conservative fallback for
     # a desktop whose worker status feed is temporarily absent.
     host = str(machine.get("host") or "")
-    ports = (443, 80) if machine.get("kind") == "web" else (3389,)
+    ports = (8787,) if machine_id == 'SMEDLEY' else ((443, 80) if machine.get("kind") == "web" else (3389,))
     if host and _tcp_online(host, ports):
+        if machine_id == 'SMEDLEY':
+            return "online", "unknown", "GUI listener reachable; worker readiness unknown/stale"
         return "online", worker_state, None
     return "offline", worker_state, "status feed is stale or host is unreachable"
 

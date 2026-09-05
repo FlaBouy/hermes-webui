@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
+import uuid
 from typing import Any, Callable
 from urllib.request import Request, urlopen
 
@@ -405,6 +407,9 @@ def request_fast_voice_reply(
     opener: Callable[..., Any] = urlopen,
 ) -> dict[str, Any]:
     """Call the warm V6 light model once and return its single final answer."""
+    started = time.monotonic()
+    timing = {"request_id": uuid.uuid4().hex, "lane": "v6_light", "accepted_ms": 0.0,
+              "first_model_token_ms": None}
     raw = str(prompt or "").strip()
     story = is_story_request(raw)
     sentence_limit = 1 if _ONE_SENTENCE_REQUEST.search(raw) else 2
@@ -437,6 +442,7 @@ def request_fast_voice_reply(
         method="POST",
     )
     answer = ""
+    timing["model_start_ms"] = round((time.monotonic() - started) * 1000, 2)
     with opener(request, timeout=55 if story else 30) as response:
         if story:
             result = json.loads(response.read().decode("utf-8"))
@@ -460,6 +466,8 @@ def request_fast_voice_reply(
                 except (KeyError, IndexError, TypeError, json.JSONDecodeError):
                     continue
                 if delta:
+                    if timing["first_model_token_ms"] is None:
+                        timing["first_model_token_ms"] = round((time.monotonic() - started) * 1000, 2)
                     chunks.append(str(delta))
                     candidate = "".join(chunks).strip()
                     if len(_completed_sentence_endings(candidate)) >= sentence_limit:
@@ -470,4 +478,5 @@ def request_fast_voice_reply(
                 answer = answer[: endings[sentence_limit - 1].end()].strip()
     if not answer:
         raise RuntimeError("V6 light model returned an empty response")
-    return {"reply": answer, "model": model, "story": story}
+    timing["final_text_ms"] = round((time.monotonic() - started) * 1000, 2)
+    return {"reply": answer, "model": model, "story": story, "timing": timing}

@@ -2735,7 +2735,7 @@
     }
 
     async function pollArgusSpeechMeter() {
-      if (speechMeterPollInFlight) return;
+      if (document.hidden || speechMeterPollInFlight) return;
       speechMeterPollInFlight = true;
       try {
         const suffix = speechMeterKnownGeneration
@@ -2880,7 +2880,7 @@
       // Never queue a second complete poll behind a slow tablet/network hop:
       // stale concurrent polls were able to multiply work for the one active
       // turn and starve the renderer after the first ask.
-      if (pttPollInFlight) return;
+      if (document.hidden || pttPollInFlight) return;
       pttPollInFlight = true;
       try {
         const status = await proxyJson('/ptt/status');
@@ -5624,6 +5624,7 @@
       panel.appendChild(banner);
     }
 
+    if (calendar.operational_state) appendOperatorRow(panel, `Google: ${calendar.operational_state.replaceAll('_', ' ')}`, 'Configuration alone does not verify connectivity or write permission.', 'muted');
     if (!calendar.connected) {
       appendOperatorRow(panel, 'Biggy needs to reconnect to Google.', calendar.oauth_ready ? 'The saved Google approval expired or was revoked.' : 'Biggy needs its profile-scoped Google OAuth connection.', 'warning');
       if (calendar.oauth_ready) {
@@ -6070,6 +6071,7 @@
         if (!current()) return;
         clearOperatorPanel(panel);
         panel.appendChild(operatorHeading('Mail'));
+        if (mail.operational_state) appendOperatorRow(panel, `Google: ${mail.operational_state.replaceAll('_', ' ')}`, 'Read connectivity is separate from configuration and write permission.', 'muted');
         if (!mail.connected) {
           appendOperatorRow(panel, 'Biggy local Google authorization is required.', mail.oauth_ready ? 'OAuth client is ready for account approval.' : 'Codex plugins are connected; Biggy still needs its own profile-scoped OAuth client.', 'warning');
           return;
@@ -7666,7 +7668,16 @@
       const objectScript = document.createElement('script');
       objectScript.id = 'argusCockpitObjectRuntime';
       objectScript.src = `/static/argus-cockpit-pet-poc.js?v=${BUILD_ID}`;
-      objectScript.onerror = () => objectScript.remove();
+      objectScript.onerror = () => {
+        objectScript.remove();
+        if (document.getElementById('argusOrbLoadRetry')) return;
+        const retry = document.createElement('button');
+        retry.id = 'argusOrbLoadRetry';
+        retry.textContent = 'Orb unavailable — retry';
+        retry.setAttribute('role', 'alert');
+        retry.addEventListener('click', () => { retry.remove(); applyShell(); });
+        mainChat.appendChild(retry);
+      };
       document.head.appendChild(objectScript);
     }
     // Apply IWO + native-transcript suppression in the same turn so HOME/init

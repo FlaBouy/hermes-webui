@@ -24,6 +24,8 @@
       this._onPointerMove = event => this.track(event.clientX, event.clientY);
       this._onPointerLeave = () => this.centerEye();
       this._onBlur = () => this.centerEye();
+      this._motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+      this._onMotionChange = () => this.centerEye();
       this.shadowRoot.innerHTML = `
         <style>
           :host{display:block;width:min(var(--pet-width,720px),96vw,120vh);aspect-ratio:1200/720;contain:layout style;container-type:inline-size;user-select:none;color:#b9c4d2;font-family:"SF Mono",ui-monospace,monospace}
@@ -128,6 +130,7 @@
       document.addEventListener('pointermove', this._onPointerMove, { passive: true });
       document.documentElement.addEventListener('mouseleave', this._onPointerLeave);
       window.addEventListener('blur', this._onBlur);
+      this._motion.addEventListener('change', this._onMotionChange);
       this.animateEye();
     }
 
@@ -135,6 +138,7 @@
       document.removeEventListener('pointermove', this._onPointerMove);
       document.documentElement.removeEventListener('mouseleave', this._onPointerLeave);
       window.removeEventListener('blur', this._onBlur);
+      this._motion.removeEventListener('change', this._onMotionChange);
       this._deactivateTimers.forEach(timer => clearTimeout(timer));
       this._deactivateTimers.clear();
       this._selectTimers.forEach(timer => clearTimeout(timer));
@@ -213,20 +217,32 @@
     }
 
     track(clientX, clientY) {
-      if (this.getAttribute('tracking') === 'off') return this.centerEye();
+      if (this._motion.matches || this.getAttribute('tracking') === 'off') return this.centerEye();
       const rect = this._eyeNode.getBoundingClientRect();
       const dx = clientX - (rect.left + rect.width / 2), dy = clientY - (rect.top + rect.height / 2);
       const distance = Math.hypot(dx, dy) || 1, strength = Math.min(1, distance / 280);
       this._target.x = dx / distance * 11 * strength;
       this._target.y = dy / distance * 8 * strength;
+      if (!this._frame) this.animateEye();
     }
 
-    centerEye() { this._target.x = 0; this._target.y = 0; }
+    centerEye() {
+      this._target.x = 0; this._target.y = 0;
+      if (!this._frame && this.isConnected) this.animateEye();
+    }
 
     animateEye() {
+      this._frame = 0;
+      if (!this.isConnected) return;
+      if (this._motion.matches) {
+        this._eye.x = 0; this._eye.y = 0;
+        this._eyeNode.style.translate = '0px 0px';
+        return;
+      }
       this._eye.x += (this._target.x - this._eye.x) * .18;
       this._eye.y += (this._target.y - this._eye.y) * .18;
       this._eyeNode.style.translate = `${this._eye.x.toFixed(2)}px ${this._eye.y.toFixed(2)}px`;
+      if (Math.hypot(this._target.x - this._eye.x, this._target.y - this._eye.y) < .01) return;
       this._frame = requestAnimationFrame(() => this.animateEye());
     }
 

@@ -279,7 +279,9 @@ def test_fast_voice_request_uses_one_light_model_call_and_story_budget():
         opener=opener,
     )
 
-    assert result == {"reply": "One complete story.", "model": DEFAULT_MODEL, "story": True}
+    assert {key: result[key] for key in ('reply', 'model', 'story')} == {"reply": "One complete story.", "model": DEFAULT_MODEL, "story": True}
+    assert result['timing']['final_text_ms'] >= result['timing']['model_start_ms'] >= 0
+    assert result['timing']['first_model_token_ms'] is None  # non-streamed story
     assert captured["url"].endswith("/v1/chat/completions")
     assert captured["payload"]["model"] == DEFAULT_MODEL
     assert captured["payload"]["max_tokens"] == 1500

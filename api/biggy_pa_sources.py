@@ -59,9 +59,11 @@ def _google_paths() -> tuple[Path, Path, Path]:
 def _connection_payload() -> dict[str, Any]:
     script, token, client = _google_paths()
     connected = script.is_file() and token.is_file()
-    reason = "connected" if connected else ("missing_token" if script.is_file() else "skill_unavailable")
+    reason = "configured_not_verified" if connected else ("missing_token" if script.is_file() else "skill_unavailable")
     return {
         "connected": connected,
+        "configured": connected,
+        "operational_state": "unverified" if connected else "not_configured",
         "reason": reason,
         "oauth_ready": client.is_file(),
         "profile": _hermes_home().name,
@@ -502,6 +504,7 @@ def mail_snapshot() -> dict[str, Any]:
         return {
             "schema": "biggy.pa.mail.v2",
             **connection,
+            "operational_state": ("unavailable" if error else "verified_read") if connection["connected"] else "not_connected",
             "messages": rows,
             "drafts": drafts,
             "error": error,
@@ -630,6 +633,7 @@ def calendar_snapshot(
         return {
             "schema": "biggy.pa.calendar.v3",
             **connection,
+            "operational_state": ("degraded" if error or overlay_error else "verified_read") if connection["connected"] else "not_connected",
             "range": {"start": start.isoformat(), "end": end.isoformat()},
             "calendar_sources": sources,
             "selected_calendar_ids": requested,

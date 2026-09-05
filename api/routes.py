@@ -25563,6 +25563,7 @@ def _return_biggy_fast_voice_route(
         "story_response": bool((routed or {}).get("story")),
         "tts_owner": tts_owner,
         "voice_personality": personality,
+        "voice_timing": (routed or {}).get("timing") or {},
     }
     if server_speak:
         assistant_row["ptt_owned_tts"] = True
@@ -25597,6 +25598,7 @@ def _return_biggy_fast_voice_route(
             "voice_model": str((routed or {}).get("model") or ""),
             "story_response": bool((routed or {}).get("story")),
             "provider_calls": 1,
+            "voice_timing": (routed or {}).get("timing") or {},
             "ptt_owned_tts": bool(server_speak),
             "tts_owner": tts_owner,
             "voice_personality": personality,

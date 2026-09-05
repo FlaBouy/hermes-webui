@@ -1,0 +1,21 @@
+--- jarvis_tools_api.py.before
++++ jarvis_tools_api.py.after
+@@ -1297,6 +1297,7 @@
+ 
+ 
+ class ToolsHandler(BaseHTTPRequestHandler):
++    timeout = 10  # Bound incomplete client reads; preserve serial calculator state.
+     def log_message(self, fmt, *args): pass
+ 
+     def _send(self, code, body):
+@@ -1332,6 +1333,10 @@
+             return
+         try:
+             length = int(self.headers.get("Content-Length", 0))
++            if length < 0 or length > 65536:
++                self.close_connection = True
++                self._send(413, _error("Request body exceeds the 64 KiB limit"))
++                return
+             raw = self.rfile.read(length) if length else b"{}"
+             params = json.loads(raw.decode("utf-8"))
+         except Exception as e:
