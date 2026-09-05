@@ -367,7 +367,7 @@ def test_readiness_only_runs_for_document_lane(monkeypatch):
         ("Re-run project review using new OCR tools", True),
     ]:
         walks = []
-        def readiness_check(folder):
+        def readiness_check(folder, walks=walks):
             walks.append(folder)
             return {"state": "needs_review", "ready": False, "reason": "Unverified evidence"}
         session = SimpleNamespace(session_id="lane-readiness-test", profile="smedley",
