@@ -1,0 +1,31 @@
+{
+  "project": "Argus GUI",
+  "id": "argus-gui",
+  "status": "established",
+  "repository": "/Users/rick/Projects/argus-gui",
+  "remote": "https://github.com/FlaBouy/argus-gui",
+  "branch": "main",
+  "baseline_tag": "argus-gui-baseline",
+  "source_sha": "0bfe245d68f865377ea7f385e6cfc7b347900478",
+  "production_build": "argus-v1.0-78-g0bfe245d",
+  "production_source": "/Users/rick/hermes-webui",
+  "production_paths_changed": false,
+  "gpt_project_id": "g-p-6a9c0ddf38bc81918cec4b82fbcca827",
+  "build_docs": "/Users/rick/Mounts/Z/DATA/Build Docs/Argus GUI",
+  "owner": "Rick",
+  "coordinator": "Codex on Smedley",
+  "cursor": "sidelined; explicit owner re-enable required",
+  "baseline_commit": "ddd3b46a23a656ebb07216118a90c1e12e4a9e9b",
+  "production_overlay": {
+    "release": "argus-continuity-20260905.1",
+    "implementation_commit": "abaa043693a6b38680e6d4d50b053b8861fc3845",
+    "source_paths_changed": false,
+    "report": "ASTRA6_HERMES_CONTINUITY_OPTIMIZATION.md"
+  },
+  "production_project_review": {
+    "release": "argus-project-review-20260906.1",
+    "manifest": "manifests/project-review-production-20260906.json",
+    "status": "deployed; owner ended further acceptance testing",
+    "collection": "jarvis_kb"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "release": "argus-project-review-20260906.1",
+  "production_revision": "6a74ff8d2d6781786d701e325e5baa17b386dc03",
+  "main": "6a74ff8d2d6781786d701e325e5baa17b386dc03",
+  "task_branch": "6a74ff8d2d6781786d701e325e5baa17b386dc03",
+  "remote": "https://github.com/FlaBouy/argus-gui.git",
+  "push": "confirmed",
+  "working_tree": "clean",
+  "updated_at": "2026-09-06T13:06:57.574769+00:00",
+  "production_running": true
+}

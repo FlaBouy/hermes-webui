@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -107,6 +108,7 @@ def phone_status() -> dict[str, Any]:
         "sms_ready": sms_ready,
         "voice_ready": voice_ready,
         "history_ready": twilio_ready,
+        "conversation": conversation_review(cfg),
         "sms_primary": "google_messages",
         "sms_transport": "google_messages" if google.get("ready") else ("twilio_fallback" if twilio_sms_ready else "unavailable"),
         "google_messages": google,
@@ -240,10 +242,58 @@ def send_sms(body: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _conversation_admin(cfg, action, request_id=None):
+    settings = cfg.get("conversation_service") or {}
+    if not isinstance(settings, dict) or not settings.get("python"):
+        raise RuntimeError("Biggy conversation service is not configured")
+    allowed = {"review", "verify", "send", "call-owner"}
+    if action not in allowed:
+        raise ValueError("Unknown conversation action")
+    argv = [settings["python"], settings["admin_script"], action]
+    if action in {"verify", "send"}:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", str(request_id or "")):
+            raise ValueError("A valid review item is required")
+        argv += ["--id", request_id]
+    if action != "review":
+        argv.append("--approve")
+    env = dict(os.environ, BIGGY_MESSAGING_STATE=settings["state_dir"],
+               BIGGY_MESSAGING_ORIGIN=settings["origin"],
+               BIGGY_TELEPHONY_CONFIG=settings["config_path"])
+    try:
+        result = subprocess.run(argv, env=env, capture_output=True, text=True, timeout=30, check=False)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError("Action status is uncertain; check phone history before retrying") from exc
+    if result.returncode:
+        raise RuntimeError("Conversation action did not complete. Check consent and activation status before retrying.")
+    return json.loads(result.stdout) if action == "review" else {"ok": True, "detail": result.stdout.strip()[:200]}
+
+
+def conversation_review(cfg=None):
+    cfg = cfg if cfg is not None else _load_config()
+    if not cfg.get("conversation_service"):
+        return {"configured": False}
+    try:
+        return {"configured": True, **_conversation_admin(cfg, "review")}
+    except Exception:
+        return {"configured": True, "error": "Conversation review is unavailable", "voice_enabled": False, "sms_enabled": False}
+
+
+def review_conversation(body):
+    if body.get("confirmed") is not True:
+        raise PermissionError("explicit confirmation is required")
+    action = body.get("action")
+    if action not in {"verify", "send"}:
+        raise ValueError("Unknown review action")
+    return _conversation_admin(_load_config(), action, body.get("id"))
+
+
 def start_call(body: dict[str, Any]) -> dict[str, Any]:
     if body.get("confirmed") is not True:
         raise PermissionError("explicit confirmation is required before starting a call")
     cfg = _load_config()
+    if body.get("mode") == "biggy":
+        result = _conversation_admin(cfg, "call-owner")
+        return {"schema": "biggy.phone.call.v1", "transport": "biggy_conversation", **result}
     target = _phone(body.get("to"), "recipient")
     bridge_device = _phone(cfg.get("bridge_device_number"), "bridge device number")
     from_number = _phone(cfg.get("voice_from_number") or cfg.get("from_number"), "Twilio number")

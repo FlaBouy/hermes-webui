@@ -1,0 +1,124 @@
+{
+  "release": "argus-project-review-20260906.1",
+  "validated_source": "d66f5dba391eb32335d32f384afcb8fd239483f0",
+  "status": "deployed; owner ended further acceptance testing",
+  "production_gui": "http://127.0.0.1:8790/",
+  "serving_route": "http://127.0.0.1:5004/rag",
+  "collection": "jarvis_kb",
+  "registry": "/Users/rick/.jarvis_rag_status/project-review/registry",
+  "project_root": "/Users/rick/Mounts/ArgusProjectReview/Library/Projects/Projects - 2026",
+  "mount": "/Users/rick/Mounts/ArgusProjectReview",
+  "mount_options": [
+    "nobrowse",
+    "nodatacache",
+    "nomdatacache"
+  ],
+  "backup": "/Users/rick/.hermes/backups/argus-project-review-production-20260906",
+  "files": [
+    {
+      "source": "api/routes.py",
+      "destination": "/Users/rick/hermes-webui/api/routes.py",
+      "sha256": "6d509fe12b5c6ed417a663f967d9550fc80aa14f8775322f9a30c52951644354"
+    },
+    {
+      "source": "api/argus_review_contract.py",
+      "destination": "/Users/rick/hermes-webui/api/argus_review_contract.py",
+      "sha256": "50c18a710f08d9094253c86d6a6f2a54124567518827e0fcec2900bf8043a4d2"
+    },
+    {
+      "source": "api/jarvis_rag_ingest_events.py",
+      "destination": "/Users/rick/hermes-webui/api/jarvis_rag_ingest_events.py",
+      "sha256": "94d29b12898af6bd3191e0f5ef581ee51ebb7e88e439e00dbd7d01bc8d1f0904"
+    },
+    {
+      "source": "api/smedley_rag_retrieval.py",
+      "destination": "/Users/rick/hermes-webui/api/smedley_rag_retrieval.py",
+      "sha256": "4ca1639ad216aaa001892c11f95358104756c5509b1132899f6c45a63354b37a"
+    },
+    {
+      "source": "static/biggy-brand.js",
+      "destination": "/Users/rick/hermes-webui/static/biggy-brand.js",
+      "sha256": "f475e0e2ba5f5b7241dab38f2168c984616c690cd79c5963c88bc8158f6511d7"
+    },
+    {
+      "source": "static/biggy-brand.css",
+      "destination": "/Users/rick/hermes-webui/static/biggy-brand.css",
+      "sha256": "00376ceeea38aaf573fafd730d965d805f214e65c6dbb494bb04eccf1e4f5e2f"
+    },
+    {
+      "source": "runtime/argus-rag/rag_config.py",
+      "destination": "/Users/rick/hermes-webui/runtime/argus-rag/rag_config.py",
+      "sha256": "e70e0fef24ec26de556566468b1d41cfc21d0c4f9f36ec941ec223ff5985bd2f"
+    },
+    {
+      "source": "runtime/argus-rag/jarvis_rag_projects.py",
+      "destination": "/Users/rick/hermes-webui/runtime/argus-rag/jarvis_rag_projects.py",
+      "sha256": "8d06f44d5addb68a94fbaca2d3dbd518226e4901f072016af7a312596196bcce"
+    },
+    {
+      "source": "runtime/argus-rag/launch_project_review.py",
+      "destination": "/Users/rick/hermes-webui/runtime/argus-rag/launch_project_review.py",
+      "sha256": "e7b40f2c95735cebad120ea97a3d837f41b71c94e036f9ba66b8b29a1ba96bac"
+    },
+    {
+      "source": "runtime/argus-rag/review_session.py",
+      "destination": "/Users/rick/hermes-webui/runtime/argus-rag/review_session.py",
+      "sha256": "0d5912162ed19ddaa9739789da78559884d083e8c24347efc961540637647d1b"
+    },
+    {
+      "source": "runtime/argus-rag/review_owner.py",
+      "destination": "/Users/rick/hermes-webui/runtime/argus-rag/review_owner.py",
+      "sha256": "4f4aece9c6eb2cc35662e1d7b6bc41017fab966a535dd2d8ab45022b597494d8"
+    },
+    {
+      "source": "runtime/argus-rag/review_extract_worker.py",
+      "destination": "/Users/rick/hermes-webui/runtime/argus-rag/review_extract_worker.py",
+      "sha256": "c834076aaa46e68d6ff223d3019691d5af8e3484493a2059d8fcdf4543e298fa"
+    },
+    {
+      "source": "runtime/argus-rag/review_pdf.py",
+      "destination": "/Users/rick/hermes-webui/runtime/argus-rag/review_pdf.py",
+      "sha256": "dda95f69ade091d51f2f4cddad938f024b19cfacb53debd977ee792d2a696dc9"
+    },
+    {
+      "source": "runtime/argus-rag/review_readiness.py",
+      "destination": "/Users/rick/hermes-webui/runtime/argus-rag/review_readiness.py",
+      "sha256": "d93ec6529def124888cfd100bdec0c8d089707820cdc1ef8c5afda6301a06d9e"
+    },
+    {
+      "source": "runtime/argus-rag/review_watch.py",
+      "destination": "/Users/rick/hermes-webui/runtime/argus-rag/review_watch.py",
+      "sha256": "6a07f5e05d7c6fdabe2813dab722702409b221309edb83574440cc2b8368d048"
+    },
+    {
+      "source": "runtime/argus-rag/jarvis_rag_poc.py",
+      "destination": "/Users/rick/hermes-webui/runtime/argus-rag/jarvis_rag_poc.py",
+      "sha256": "872d987debc2833322880debbc71a38bad46e08dab31dba6ec2c180c5ec50ab2"
+    },
+    {
+      "source_patch": "runtime/production/smedley-rag-api.patch",
+      "destination": "/Users/rick/bin/smedley-rag-api.py",
+      "sha256": "afab427fa8acf870c67b34a31debec6a95ebb34cfd91c889aed7ca03ff5d3b60"
+    },
+    {
+      "source_patch": "runtime/production/library-watch.patch",
+      "destination": "/Users/rick/Mounts/Z/DATA/n8n_share/Staging/RAG-build/jarvis_rag_watch.py",
+      "sha256": "bf86ca7ee276800529f2c04af879b9eece511984f74adcc5cdebc1d8fe2d81df"
+    }
+  ],
+  "live_passes": [
+    "GUI DETECTED and INGESTING",
+    "GUI READY and VALIDATING history",
+    "production 4X \u00d8.194 page/hash/generation canary",
+    "GUI OCR_RUNNING",
+    "vendor NEEDS_REVIEW and abstention",
+    "zero-chunk FAILED and exclusion"
+  ],
+  "not_rehearsed_live": [
+    "changed-source invalidation",
+    "RETRYING projection",
+    "mount loss/restoration",
+    "transient watcher/API restart recovery"
+  ],
+  "prior_evidence": "These paths passed isolated validation; production repetitions stopped at owner direction."
+}

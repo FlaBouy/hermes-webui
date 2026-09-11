@@ -12308,11 +12308,15 @@ def _deep_health_checks(stream_check: dict | None = None) -> tuple[dict, bool]:
 
 
 def _handle_health(handler, parsed):
+    from api.argus_continuity import RELEASE as continuity_release
     deep = parse_qs(parsed.query or "").get("deep", [""])[0].lower() in {"1", "true", "yes", "on"}
     stream_check = _streams_lock_health()
     run_check = _run_lifecycle_health()
     payload = {
         "status": "ok" if stream_check.get("status") == "ok" else "degraded",
+        "continuity_release": continuity_release,
+        "project_review_release": os.environ.get("ARGUS_REVIEW_RELEASE"),
+        "project_review_collection": os.environ.get("ARGUS_REVIEW_COLLECTION"),
         "sessions": len(SESSIONS),
         "active_streams": int(stream_check.get("active_streams") or 0),
         "active_runs": int(run_check.get("active_runs") or 0),
@@ -12775,8 +12779,25 @@ def _handle_biggy_v6_world_asset(handler, parsed) -> bool:
     return True
 
 
+def _handle_biggy_workspace_embed(handler, parsed, method: str):
+    """Same-origin authenticated Biggy Workspace iframe proxy."""
+    from api.biggy_workspace_embed import handle_biggy_workspace_embed, is_embed_path
+
+    if not is_embed_path(str(getattr(parsed, "path", "") or "")):
+        return False
+    return handle_biggy_workspace_embed(handler, parsed, method)
+
+
 def handle_get(handler, parsed) -> bool:
     """Handle all GET routes. Returns True if handled, False for 404."""
+    embed_result = _handle_biggy_workspace_embed(handler, parsed, "GET")
+    if embed_result is not False:
+        return embed_result
+
+    if parsed.path.startswith('/sentinel/'):
+        from api.sentinel import handle_get as handle_sentinel_get
+        return handle_sentinel_get(handler, parsed)
+
     proxy_result = _handle_extension_sidecar_proxy(handler, parsed, "GET")
     if proxy_result is not False:
         return proxy_result
@@ -13340,6 +13361,18 @@ def handle_get(handler, parsed) -> bool:
                 status=500,
             )
 
+    if parsed.path == "/api/biggy/pa/visual-plans":
+        from api.pa_visual import handle
+        return handle(handler, parsed, post=False)
+
+    if parsed.path == "/api/biggy/pa/phone-device":
+        from api.pa_phone_device import handle
+        return handle(handler, parsed, post=False)
+
+    if parsed.path == "/api/biggy/pa/planner":
+        from api.office_planner import handle_get as office_get
+        return office_get(handler, parsed)
+
     if parsed.path == "/api/biggy/pa/mail":
         try:
             from api.biggy_pa_sources import mail_snapshot
@@ -13348,6 +13381,10 @@ def handle_get(handler, parsed) -> bool:
         except Exception:
             logger.exception("biggy mail source failed")
             return j(handler, {"schema": "biggy.pa.mail.v1", "connected": False, "messages": [], "error": "mail unavailable"}, status=200)
+
+    if parsed.path == "/api/biggy/pa/review-context":
+        from api.pa_situation import review_context
+        return j(handler, review_context(load_projects(_migrate=False)))
 
     if parsed.path == "/api/biggy/pa/calendar":
         try:
@@ -14230,6 +14267,21 @@ def handle_get(handler, parsed) -> bool:
 
         return j(handler, {"ok": True, "tool": "project_review_extract", "mcp_tools": ["project_review_extract_capabilities", "project_review_extract"], **review_extract_capabilities()})
 
+    if parsed.path == "/api/biggy/projects/reviews/planning-documents":
+        project_id = str((parse_qs(parsed.query).get("project_id") or [""])[0]).strip()
+        project = next((item for item in load_projects(_migrate=False)
+                        if str(item.get("project_id") or "") == project_id
+                        and _profiles_match(item.get("profile"), "biggy")
+                        and isinstance(item.get("review"), dict)
+                        and item["review"].get("review_owner") == "smedley"), None)
+        if project is None:
+            return bad(handler, "project review not found", 404)
+        try:
+            from api.review_planning import documents
+            return j(handler, documents(str(project["review"].get("rag_folder") or "")))
+        except (ValueError, OSError):
+            return bad(handler, "Review documents are unavailable; check the selected review folder", 400)
+
     if parsed.path == "/api/biggy/projects/reviews/dialog":
         project_id = str((parse_qs(parsed.query).get("project_id") or [""])[0]).strip()
         project = next((item for item in load_projects()
@@ -14926,6 +14978,11 @@ def _validate_session_toolsets_shape(toolsets):
 def handle_post(handler, parsed) -> bool:
     """Handle all POST routes. Returns True if handled, False for 404."""
     diag = RequestDiagnostics.maybe_start("POST", parsed.path, logger=logger, print_fn=getattr(handler, '_safe_webui_print', None))
+    embed_result = _handle_biggy_workspace_embed(handler, parsed, "POST")
+    if embed_result is not False:
+        if diag:
+            diag.finish()
+        return embed_result
     if parsed.path == "/api/csp-report":
         if diag:
             diag.stage("csp_report")
@@ -15118,6 +15175,28 @@ def handle_post(handler, parsed) -> bool:
         finally:
             if diag:
                 diag.finish()
+    if parsed.path == "/api/biggy/pa/visual-plans":
+        from api.pa_visual import handle
+        return handle(handler, parsed, post=True)
+
+    if parsed.path == "/api/biggy/pa/phone-device":
+        from api.pa_phone_device import handle
+        return handle(handler, parsed, post=True)
+
+    if parsed.path == "/api/biggy/pa/planner":
+        from api.office_planner import handle_post as office_post
+        return office_post(handler, parsed)
+
+    if parsed.path.startswith('/sentinel/'):
+        try:
+            if not _check_same_origin_browser_request(handler, require_provenance=True):
+                return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
+            from api.sentinel import handle_post as handle_sentinel_post
+            return handle_sentinel_post(handler, parsed)
+        finally:
+            if diag:
+                diag.finish()
+
     proxy_result = _handle_extension_sidecar_proxy(
         handler,
         parsed,
@@ -15252,6 +15331,7 @@ def handle_post(handler, parsed) -> bool:
             return bad(handler, f"{action_name} failed", 502)
 
     phone_actions = {
+        "/api/biggy/phone/conversation/review": ("review_conversation", "conversation review"),
         "/api/biggy/phone/sms/send": ("send_sms", "phone text send"),
         "/api/biggy/phone/call/start": ("start_call", "phone call start"),
     }
@@ -17674,8 +17754,8 @@ def handle_post(handler, parsed) -> bool:
                             return (tool_form_reply(requested_calculator, history, message)
                                     if plan.get("reason") == "interactive_electrical_tool"
                                     else voltage_drop_reply(history, message))
-                        return request_fast_voice_reply(
-                            message, system_context=project_context, history_rows=history_cap,
+                        return _argus_saved_status(session, message, "smedley") or request_fast_voice_reply(
+                            message, system_context=project_context + "\n\n" + _argus_session_context(session, message, "smedley"), history_rows=history_cap,
                             history=build_review_agent_context_messages(history, max_messages=history_cap),
                             personality="smedley",
                         )
@@ -17868,6 +17948,62 @@ def handle_post(handler, parsed) -> bool:
         from api.smedley_project_review_extract import capabilities as review_extract_capabilities
 
         return j(handler, {"ok": True, **review_extract_capabilities()})
+
+    if parsed.path == "/api/biggy/pa/conversation":
+        try:
+            session = get_session(str(body.get("session_id") or ""))
+        except KeyError:
+            return bad(handler, "Session not found", 404)
+        if not _session_visible_to_active_profile(getattr(session, "profile", None), handler):
+            return bad(handler, "Session not found", 404)
+        handled = _try_pa_conversation(handler, session, body, str(body.get("message") or "").strip())
+        if handled is not None:
+            return
+        return j(handler, {"handled": False})
+
+    if parsed.path == "/api/biggy/pa/project-evidence":
+        project = next((item for item in load_projects(_migrate=False)
+                        if str(item.get("project_id") or "") == str(body.get("project_id") or "")
+                        and _profiles_match(item.get("profile"), "biggy")
+                        and isinstance(item.get("review"), dict)
+                        and item["review"].get("review_owner") == "smedley"), None)
+        if project is None:
+            return bad(handler, "project review not found", 404)
+        from api.pa_evidence import assess
+        from api.office_planner import store as planner_store
+        messages = []
+        conversation_note = "No stored review conversation is linked."
+        if project["review"].get("session_id"):
+            try:
+                session = get_session(project["review"]["session_id"])
+                if not getattr(session, "is_streaming", False):
+                    messages = list(getattr(session, "messages", []) or [])
+                    conversation_note = "Stored review conversation checked."
+                else:
+                    conversation_note = "Review is still responding; conversation was omitted until it finishes."
+            except KeyError:
+                conversation_note = "Linked review conversation was unavailable."
+        try:
+            result = assess(project, body.get("query"), planner_store().snapshot()["tasks"], messages)
+        except ValueError as exc:
+            return bad(handler, str(exc), 400)
+        result["coverage"].append(conversation_note)
+        return j(handler, result)
+
+    if parsed.path == "/api/biggy/projects/reviews/planning-preview":
+        project = next((item for item in load_projects(_migrate=False)
+                        if str(item.get("project_id") or "") == str(body.get("project_id") or "")
+                        and _profiles_match(item.get("profile"), "biggy")
+                        and isinstance(item.get("review"), dict)
+                        and item["review"].get("review_owner") == "smedley"), None)
+        if project is None:
+            return bad(handler, "project review not found", 404)
+        try:
+            from api.review_planning import extract
+            return j(handler, extract(str(project["review"].get("rag_folder") or ""),
+                                      str(body.get("path") or ""), body.get("start", 1)))
+        except (ValueError, OSError) as exc:
+            return bad(handler, str(exc), 400)
 
     if parsed.path in {
         "/api/biggy/projects/reviews/extract",
@@ -18409,6 +18545,9 @@ def handle_post(handler, parsed) -> bool:
 
 def handle_patch(handler, parsed) -> bool:
     """Handle all PATCH routes. Returns True if handled, False for 404."""
+    embed_result = _handle_biggy_workspace_embed(handler, parsed, "PATCH")
+    if embed_result is not False:
+        return embed_result
     if not _check_csrf(handler):
         return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
     proxy_result = _handle_extension_sidecar_proxy(
@@ -18437,6 +18576,9 @@ def handle_patch(handler, parsed) -> bool:
 
 def handle_delete(handler, parsed) -> bool:
     """Handle all DELETE routes. Returns True if handled, False for 404."""
+    embed_result = _handle_biggy_workspace_embed(handler, parsed, "DELETE")
+    if embed_result is not False:
+        return embed_result
     if not _check_csrf(handler):
         return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
     proxy_result = _handle_extension_sidecar_proxy(
@@ -18473,6 +18615,9 @@ def handle_delete(handler, parsed) -> bool:
 
 def handle_put(handler, parsed) -> bool:
     """Handle all PUT routes. Returns True if handled, False for 404."""
+    embed_result = _handle_biggy_workspace_embed(handler, parsed, "PUT")
+    if embed_result is not False:
+        return embed_result
     if not _check_csrf(handler):
         return j(handler, {"error": "Cross-origin request rejected"}, status=403)
     proxy_result = _handle_extension_sidecar_proxy(
@@ -24190,6 +24335,9 @@ def _handle_chat_start(handler, body, diag=None):
             return bad(handler, "message is required")
         diag.stage("normalize_attachments") if diag else None
         attachments = _normalize_chat_attachments(body.get("attachments") or [])[:20]
+        pa_result = _try_pa_conversation(handler, s, body, msg)
+        if pa_result is not None:
+            return pa_result
         # Biggy is a coordinator, not a tax on ordinary conversation.  Typed
         # small-talk and direct questions use the same warm V6 lane as voice;
         # explicit tool/RAG/engineering/repository work continues below on the
@@ -24212,10 +24360,11 @@ def _handle_chat_start(handler, body, diag=None):
                 profile=_fast_voice_default_personality(s),
                 has_attachments=bool(attachments),
             ):
-                light = request_fast_voice_reply(
+                light = _argus_saved_status(s, msg, conversation_personality) or request_fast_voice_reply(
                     msg,
                     history=getattr(s, "messages", None),
                     personality=conversation_personality,
+                    system_context=_argus_session_context(s, msg, conversation_personality),
                 )
                 return _return_biggy_fast_voice_route(
                     handler,
@@ -25521,6 +25670,68 @@ def _return_smedley_fast_route(handler, s, msg, routed, ptt_owned_tts=False):
     )
 
 
+def _argus_session_context(session, prompt, role):
+    from api.argus_continuity import context_for_session
+    return context_for_session(session, prompt=prompt, role=role)
+
+
+def _argus_saved_status(session, prompt, role):
+    from api.argus_continuity import saved_status_reply
+    reply = saved_status_reply(session, prompt, role)
+    return {'reply': reply, 'model': '', 'continuity_source': 'saved_checkpoint'} if reply else None
+
+
+_PA_CONVERSATION_ACTIVE = set()
+
+
+def _try_pa_conversation(handler, session, body, text):
+    from api.pa_conversation import route, intent, last_context
+    if not _profiles_match(getattr(session, "profile", None), "biggy") or body.get("attachments"):
+        return None
+    previous = last_context(getattr(session, "messages", []))
+    if not intent(text) and not ((previous.get("choices") or previous.get("draft_choices")) and re.fullmatch(r"\s*(?:project\s+)?\d+\s*[.!]?\s*", text, re.I)):
+        return None
+    if not _session_visible_to_active_profile(getattr(session, "profile", None), handler):
+        bad(handler, "Session not found", 404)
+        return True
+    if getattr(session, "is_streaming", False) or getattr(session, "active_stream_id", None):
+        bad(handler, "Finish or stop the active response before asking the PA resolver", 409)
+        return True
+    with LOCK:
+        if session.session_id in _PA_CONVERSATION_ACTIVE:
+            bad(handler, "PA sources are already being checked for this conversation", 409)
+            return True
+        _PA_CONVERSATION_ACTIVE.add(session.session_id)
+    try:
+        projects = [p for p in load_projects(_migrate=False) if _profiles_match(p.get("profile"), "biggy")
+                    and isinstance(p.get("review"), dict) and p["review"].get("review_owner") == "smedley"]
+        from api.pa_evidence import assess
+        from api.office_planner import store
+        def evidence(project, query):
+            messages = []
+            sid = project["review"].get("session_id")
+            if sid:
+                try:
+                    reviewed = get_session(sid)
+                    if not getattr(reviewed, "is_streaming", False):
+                        messages = list(getattr(reviewed, "messages", []) or [])
+                except KeyError:
+                    pass
+            return assess(project, query, store().snapshot()["tasks"], messages)
+        routed = route(text, projects, getattr(session, "messages", []), str(body.get("pa_review_id") or ""), assess_fn=evidence)
+        if routed is None:
+            return None
+        if getattr(session, "is_streaming", False) or getattr(session, "active_stream_id", None):
+            bad(handler, "Another response started while sources loaded; retry after it finishes", 409)
+            return True
+        routed["pa_local_voice"] = _chat_body_biggy_local_voice(body)
+        _return_biggy_fast_voice_route(handler, session, text, routed, server_speak=False, personality="argus")
+        return True
+    finally:
+        with LOCK:
+            _PA_CONVERSATION_ACTIVE.discard(session.session_id)
+
+
 def _return_biggy_fast_voice_route(
     handler, s, msg, routed, *, server_speak=False, personality="biggy"
 ):
@@ -25565,6 +25776,10 @@ def _return_biggy_fast_voice_route(
         "voice_personality": personality,
         "voice_timing": (routed or {}).get("timing") or {},
     }
+    if "pa_context" in routed:
+        assistant_row["pa_context"] = routed["pa_context"]
+        assistant_row["spoken_text"] = routed.get("spoken_text", "")
+        assistant_row["pa_local_voice"] = routed.get("pa_local_voice", False)
     if server_speak:
         assistant_row["ptt_owned_tts"] = True
     s.messages.append(assistant_row)
@@ -25593,11 +25808,12 @@ def _return_biggy_fast_voice_route(
             "session_id": s.session_id,
             "answer": reply,
             "reply": reply,
-            "spoken_text": reply,
+            "spoken_text": routed.get("spoken_text", reply),
+            "pa_conversation": "pa_context" in routed,
             "biggy_fast_voice_route": True,
             "voice_model": str((routed or {}).get("model") or ""),
             "story_response": bool((routed or {}).get("story")),
-            "provider_calls": 1,
+            "provider_calls": routed.get("provider_calls", 1),
             "voice_timing": (routed or {}).get("timing") or {},
             "ptt_owned_tts": bool(server_speak),
             "tts_owner": tts_owner,
@@ -26526,6 +26742,9 @@ def _handle_chat_sync(handler, body):
                 handler,
                 f"display_message exceeds {SYNC_DISPLAY_MESSAGE_MAX_CHARS} characters",
             )
+    pa_result = _try_pa_conversation(handler, s, body, display_msg)
+    if pa_result is not None:
+        return pa_result
     ptt_owned = _chat_body_ptt_owned_tts(body)
     # A pedal/synchronous Ask-Jarvis request for an engineering document is a
     # governed document retrieval, not a PA-briefing request.  This endpoint
@@ -26718,10 +26937,11 @@ def _handle_chat_sync(handler, body):
             display_message=display_msg if "display_message" in body else None,
             personality=voice_personality,
         ):
-            light = request_fast_voice_reply(
+            light = _argus_saved_status(s, display_msg, voice_personality) or request_fast_voice_reply(
                 display_msg,
                 history=getattr(s, "messages", None),
                 personality=voice_personality,
+                system_context=_argus_session_context(s, display_msg, voice_personality),
             )
             return _return_biggy_fast_voice_route(
                 handler,

@@ -8984,6 +8984,10 @@ def _run_agent_streaming(
                 },
                 config_data=_cfg,
             )
+            from api.argus_continuity import context_for_session
+            _continuity = context_for_session(s, prompt=msg_text)
+            if _continuity:
+                agent.ephemeral_system_prompt += '\n\n' + _continuity
             _pending_started_at = getattr(s, 'pending_started_at', None)
             meter().set_pending_started_at(stream_id, _pending_started_at)
             # Normal chat-start sets pending_started_at before spawning this thread;

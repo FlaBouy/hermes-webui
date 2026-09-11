@@ -1,0 +1,47 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Office Planner</title><link rel="stylesheet" href="style.css?v=whiteboard-20260911"></head><body>
+<header><div><small>PERSONAL ASSISTANT</small><h1>Office planner</h1></div><button id="refresh">Refresh</button></header>
+<details id="situation-panel" open><summary>Situation Brief</summary>
+<p>Check what needs attention using saved tasks, review context and the primary calendar. Choose a subject or leave it blank for the current review / all planner work.</p>
+<label for="situation-question">What do you need to know?</label><select id="situation-question"><option value="all">Overall situation</option><option value="today">What needs attention today?</option><option value="week">What is at risk in the next seven days?</option><option value="blocked">What is holding this work up?</option></select>
+<label for="situation-subject">Project, person, task or document</label><input id="situation-subject" maxlength="240" placeholder="Name or review ID — leave blank for current context">
+<button id="situation-refresh">Build / refresh brief</button><p id="situation-status" role="status"></p><div id="situation-matches"></div><div id="situation-results"></div></details>
+<details id="evidence-panel"><summary>Ask about project evidence</summary>
+<p>Ask about one project’s indexed documents and stored review conversation. Proposed commitments and task matches need your confirmation.</p>
+<button id="evidence-projects">Load projects</button><label for="evidence-project">Project Review</label><select id="evidence-project"><option value="">Load projects first</option></select>
+<label for="evidence-question">Question</label><textarea id="evidence-question" rows="3" maxlength="1000" placeholder="What is holding this project up? Which deadlines need a planner task?"></textarea>
+<button id="evidence-ask">Check project evidence</button><p id="evidence-status" role="status"></p><div id="evidence-results"></div></details>
+<details id="visual-panel"><summary>Visual Planning · diagrams and workflow</summary><div id="visual-workspace"></div></details>
+<details id="phone-device-panel"><summary>Phone → planner</summary><div id="phone-device-workspace"></div></details>
+<section class="capture"><form id="capture"><label for="quick">Capture a task</label><div class="row"><input id="quick" maxlength="240" required placeholder="Send proposal tomorrow !high"><button>Add task</button></div><small>Optional: “today”, “tomorrow”, “every weekday”, “every week” or “!high”. Review the captured date below.</small></form></section>
+<nav id="views" aria-label="Planner views"></nav>
+<section id="brief" aria-label="Daily brief"></section>
+<section id="calendar"><div class="row"><h2>Today’s calendar</h2><button id="calendar-refresh">Load calendar</button></div><div id="meetings">Calendar loads separately; tasks are available immediately.</div></section>
+<details id="document-planning" hidden><summary>Review document → planning tasks</summary>
+<p>Select a review document. This local keyword scan suggests milestones, deliverables, decisions and deadlines from PDF native text or text/Markdown. Scanned images require a text export; this is not a complete document review.</p>
+<button id="load-documents">Load review documents</button><label for="planning-document">Document</label><select id="planning-document"><option value="">Load documents first</option></select>
+<label for="planning-start">Starting PDF page / 100-line text block</label><input id="planning-start" type="number" min="1" max="100000" value="1">
+<button id="preview-document">Find planning candidates</button><p id="document-status" role="status"></p><div id="document-candidates"></div>
+<details><summary>Extracted source text</summary><div id="document-text"></div></details></details>
+<details id="meeting-prep"><summary>Prepare for a meeting / project review</summary>
+<p>Choose a project scope and optionally one of today’s appointments. The brief uses saved planner records; documents and mail are not searched.</p>
+<label for="prep-meeting">Appointment</label><select id="prep-meeting"><option value="">No appointment selected</option></select>
+<label for="prep-project">Task scope</label><select id="prep-project"><option value="">Choose task scope</option></select>
+<label for="prep-agenda">Agenda / decisions to discuss</label><textarea id="prep-agenda" rows="3" maxlength="5000" placeholder="Purpose, discussion points, decisions needed"></textarea>
+<button id="build-brief">Build preparation brief</button><p id="prep-status" role="status"></p>
+<label for="prep-output">Editable preparation brief</label><textarea id="prep-output" rows="12" placeholder="Your preparation brief will appear here."></textarea>
+<div class="actions"><button id="copy-brief" disabled>Copy brief</button><button id="export-brief" disabled>Export brief</button></div></details>
+<details id="meeting-capture"><summary>Meeting notes → action items</summary>
+<p>Paste notes or a list. Lines beginning “Action:” or “TODO:” are picked first; otherwise each line becomes a candidate. Review wording and dates before saving.</p>
+<label for="meeting-source">Meeting / source reference</label><input id="meeting-source" maxlength="1000" placeholder="Weekly project meeting · date or document reference">
+<label for="meeting-notes">Notes</label><textarea id="meeting-notes" rows="5" maxlength="5000" placeholder="Action: Send the revised proposal tomorrow"></textarea>
+<button id="review-actions">Review action items</button><div id="action-drafts" aria-live="polite"></div></details>
+<details id="work-planning"><summary>Plan work around today’s appointments</summary>
+<p>Suggestions use the primary calendar loaded above and this browser’s timezone. Other calendars and unsaved commitments may affect availability. Nothing is booked.</p>
+<div class="row"><label>Start<input id="work-start" type="time" value="08:00"></label><label>Finish<input id="work-end" type="time" value="17:00"></label><button id="plan-work">Suggest work periods</button></div><div id="work-suggestions" aria-live="polite"></div></details>
+<div class="row filters"><input id="search" type="search" aria-label="Search tasks" placeholder="Search title, project, person or notes"><button id="new">Detailed task</button><button id="export">Export tasks</button></div>
+<p id="status" role="status"></p><section id="tasks" aria-label="Office tasks"></section>
+<footer>Tasks are shared across your signed-in browsers. Snoozed items return to the list when due. This first pass does not send background or device notifications.</footer>
+<dialog id="editor" aria-labelledby="edit-title"><form id="edit-form"><div class="row"><h2 id="edit-title">Task details</h2><button type="button" id="close" aria-label="Close task editor">×</button></div>
+<input type="hidden" name="review_project_id"><label>Title<input name="title" required maxlength="240"></label><div class="grid"><label>Due date<input name="due" type="date"></label><label>Priority<select name="priority"><option value="normal">Normal</option><option value="high">High</option><option value="low">Low</option></select></label><label>List<select name="status"><option value="open">Open</option><option value="waiting">Waiting</option></select></label><label>Repeat<select name="recurrence"><option value="none">Does not repeat</option><option value="daily">Daily</option><option value="weekdays">Weekdays</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option></select></label><label>Estimate (minutes)<input name="estimate" type="number" min="5" max="480" step="5" value="30"></label><label>Timezone<input name="timezone" required></label><label>Project<input name="project" maxlength="120"></label><label>Waiting on<input name="waiting_on" maxlength="120"></label></div>
+<label>Source / reference<input name="source" maxlength="1000" placeholder="Meeting, document or message reference"></label><label>Notes<textarea name="notes" rows="4" maxlength="5000"></textarea></label><p id="edit-error" role="alert"></p><button id="save">Save task</button></form></dialog>
+<script type="module" src="app.js?v=whiteboard-20260911-view"></script></body></html>

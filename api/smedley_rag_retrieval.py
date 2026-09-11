@@ -308,6 +308,11 @@ def build_retrieve_response(
     )
     _library_only(body)
 
+    if isinstance(body.get("filter"), dict) and "project_folder" in body["filter"]:
+        from api.pa_project_retrieval import project_matches
+        return project_matches(query, body["filter"]["project_folder"], embed_fn=embed_fn,
+                               qd_fn=qd_fn, collection=collection)
+
     exact_publications = _exact_publication_matches(query, topk)
     if exact_publications is not None:
         return {
@@ -372,6 +377,12 @@ def build_retrieve_response(
         ranked = []
         seen_sources = set()
 
+    from api.argus_review_contract import active_filter, filter_hits
+
+    try:
+        eligibility_filter = active_filter(collection)
+    except RuntimeError:
+        return {"matches": [], "collection": collection, "readiness": "NEEDS_REVIEW", "reason": "Shared readiness registry unavailable"}
     vectors = embed_fn([expanded])
     if not vectors:
         raise RuntimeError("embedding service returned no vector")
@@ -380,7 +391,7 @@ def build_retrieve_response(
         "vector": vectors[0],
         "limit": max(topk * 3, topk),
         "with_payload": True,
-        "filter": {"must": [{"is_empty": {"key": "project"}}]},
+        "filter": {"must": [{"is_empty": {"key": "project"}}, *eligibility_filter["must"]]},
     }
     result = qd_fn(f"/collections/{collection}/points/search", search_body)
     hits = result.get("result", []) if isinstance(result, dict) else []
@@ -412,11 +423,14 @@ def build_retrieve_response(
             # Fake a vector-hit shape so the merge loop is uniform.
             hits.append({"score": 0.82, "payload": point.get("payload") or {}})
 
-    for hit in hits:
+    seen_chunks = set()
+    for hit in filter_hits(hits, collection):
         payload = hit.get("payload") or {}
         source = str(payload.get("source") or "?")
-        if source in seen_sources:
+        identity = payload.get("chunk_id")
+        if identity in seen_chunks:
             continue
+        seen_chunks.add(identity)
         # When TDC index already answered a part-number query, do not let
         # semantic near-family / wrong-product PDFs outrank or dilute it.
         if tdc_matches:
@@ -436,6 +450,9 @@ def build_retrieve_response(
             "lan_url": f"{CORPUS_BASE_URL}/{urllib.parse.quote(source.lstrip('/'), safe='/')}",
             "score": round(base + _source_bonus(source, tokens), 6),
         }
+        for key in ("source_hash", "source_version", "generation", "pdf_page", "printed_page", "chunk_id", "quality_state", "extraction_method", "items"):
+            match[key] = payload.get(key)
+        match["support_text"] = str(payload.get("text") or "")
         ranked.append(match)
 
     ranked.sort(key=lambda m: m.get("score", 0.0), reverse=True)

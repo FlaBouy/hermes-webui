@@ -157,7 +157,7 @@
         const row = index % 6;
         const y = 250 + row * 60;
         const inward = [40, 20, 0, 0, 20, 40][row];
-        const leftX = 100 + inward;
+        const leftX = 180 + inward;
         const x = side === 'left' ? leftX : 1192 - leftX;
         const connectorX = x + (side === 'left' ? 78 : -78);
         const dx = connectorX - 596, dy = y - 404, length = Math.hypot(dx, dy) || 1;

@@ -1,4 +1,7 @@
 async function api(path,opts={}){
+  if(['/api/chat','/api/chat/start'].includes(path)&&typeof opts.body==='string'){
+    try{const body=JSON.parse(opts.body);const id=window.__argusPAReviewContext?.();if(id){body.pa_review_id=id;opts={...opts,body:JSON.stringify(body)};}}catch(_){}
+  }
   // Strip leading slash so URL resolves relative to location.href (supports subpath mounts)
   const rel = path.startsWith('/') ? path.slice(1) : path;
   const url=new URL(rel,document.baseURI||location.href);

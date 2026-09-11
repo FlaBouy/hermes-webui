@@ -1,0 +1,299 @@
+{
+  "schema": 1,
+  "source": "accepted Argus GUI establishment and Astra6 closeout",
+  "verified_at": "2026-09-05",
+  "state": "accepted_with_residuals",
+  "project": "Argus GUI",
+  "identity": "Biggy is the user-facing assistant; Argus is the GUI/tool integration; Smedley is engineering support; Hermes is the session/worker foundation.",
+  "repository": "/Users/rick/Projects/argus-gui",
+  "branch": "main",
+  "production_baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478",
+  "production_build": "argus-v1.0-78-g0bfe245d",
+  "production_source": "/Users/rick/hermes-webui",
+  "coordinator": "Codex on Smedley; owner Rick",
+  "build_docs": "/Users/rick/Mounts/Z/DATA/Build Docs/Argus GUI",
+  "evidence": [
+    "docs/audits/ASTRA6_AUDIT_CLOSEOUT.md",
+    "ARGUS_GUI_PROJECT_ESTABLISHMENT.md"
+  ],
+  "boundaries": [
+    "Copper conductor contract; aluminum support is not aluminum conductor capability.",
+    "OCR/indexing does not imply verification or engineering approval.",
+    "Live services/active extensions remain external; health and account permissions independently verified.",
+    "Cursor remains sidelined; no autonomous execution or blind worker replay."
+  ],
+  "rag": {
+    "ledger": "~/.jarvis_rag_status/ingest_ledger.json",
+    "library": "/Users/rick/Mounts/RAG_Pool/Library",
+    "states": {
+      "detected": "seen, not ingested",
+      "queued": "waiting",
+      "indexed": "retrievable, not verified",
+      "duplicate": "duplicate record, not independent verification",
+      "verified": "separate evidence-based verification state"
+    },
+    "retrieval": "Use existing RAG tools and preserve source/page identifiers; missing evidence is unknown."
+  },
+  "technical_debt": [
+    "voice buffering/end-to-end timing",
+    "story token caps",
+    "distributed deadlines and travel barrier",
+    "Google supervision/refresh locking",
+    "LAN auth/CORS and NAS dependencies",
+    "Galaxy capacity and large-file cleanup"
+  ],
+  "capabilities": [
+    {
+      "name": "conversation",
+      "owner": "Biggy",
+      "endpoint": "api/biggy_voice_route.py",
+      "purpose": "Local model replies; ordinary conversation uses fast lane",
+      "prerequisites": "Model endpoint available",
+      "limitations": "Buffered delivery; no end-to-end latency guarantee",
+      "availability": "implemented; live availability unknown until checked",
+      "validation": "accepted baseline, affected scope",
+      "input_contract": "message, bounded history, persona, optional system context",
+      "output_contract": "reply and timing/model metadata; empty response is failure",
+      "baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478"
+    },
+    {
+      "name": "Project Review",
+      "owner": "Smedley",
+      "endpoint": "api/routes.py: project review routes",
+      "purpose": "Durable review dialogue, governed document tasks and deterministic tool handoff",
+      "prerequisites": "Existing project/folder and Hermes worker",
+      "limitations": "Extraction does not imply engineering approval",
+      "availability": "implemented; live availability unknown until checked",
+      "validation": "accepted baseline, affected scope",
+      "input_contract": "project/session ID, current message, stable request ID; explicit execution directive for governed work",
+      "output_contract": "persisted review dialogue and terminal turn state; evidence/tool result on governed path",
+      "baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478"
+    },
+    {
+      "name": "electrical calculations",
+      "owner": "tools",
+      "endpoint": "http://127.0.0.1:8801/tools/*",
+      "purpose": "Voltage drop, feeder sizing and other supported deterministic tools",
+      "prerequisites": "Valid inputs, external tables/adapter",
+      "limitations": "Copper conductors only; aluminum tray is separate; Allied needs matching datasheet",
+      "availability": "implemented; live availability unknown until checked",
+      "validation": "accepted baseline, affected scope",
+      "input_contract": "selected tool schema with units and required load, voltage, length and conductor inputs",
+      "output_contract": "deterministic calculation plus validation/error and tool evidence; no aluminum conductor inference",
+      "baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478"
+    },
+    {
+      "name": "RAG retrieval",
+      "owner": "RAG",
+      "endpoint": "scripts/smedley_rag_mcp.py",
+      "purpose": "Retrieve bounded evidence with source identifiers",
+      "prerequisites": "RAG/resolver and indexed sources",
+      "limitations": "Missing evidence is unknown; no fabricated citations",
+      "availability": "implemented; live availability unknown until checked",
+      "validation": "accepted baseline, affected scope",
+      "input_contract": "rag_search(query: str)",
+      "output_contract": "JSON/string response with retrieval evidence; preserve provided source IDs",
+      "baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478"
+    },
+    {
+      "name": "Galaxy navigation",
+      "owner": "Argus",
+      "endpoint": "api/argus_world.py",
+      "purpose": "Browse ingestion and verification states",
+      "prerequisites": "Local ingest ledger",
+      "limitations": "Detected/queued/indexed/duplicate are not verified; >4000 redesign deferred",
+      "availability": "implemented; live availability unknown until checked",
+      "validation": "accepted baseline, affected scope",
+      "input_contract": "existing world/ledger filters and navigation action",
+      "output_contract": "ingest state and source identity; verification is a separate state",
+      "baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478"
+    },
+    {
+      "name": "OCR and DXF",
+      "owner": "Smedley",
+      "endpoint": "scripts/smedley_project_review_mcp.py",
+      "purpose": "Extract source-linked drawing evidence",
+      "prerequisites": "Optional OCR/DXF tools and documents",
+      "limitations": "Uncertain extraction remains unverified",
+      "availability": "implemented; live availability unknown until checked",
+      "validation": "accepted baseline, affected scope",
+      "input_contract": "project_review_extract(project_id, path, kind=auto, max_pages=8, update_ledger=false, producer_mode)",
+      "output_contract": "JSON ok/error and extraction evidence; does not index Qdrant",
+      "baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478"
+    },
+    {
+      "name": "voice input",
+      "owner": "Whisper",
+      "endpoint": "http://127.0.0.1:5001",
+      "purpose": "Transcription through existing PTT integration",
+      "prerequisites": "Microphone, daemon and client permissions",
+      "limitations": "Availability must be checked; no automatic restart",
+      "availability": "implemented; live availability unknown until checked",
+      "validation": "accepted baseline, affected scope",
+      "input_contract": "microphone audio through existing PTT capture and Whisper integration",
+      "output_contract": "transcribed text or explicit failure",
+      "baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478"
+    },
+    {
+      "name": "voice output",
+      "owner": "Smedley/RAG",
+      "endpoint": "api/project_review_speech.py",
+      "purpose": "Spoken response/summary",
+      "prerequisites": "Existing speech service",
+      "limitations": "Heavy replies use summaries; synthesis/playback timing incomplete",
+      "availability": "implemented; live availability unknown until checked",
+      "validation": "accepted baseline, affected scope",
+      "input_contract": "reply/summary text through owning speech route",
+      "output_contract": "audio/playback response; synthesis success is not audible-playback proof",
+      "baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478"
+    },
+    {
+      "name": "email and calendar",
+      "owner": "PA",
+      "endpoint": "api/biggy_pa_sources.py",
+      "purpose": "Existing Gmail/Calendar integrations",
+      "prerequisites": "Configured account authorization",
+      "limitations": "Configuration is not proof of read/write access",
+      "availability": "implemented; live availability unknown until checked",
+      "validation": "accepted baseline, affected scope",
+      "input_contract": "selected PA action and validated IDs/addresses/time fields; existing account authorization",
+      "output_contract": "provider result or reconnect/permission error; sends require owner authorization",
+      "baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478"
+    },
+    {
+      "name": "messaging",
+      "owner": "PA",
+      "endpoint": "scripts/biggy_google_messages_bridge.mjs",
+      "purpose": "Existing Google Messages browser integration",
+      "prerequisites": "Authenticated supervised browser",
+      "limitations": "Reconnect/supervision and refresh locking residuals",
+      "availability": "implemented; live availability unknown until checked",
+      "validation": "accepted baseline, affected scope",
+      "input_contract": "selected Messages action and validated recipient/text; authenticated browser",
+      "output_contract": "bridge result/error; sending requires owner authorization",
+      "baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478"
+    },
+    {
+      "name": "maps and travel",
+      "owner": "PA/n8n",
+      "endpoint": "workflows/jarvis-ii-pa-core-poc.json",
+      "purpose": "Existing route/destination workflow",
+      "prerequisites": "n8n and existing provider configuration",
+      "limitations": "Slowest-result barrier remains; no requests on session start",
+      "availability": "implemented; live availability unknown until checked",
+      "validation": "accepted baseline, affected scope",
+      "input_contract": "existing route/destination request with places and travel constraints",
+      "output_contract": "workflow route/travel results or provider error",
+      "baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478"
+    },
+    {
+      "name": "notes",
+      "owner": "PA",
+      "endpoint": "api/biggy_pa_sources.py",
+      "purpose": "Existing notes integration",
+      "prerequisites": "Existing authorized notes source",
+      "limitations": "No automatic durable promotion of arbitrary dialogue",
+      "availability": "implemented; live availability unknown until checked",
+      "validation": "accepted baseline, affected scope",
+      "input_contract": "existing notes read/write action and validated text/identifier",
+      "output_contract": "notes result/error; dialogue is not automatically promoted",
+      "baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478"
+    },
+    {
+      "name": "Orb and ANI Objects",
+      "owner": "GUI",
+      "endpoint": "static/biggy-pets.js",
+      "purpose": "Persistent Orb and independent object placement/scale",
+      "prerequisites": "Browser state and frontend",
+      "limitations": "Browser-local layout is not worker or engineering acceptance",
+      "availability": "implemented; live availability unknown until checked",
+      "validation": "accepted baseline, affected scope",
+      "input_contract": "browser object selection, placement/scale and interaction events",
+      "output_contract": "browser visual/layout state; not server worker state",
+      "baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478"
+    },
+    {
+      "name": "session/task/project persistence",
+      "owner": "Hermes GUI",
+      "endpoint": "api/models.py; api/project_store.py; api/turn_journal.py",
+      "purpose": "Sessions, atomic project records and durable turn/run evidence",
+      "prerequisites": "Local writable state",
+      "limitations": "Ambiguous interruptions require inspection, not blind replay",
+      "availability": "implemented; live availability unknown until checked",
+      "validation": "accepted baseline, affected scope",
+      "input_contract": "session/project ID, revision-aware project mutation and durable turn/run events",
+      "output_contract": "canonical session/project record and journal evidence",
+      "baseline": "0bfe245d68f865377ea7f385e6cfc7b347900478"
+    }
+  ],
+  "services": [
+    {
+      "id": "biggy",
+      "port": 8790,
+      "health": "http://127.0.0.1:8790/health",
+      "identity": null,
+      "owner": "Rick/Smedley",
+      "restart_policy": "No automatic restarts; existing supervisor/owner recovery only"
+    },
+    {
+      "id": "smedley",
+      "port": 8787,
+      "health": "http://127.0.0.1:8787/health",
+      "identity": null,
+      "owner": "Rick/Smedley",
+      "restart_policy": "No automatic restarts; existing supervisor/owner recovery only"
+    },
+    {
+      "id": "tools",
+      "port": 8801,
+      "health": "http://127.0.0.1:8801/health",
+      "identity": "jarvis-tools-api",
+      "owner": "Rick/Smedley",
+      "restart_policy": "No automatic restarts; existing supervisor/owner recovery only"
+    },
+    {
+      "id": "rag",
+      "port": 5004,
+      "health": "http://127.0.0.1:5004/health",
+      "identity": null,
+      "owner": "Rick/Smedley",
+      "restart_policy": "No automatic restarts; existing supervisor/owner recovery only"
+    },
+    {
+      "id": "resolver",
+      "port": 5014,
+      "health": "http://127.0.0.1:5014/health",
+      "identity": "jarvis-ii-rag-core-vnext",
+      "owner": "Rick/Smedley",
+      "restart_policy": "No automatic restarts; existing supervisor/owner recovery only"
+    },
+    {
+      "id": "inference",
+      "port": 1234,
+      "health": "http://127.0.0.1:1234/v1/models",
+      "identity": null,
+      "owner": "Rick/Smedley",
+      "restart_policy": "No automatic restarts; existing supervisor/owner recovery only"
+    }
+  ],
+  "recent_milestones": [
+    "2026-09-05: Astra6 affected-scope audit closed with residual risks.",
+    "2026-09-05: Argus GUI repository, GPT project and Build Docs established.",
+    "2026-09-05: Bounded continuity release deployed; 239 release checks and 79 affected checks passed; common recall reads saved evidence directly."
+  ],
+  "open_work": [
+    "Separate RAG/Galaxy alignment audit; indexed material still needs independent verification.",
+    "Accepted residuals: voice timing, Google supervision/locking, LAN auth/CORS, NAS dependence and Galaxy capacity."
+  ],
+  "runtime_reference": "docs/operations/ARGUS_RUNTIME.md; manifests/astra6-runtime-20260905.json",
+  "release_gate": "scripts/astra_release_gate.sh; docs/operations/ARGUS_RELEASE_GATE.md",
+  "memory_authority": "Current owner correction and canonical session/project records outrank derived excerpts. Accepted manifests carry baseline/evidence; conflicts are withheld, never silently reconciled.",
+  "service_states": {
+    "healthy": "Recent expected HTTP response; functional readiness still separate",
+    "degraded": "Reachable but expected health contract not met",
+    "unavailable": "Bounded request failed",
+    "stale": "Last local check older than 60 seconds or clock moved backward",
+    "recovering": "Second safe health attempt pending; no restart implied"
+  },
+  "continuity_release": "argus-continuity-20260905.1"
+}

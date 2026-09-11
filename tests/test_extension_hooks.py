@@ -122,6 +122,27 @@ def test_manifest_static_auto_version_tracks_asset_content(tmp_path, monkeypatch
     assert first != second
 
 
+def test_manifest_static_stale_pin_rewrites_to_content_digest(tmp_path, monkeypatch):
+    """Pinned gallery ?v= hashes must not keep immutable browser cache after edits."""
+    from api import config as api_config
+    from api.extensions import _manifest_asset_url
+    import hashlib
+
+    static_root = tmp_path / "static"
+    static_root.mkdir()
+    asset = static_root / "biggy-brand.js"
+    asset.write_text("local-workspace-route", encoding="utf-8")
+    monkeypatch.setattr(api_config, "get_static_root", lambda: static_root)
+
+    digest = hashlib.sha256(asset.read_bytes()).hexdigest()[:16]
+    stale = _manifest_asset_url("/static/biggy-brand.js?v=87dfdf1")
+    matching = _manifest_asset_url(f"/static/biggy-brand.js?v={digest}")
+
+    assert stale == f"/static/biggy-brand.js?v={digest}"
+    assert matching == f"/static/biggy-brand.js?v={digest}"
+    assert "87dfdf1" not in stale
+
+
 def test_manifest_extension_auto_version_tracks_asset_content(tmp_path, monkeypatch):
     from api.extensions import _manifest_asset_url
 

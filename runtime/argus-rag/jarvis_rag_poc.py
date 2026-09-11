@@ -152,50 +152,9 @@ def _pdf_has_text_layer(path):
         return False
 
 def _pdf(path):
-    # SIDECAR-FIRST (v6): if a pre-OCR'd <file>.ocr.txt exists alongside this PDF,
-    # read that instead of invoking docling. Zero timeout risk, full text fidelity.
-    # Sidecar is always preferred; docling runs only when no sidecar is present.
-    base = os.path.basename(path)
-    sidecar = os.path.splitext(path)[0] + ".ocr.txt"
-    if os.path.isfile(sidecar):
-        try:
-            with open(sidecar, "r", errors="ignore") as f:
-                text = f.read()
-            if text.strip():
-                print("      [pdf] sidecar OK  %s  -> %s" % (base, os.path.basename(sidecar)), flush=True)
-                return text
-            else:
-                print("      [pdf] sidecar empty, falling through to docling  %s" % base, flush=True)
-        except Exception as e:
-            print("      [pdf] sidecar read failed (%s), falling through to docling  %s" % (e, base), flush=True)
-
-    # DOCLING IS THE DEFAULT (engine for every pdf without a sidecar). OCR is GATED:
-    # on only when there is no readable text layer. pypdf is an emergency fallback
-    # ONLY, and it is LOUD: a missing-docling runtime must never again degrade
-    # silently (Rick directive 2026-06-15).
-    try:
-        from docling.document_converter import DocumentConverter, PdfFormatOption
-        from docling.datamodel.base_models import InputFormat
-        from docling.datamodel.pipeline_options import PdfPipelineOptions
-        has_text = _pdf_has_text_layer(path)
-        opts = PdfPipelineOptions()
-        opts.do_ocr = not has_text          # OCR only when there is no readable text layer
-        opts.do_table_structure = True      # keep table fidelity on all
-        conv = DocumentConverter(format_options={InputFormat.PDF: PdfFormatOption(pipeline_options=opts)})
-        md = conv.convert(path).document.export_to_markdown()
-        print("      [pdf] docling OK  (ocr=%s)  %s" % ("on" if opts.do_ocr else "off", base), flush=True)
-        return md
-    except ImportError:
-        print("      [pdf] !! DOCLING NOT IMPORTABLE in this runtime (python %s) -- "
-              "this runtime is NOT docling-default. FALLING BACK to pypdf (NO OCR): %s"
-              % (sys.version.split()[0], base), flush=True)
-    except Exception as e:
-        print("      [pdf] !! docling FAILED on this file (%s: %s) -- "
-              "falling back to pypdf for this file only: %s"
-              % (e.__class__.__name__, str(e)[:120], base), flush=True)
-    from pypdf import PdfReader
-    reader = PdfReader(path)
-    return "\n".join((pg.extract_text() or "") for pg in reader.pages)
+    from review_pdf import extract_pdf
+    text, manifest = extract_pdf(path)
+    return text
 
 def _xlsx(path):
     from openpyxl import load_workbook
@@ -260,22 +219,18 @@ def list_files(folder):
             if os.path.isfile(p) and "/~" not in p and "/." not in p]
 
 def ingest_one(path, total_holder):
-    source = os.path.relpath(path, LIB_ROOT)
-    text = extract(path)
-    cks = chunks_of(text)
-    if not cks: return 0
-    vecs = embed(cks)
-    pts = [{"id": pid(source, i), "vector": vecs[i],
-            "payload": {"source": source, "abspath": path, "chunk": i, "text": cks[i]}}
-           for i in range(len(cks))]
-    for j in range(0, len(pts), 64):
-        qd("/collections/%s/points" % COLLECTION, {"points": pts[j:j+64]}, method="PUT")
-    total_holder[0] += len(pts)
-    return len(pts)
+    from review_readiness import ingest as ingest_ready
+    from review_pdf import extract_pdf
+    if not str(path).lower().endswith('.pdf'):
+        raise RuntimeError('Non-PDF readiness is not qualified; manual review required')
+    result = ingest_ready(path, source=os.path.relpath(path, LIB_ROOT), collection=COLLECTION,
+                          extract_fn=extract_pdf, embed_fn=embed, qd_fn=qd)
+    total_holder[0] += result['chunks']
+    return result['chunks']
 
-def ingest(folders, recreate_first=True):
+def ingest(folders, recreate_first=False):
     if recreate_first:
-        print("[1/4] (re)creating collection '%s'" % COLLECTION); recreate()
+        raise RuntimeError('Collection recreation disabled for controlled readiness ingestion')
     total = [0]
     allfiles = []
     for f in folders:
@@ -293,44 +248,30 @@ def ingest(folders, recreate_first=True):
     print("[4/4] DONE. collection '%s' holds %d vectors." % (COLLECTION, c))
 
 def ingest_file(path):
-    source = os.path.relpath(path, LIB_ROOT)
-    print("ingest-file: %s" % source)
-    delete_source(source)            # clear old chunks for this file (handles edits)
+    from review_readiness import Registry
     total = [0]
-    n = ingest_one(path, total)
-    print("  upserted %d chunks. collection holds %d." % (n, count()))
+    ingest_one(path, total)
+    record = Registry().record(COLLECTION, os.path.relpath(path, LIB_ROOT))
+    manifest = record['manifest']
+    machine = dict(manifest, chunks=record['chunks'], readiness=record['state'], generation=record['active_generation'], timings=record['timings'])
+    print('INGEST_RESULT_JSON=' + json.dumps(machine, ensure_ascii=False), flush=True)
+    return record
 
 # ---------- ask ----------
 def ask(question):
-    qv = embed([question])[0]
-    res = qd("/collections/%s/points/search" % COLLECTION,
-             {"vector": qv, "limit": TOPK, "with_payload": True})
-    hits = res["result"]
-    if not hits:
-        print("No matches. Is the collection populated? (count = %d)" % count()); return
-    ctx = "\n\n".join("[%d] (%s)\n%s" % (i+1, h["payload"]["source"], h["payload"]["text"])
-                      for i, h in enumerate(hits))
-    sys_p = ("/no_think You are a precise engineering assistant. Answer ONLY from the "
-             "provided context. Cite the source filename in brackets. If the context does "
-             "not contain the answer, say so plainly.")
-    ans = chat([{"role": "system", "content": sys_p},
-                {"role": "user", "content": "Context:\n%s\n\nQuestion: %s" % (ctx, question)}])
-    ans = re.sub(r"<think>.*?</think>", "", ans, flags=re.S).strip()
-    print("\n=== ANSWER ===\n" + ans)
-    print("\n=== RETRIEVED FROM ===")
-    seen = set()
-    for h in hits:
-        s = h["payload"]["source"]
-        tag = "%s (score %.3f)" % (s, h["score"])
-        if s not in seen:
-            print("  - " + tag); seen.add(s)
+    from review_readiness import active_filter, filter_hits, grounded_answer
+    query = embed([question])[0]
+    result = qd('/collections/%s/points/search' % COLLECTION,
+                {'vector': query, 'limit': TOPK, 'with_payload': True, 'filter': active_filter(COLLECTION)})
+    answer = grounded_answer(question, filter_hits(result.get('result', []), COLLECTION))
+    print(json.dumps(answer, ensure_ascii=False))
 
 # ---------- main ----------
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else ""
     if cmd == "ingest":
         folders = sys.argv[2:] or DEFAULT_FOLDERS
-        ingest(folders, recreate_first=True)
+        ingest(folders, recreate_first=False)
     elif cmd == "ingest-file":
         ingest_file(sys.argv[2])
     elif cmd == "ask":

@@ -21,7 +21,7 @@ LIBRARY_STATUS = os.path.join(STATUS_DIR, "library.json")
 LEDGER_FILE = os.path.join(STATUS_DIR, "ingest_ledger.json")
 WATCH_META = os.path.expanduser("~/.jarvis_rag_watch_meta.json")
 WATCH_STATE = os.path.expanduser("~/.jarvis_rag_watch_state.json")
-LIBRARY_ROOT = "/Users/rick/Mounts/RAG_Pool/Library"
+LIBRARY_ROOT = os.environ.get("ARGUS_RAG_LIBRARY_ROOT", "/Users/rick/Mounts/RAG_Pool/Library")
 FOCUS_FILES = ("1756-td005_-en-e.pdf", "1756-in619_-en-p.pdf")
 PROCESSING = {"detected", "queued", "extracting", "indexing"}
 ACTIONABLE_PHASES = {"failed", "quarantined", "needs_review"}
@@ -457,9 +457,13 @@ def folder_ingest_readiness(folder: str) -> dict[str, Any]:
     target = os.path.realpath(os.path.join(root, rel))
     if not rel or (target != root and not target.startswith(root + os.sep)):
         return {"ready": False, "state": "failed", "reason": "invalid RAG folder", "counts": {}}
+    health_path = os.environ.get("ARGUS_REVIEW_ROOT_HEALTH")
+    if health_path:
+        health = _load(health_path, {})
+        if health.get("state") == "FAILED":
+            return {"ready": False, "state": "failed", "reason": health.get("reason"), "fault": health.get("fault"), "counts": {}, "documents": []}
     if not os.path.isdir(target):
-        return {"ready": False, "state": "failed", "reason": "RAG folder does not exist", "counts": {}}
-
+        return {"ready": False, "state": "failed", "reason": "RAG folder is missing or inaccessible", "counts": {}}
     ledger_files = load_ledger().get("files") or {}
     rows = []
     for dirpath, _, filenames in os.walk(target):
@@ -467,6 +471,8 @@ def folder_ingest_readiness(folder: str) -> dict[str, Any]:
             if name.startswith((".", "~")) or os.path.splitext(name)[1].lower() not in SUPPORTED_EXTENSIONS:
                 continue
             path = os.path.realpath(os.path.join(dirpath, name))
+            if name.lower().endswith('.ocr.txt') and os.path.isfile(path[:-8] + '.pdf'):
+                continue
             entry = ledger_files.get(path) if isinstance(ledger_files.get(path), dict) else {}
             phase = str(entry.get("phase") or "untracked").lower()
             quality = str(entry.get("quality_state") or "unknown").lower()
@@ -509,7 +515,20 @@ def folder_ingest_readiness(folder: str) -> dict[str, Any]:
                     warn = "Independent OCR/table verification required."
                 if warn not in warnings:
                     warnings.append(warn)
+            from api.argus_review_contract import document_readiness
+            readiness = document_readiness(path)
+            readiness_state = readiness['state']
+            state = ('verified' if readiness_state == 'READY' else
+                     'processing' if readiness_state in {'DETECTED','INGESTING','OCR_REQUIRED','OCR_RUNNING','INDEXING','VALIDATING','RETRYING'} else
+                     'failed' if readiness_state == 'FAILED' else 'needs_review')
+            reason = readiness['reason']
+            quality = 'verified' if readiness_state == 'READY' else ('failed' if readiness_state == 'FAILED' else 'needs_review')
+            phase = readiness_state.lower()
             rows.append({
+                "readiness": readiness_state, "generation": readiness.get('generation'),
+                "history": readiness.get("history", []), "published_at": readiness.get("published_at"),
+                "source_hash": readiness.get("source_hash"),
+                "validated_source_hash": readiness.get("validated_source_hash"),
                 "path": path, "source": _rel_from_path(path), "basename": name,
                 "phase": phase, "quality_state": quality, "state": state,
                 "reason": reason, "warnings": warnings,
@@ -518,6 +537,13 @@ def folder_ingest_readiness(folder: str) -> dict[str, Any]:
                 "ocr_pages": entry.get("ocr_pages") or [],
             })
 
+    from api.argus_review_contract import missing_documents
+    for record in missing_documents(target):
+        rows.append({'readiness':'FAILED', 'state':'failed', 'source':record.get('source'),
+                     'basename':os.path.basename(record['path']), 'path':record['path'],
+                     'reason':'Validated source is missing or inaccessible', 'history':record.get('history', []),
+                     'generation':record.get('active_generation'), 'source_hash':record.get('manifest',{}).get('source_hash'),
+                     'published_at':record.get('published_at')})
     counts = {key: sum(1 for row in rows if row["state"] == key)
               for key in ("verified", "processing", "needs_review", "failed", "unverified")}
     if not rows:
@@ -525,13 +551,13 @@ def folder_ingest_readiness(folder: str) -> dict[str, Any]:
     elif counts["failed"]:
         state, reason = "failed", "%d document(s) failed ingestion." % counts["failed"]
     elif counts["needs_review"]:
-        state, reason = "needs_review", "%d document(s) require independent OCR/table verification." % counts["needs_review"]
+        state, reason = "needs_review", "%d document(s) require review before use." % counts["needs_review"]
     elif counts["processing"]:
         state, reason = "processing", "%d document(s) are still ingesting." % counts["processing"]
     elif counts["unverified"]:
         state, reason = "unverified", "%d document(s) do not have verified extraction manifests." % counts["unverified"]
     else:
-        state, reason = "verified", "All review documents have verified extraction manifests."
+        state, reason = "verified", "All review documents passed ingestion and retrieval readiness checks."
     return {
         "schema": "smedley.project_review_readiness.v1",
         "folder": rel, "path": target, "ready": state == "verified",
@@ -550,6 +576,10 @@ def request_rescan(folder: str) -> dict[str, Any]:
         raise ValueError("folder escapes library root")
     if not os.path.isdir(target):
         raise ValueError("Library folder does not exist: %s" % rel)
+    review_root = os.environ.get('ARGUS_PROJECT_ROOT')
+    if review_root and (target == os.path.realpath(review_root) or target.startswith(os.path.realpath(review_root) + os.sep)):
+        from api.argus_review_contract import queue_project_ingestion
+        return queue_project_ingestion(target, rel)
     hashed_paths = {
         os.path.realpath(str(path))
         for path in ((_load(WATCH_META, {}) or {}).get("hashes") or {}).values()

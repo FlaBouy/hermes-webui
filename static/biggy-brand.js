@@ -48,6 +48,68 @@
     ['logs', 'LOGS'],
     ['settings', 'SETTINGS'],
   ]);
+  // Native ARGUS Vision control surfaces. Allowlist matches the established
+  // V7/Workspace panel contract (overview/vision/focus/gestures/guidance/control).
+  // Opening a choice never launches Planner Workspace, PLATO, or an external window,
+  // and never performs capture, gesture, guidance, or machine-control actions.
+  const BIGGY_VISION_ORIGIN = 'https://plato.tail061f03.ts.net';
+  const BIGGY_VISION_PANELS = Object.freeze([
+    Object.freeze({ label: 'Overview', panel: 'overview' }),
+    Object.freeze({ label: 'Visual Capture', panel: 'vision' }),
+    Object.freeze({ label: 'Focus', panel: 'focus' }),
+    Object.freeze({ label: 'Gestures', panel: 'gestures' }),
+    Object.freeze({ label: 'Screen Guidance', panel: 'guidance' }),
+    Object.freeze({ label: 'Machine Control', panel: 'control' }),
+  ]);
+  const BIGGY_VISION_PANEL_IDS = Object.freeze(
+    BIGGY_VISION_PANELS.map((entry) => entry.panel),
+  );
+  // Truthful local sense states reused from the V7 Workspace adapter contract.
+  // ARGUS does not claim live adapters or broaden machine permissions here.
+  const ARGUS_VISION_SENSE_STATES = Object.freeze({
+    overview: Object.freeze({
+      state: 'available',
+      detail: 'Native ARGUS Vision control surface is ready. Select a function.',
+    }),
+    vision: Object.freeze({
+      state: 'unavailable',
+      detail: 'Visual capture adapter is not connected in ARGUS. No automatic capture.',
+    }),
+    focus: Object.freeze({
+      state: 'off',
+      detail: 'Focus session is not started. No automatic focus action.',
+    }),
+    gestures: Object.freeze({
+      state: 'off',
+      detail: 'Gesture adapter is opt-in and idle. Pointer and keyboard remain complete controls.',
+    }),
+    guidance: Object.freeze({
+      state: 'off',
+      detail: 'Screen guidance overlay is off. Guidance never clicks or types.',
+    }),
+    control: Object.freeze({
+      state: 'unavailable',
+      detail: 'Machine control is not armed from ARGUS. Permissions are not broadened.',
+    }),
+  });
+  const VISION_SURFACE_BODY_CLASS = 'argus-vision-surface-active';
+  let biggyVisionSurfacePanel = null;
+  let biggyVisionSurfaceActive = '';
+  let biggyVisionSurfaceBound = false;
+  let cockpitServiceAvailTimer = 0;
+  // Central surfaces (VISION menu never opens these):
+  // - Open Workspace → same-origin /biggy-workspace/ proxy (Hermes GUI session
+  //   + server-to-server owner session mint). Never put secrets in the URL.
+  // - View (Visual Planning) → same-origin local visual whiteboard.
+  const BIGGY_WORKSPACE_URL = '/biggy-workspace/';
+  const BIGGY_VISUAL_WHITEBOARD_URL =
+    `/static/office-planner/index.html?workspace=1&v=${encodeURIComponent(BUILD_ID)}`;
+  const PLANNER_WORKSPACE_BODY_CLASS = 'argus-planner-workspace-active';
+  let biggyPlannerWorkspacePanel = null;
+  let biggyPlannerWorkspaceFrame = null;
+  let biggyPlannerWorkspaceRestore = null;
+  let biggyPlannerWorkspaceBound = false;
+  let biggyPlannerWorkspaceKind = '';
   // The Tools rail is deliberately a launcher, not a second calculator
   // implementation.  These are the same Smedley assets and sidecar contract
   // used by the Smedley engineering surface.
@@ -269,6 +331,7 @@
   }
 
   async function submitBiggyV6Voice(transcript) {
+    const paSpeechTicket=(biggyV6VoiceState.paSpeechTicket||0)+1;biggyV6VoiceState.paSpeechTicket=paSpeechTicket;
     const spoken = String(transcript || '').trim();
     window.__biggyV6VoicePending = false;
     window._micPendingSend = false;
@@ -333,6 +396,7 @@
           guiId: GUI_ID,
         });
       }
+      if(result.pa_conversation&&biggyV6VoiceState.active&&paSpeechTicket===biggyV6VoiceState.paSpeechTicket)await speakOnSmedley(result.spoken_text,{personality:'argus',canSpeak:()=>biggyV6VoiceState.active&&paSpeechTicket===biggyV6VoiceState.paSpeechTicket});
       setBiggyV6VoicePhase('listening');
     } catch (error) {
       const message = String((error && error.message) || error || 'Biggy Voice failed');
@@ -366,6 +430,7 @@
         }
         window.__biggyV6VoicePending = false;
         window._micPendingSend = false;
+        biggyV6VoiceState.paSpeechTicket=(biggyV6VoiceState.paSpeechTicket||0)+1;
         biggyV6VoiceState.active = false;
         biggyV6VoiceState.talking = false;
         biggyV6VoiceState.processing = false;
@@ -711,6 +776,7 @@
               break;
             }
           }
+          if(newestAssistant?.pa_context){if(!newestAssistant.pa_local_voice&&localStorage.getItem('hermes-tts-auto-read')==='true')speakOnSmedley(newestAssistant.spoken_text,{personality:'argus'});return;}
           if (newestAssistant && (
             newestAssistant.ptt_owned_tts
             || String(newestAssistant.tts_owner || '').trim()
@@ -854,9 +920,169 @@
     window.location.href = target;
   }
 
+  function positionBiggyPlannerWorkspace() {
+    const panel = biggyPlannerWorkspacePanel;
+    if (!panel) return;
+    const rail = document.querySelector('.biggy-top-rail-group');
+    const composer = document.querySelector('#mainChat .composer-wrap')
+      || document.getElementById('composerBox')
+      || document.querySelector('.composer-wrap');
+    const top = Math.max(76, Math.round((rail?.getBoundingClientRect().bottom || 64) + 8));
+    let bottom = 132;
+    if (composer) {
+      const gap = Math.round(window.innerHeight - composer.getBoundingClientRect().top + 8);
+      bottom = Math.max(72, gap);
+    }
+    panel.style.top = `${top}px`;
+    panel.style.bottom = `${bottom}px`;
+    panel.style.left = '14px';
+    panel.style.right = '62px';
+  }
+
+  function closeBiggyPlannerWorkspace({ restorePlanner = true, restoreFocus = true } = {}) {
+    const panel = biggyPlannerWorkspacePanel;
+    const restore = biggyPlannerWorkspaceRestore;
+    const closingKind = biggyPlannerWorkspaceKind;
+    document.body.classList.remove(PLANNER_WORKSPACE_BODY_CLASS);
+    if (panel && panel.parentNode) panel.remove();
+    biggyPlannerWorkspacePanel = null;
+    biggyPlannerWorkspaceFrame = null;
+    biggyPlannerWorkspaceRestore = null;
+    biggyPlannerWorkspaceKind = '';
+
+    const openBtn = document.getElementById('biggyPlannerOpenWorkspace');
+    if (openBtn) openBtn.setAttribute('aria-expanded', 'false');
+
+    if (restorePlanner && restore) {
+      const dlg = document.getElementById('biggyTravelMapDialog');
+      if (dlg) {
+        const category = restore.category || 'planner';
+        if (typeof dlg.__biggySetActiveCategory === 'function') {
+          dlg.__biggySetActiveCategory(category, { open: !restore.collapsed });
+        }
+        if (typeof dlg.__biggySetCollapsed === 'function') {
+          dlg.__biggySetCollapsed(!!restore.collapsed);
+        }
+      }
+    }
+    if (restoreFocus) {
+      const focusTarget = (closingKind === 'whiteboard'
+        ? null
+        : document.getElementById('biggyPlannerOpenWorkspace'))
+        || document.getElementById('biggyTravelMapClose');
+      try { focusTarget?.focus(); } catch (_err) { /* ignore */ }
+    }
+  }
+
+  function openBiggyCentralSurface(kind) {
+    const mode = kind === 'whiteboard' ? 'whiteboard' : 'workspace';
+    if (biggyPlannerWorkspacePanel && biggyPlannerWorkspaceKind === mode) {
+      closeBiggyPlannerWorkspace({ restorePlanner: true, restoreFocus: true });
+      return;
+    }
+    if (biggyPlannerWorkspacePanel) {
+      closeBiggyPlannerWorkspace({ restorePlanner: false, restoreFocus: false });
+    }
+    const dlg = document.getElementById('biggyTravelMapDialog');
+    biggyPlannerWorkspaceRestore = {
+      category: (dlg && dlg.getAttribute('data-active-category')) || 'planner',
+      collapsed: !!(dlg && dlg.classList.contains('is-collapsed')),
+    };
+    // Collapse the Planner pop-out while the central surface owns the galaxy
+    // region; PA rail stays as-is. State is restored on close.
+    if (dlg && typeof dlg.__biggySetCollapsed === 'function') {
+      dlg.__biggySetCollapsed(true);
+    }
+
+    const panel = document.createElement('section');
+    panel.id = 'biggyPlannerWorkspace';
+    panel.className = 'biggy-planner-workspace';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('data-surface-kind', mode);
+    panel.setAttribute(
+      'aria-label',
+      mode === 'whiteboard' ? 'Visual Planner whiteboard' : 'Biggy Workspace',
+    );
+    panel.setAttribute('data-testid', mode === 'whiteboard'
+      ? 'biggy-visual-whiteboard'
+      : 'biggy-planner-workspace');
+
+    const bar = document.createElement('div');
+    bar.className = 'biggy-planner-workspace-bar';
+    const title = document.createElement('b');
+    title.textContent = mode === 'whiteboard' ? 'Visual Planner' : 'Biggy Workspace';
+    const exit = document.createElement('button');
+    exit.type = 'button';
+    exit.id = 'biggyPlannerCloseWorkspace';
+    exit.className = 'biggy-planner-close-workspace';
+    exit.setAttribute('data-testid', 'biggy-planner-close-workspace');
+    exit.setAttribute('aria-label', mode === 'whiteboard' ? 'Close Visual Planner' : 'Close Workspace');
+    exit.textContent = mode === 'whiteboard' ? 'Close Visual Planner' : 'Close Workspace';
+    exit.addEventListener('click', (event) => {
+      event.preventDefault();
+      closeBiggyPlannerWorkspace();
+    });
+    bar.append(title, exit);
+
+    const frame = document.createElement('iframe');
+    frame.title = mode === 'whiteboard' ? 'Visual Planner whiteboard' : 'Biggy Workspace';
+    frame.setAttribute('data-testid', mode === 'whiteboard'
+      ? 'biggy-visual-whiteboard-frame'
+      : 'biggy-planner-workspace-frame');
+    // Workspace: same-origin authenticated proxy. Whiteboard: office-planner.
+    // Never put credentials or tokens in the URL.
+    frame.src = mode === 'whiteboard' ? BIGGY_VISUAL_WHITEBOARD_URL : BIGGY_WORKSPACE_URL;
+    panel.append(bar, frame);
+    document.body.append(panel);
+    document.body.classList.add(PLANNER_WORKSPACE_BODY_CLASS);
+    biggyPlannerWorkspacePanel = panel;
+    biggyPlannerWorkspaceFrame = frame;
+    biggyPlannerWorkspaceKind = mode;
+
+    const openBtn = document.getElementById('biggyPlannerOpenWorkspace');
+    if (openBtn) openBtn.setAttribute('aria-expanded', mode === 'workspace' ? 'true' : 'false');
+    positionBiggyPlannerWorkspace();
+    try { exit.focus(); } catch (_err) { /* ignore */ }
+    installBiggyPlannerWorkspaceLifecycle();
+  }
+
+  function openBiggyPlannerWorkspace() {
+    openBiggyCentralSurface('workspace');
+  }
+
+  function openBiggyVisualWhiteboard() {
+    openBiggyCentralSurface('whiteboard');
+  }
+
+  function installBiggyPlannerWorkspaceLifecycle() {
+    if (biggyPlannerWorkspaceBound) return;
+    biggyPlannerWorkspaceBound = true;
+    window.addEventListener('resize', () => {
+      if (biggyPlannerWorkspacePanel) positionBiggyPlannerWorkspace();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || !biggyPlannerWorkspacePanel) return;
+      event.preventDefault();
+      closeBiggyPlannerWorkspace();
+    });
+    window.addEventListener('pagehide', () => {
+      closeBiggyPlannerWorkspace({ restorePlanner: false, restoreFocus: false });
+    }, { once: true });
+    window.addEventListener('message', (event) => {
+      if (event.origin !== location.origin) return;
+      const data = event.data;
+      if (!data || typeof data !== 'object') return;
+      if (data.type !== 'argus-open-visual-whiteboard') return;
+      openBiggyVisualWhiteboard();
+    });
+  }
+
   function resetBiggyWorkspace() {
     clearRagTrace();
     markGalaxyFilterSelection('', 0);
+    closeBiggyPlannerWorkspace({ restorePlanner: false, restoreFocus: false });
+    closeBiggyVisionSurface({ restoreFocus: false });
 
     // HOME is a presentation reset, not a transcript mutation. Hide the
     // conversation stack at its current signature while leaving every turn
@@ -938,6 +1164,412 @@
     return sync;
   }
 
+  function setCockpitAvailability(button, available) {
+    if (!button) return;
+    button.classList.toggle('is-online', !!available);
+    button.classList.toggle('is-offline', !available);
+    // Availability must never set selection chrome (ok / aria-pressed / border).
+    button.classList.remove('ok', 'down', 'muted');
+  }
+
+  async function refreshCockpitServiceAvailability() {
+    if (document.hidden) return;
+    const rag = document.getElementById('biggyCockpitRag');
+    if (rag) {
+      try {
+        const response = await fetch(`${ARGUS_RAG_INGEST_PROXY}/health`, {
+          credentials: 'same-origin',
+          cache: 'no-store',
+        });
+        let available = response.ok;
+        if (available) {
+          try {
+            const payload = await response.json();
+            if (payload && typeof payload === 'object') {
+              if (payload.api_alive === false || payload.ok === false) available = false;
+              else if (payload.status && /^(down|error|offline)$/i.test(String(payload.status))) {
+                available = false;
+              }
+            }
+          } catch (_err) {
+            // HTTP 200 with non-JSON body still counts as reachable.
+          }
+        }
+        setCockpitAvailability(rag, available);
+      } catch (_err) {
+        setCockpitAvailability(rag, false);
+      }
+    }
+    const vision = document.getElementById('biggyVision');
+    if (vision) {
+      // Native ARGUS Vision surface is host-local and always mountable here.
+      setCockpitAvailability(vision, true);
+    }
+  }
+
+  function installCockpitServiceAvailabilityPolling() {
+    refreshCockpitServiceAvailability().catch(() => {});
+    if (cockpitServiceAvailTimer) window.clearInterval(cockpitServiceAvailTimer);
+    cockpitServiceAvailTimer = window.setInterval(() => {
+      refreshCockpitServiceAvailability().catch(() => {});
+    }, 15000);
+  }
+
+  function syncVisionToggleSelection() {
+    const toggle = document.getElementById('biggyVision');
+    if (!toggle) return;
+    const menu = document.getElementById('biggyVisionMenu');
+    const menuOpen = !!(menu && !menu.hidden);
+    const surfaceOpen = !!biggyVisionSurfacePanel;
+    toggle.setAttribute('aria-expanded', menuOpen ? 'true' : 'false');
+    toggle.setAttribute('aria-pressed', surfaceOpen ? 'true' : 'false');
+  }
+
+  function positionBiggyVisionSurface() {
+    const panel = biggyVisionSurfacePanel;
+    if (!panel) return;
+    const rail = document.querySelector('.biggy-top-rail-group');
+    // Lower bound from Orb geometry — never the message composer — so the Orb
+    // stays visible and interactive beneath a clear gap.
+    const orb = document.getElementById('biggyArgusReactor')
+      || document.getElementById('j-orb');
+    const top = Math.max(76, Math.round((rail?.getBoundingClientRect().bottom || 64) + 12));
+    const orbGap = 16;
+    let bottom = 220;
+    if (orb) {
+      const orbTop = orb.getBoundingClientRect().top;
+      bottom = Math.max(96, Math.round(window.innerHeight - orbTop + orbGap));
+    }
+    // Centered tool-panel under the cockpit rail — never full-bleed left/right.
+    const gutter = window.innerWidth <= 760 ? 12 : 48;
+    const maxPanelWidth = 920;
+    const width = Math.max(
+      280,
+      Math.min(maxPanelWidth, window.innerWidth - (gutter * 2)),
+    );
+    panel.style.top = `${top}px`;
+    panel.style.bottom = `${bottom}px`;
+    panel.style.left = '50%';
+    panel.style.right = 'auto';
+    panel.style.width = `${width}px`;
+    panel.style.maxWidth = `calc(100vw - ${gutter * 2}px)`;
+    panel.style.transform = 'translateX(-50%)';
+    // Keep panel from collapsing when vertical room is tight; body scrolls.
+    const available = Math.max(120, window.innerHeight - top - bottom);
+    panel.style.maxHeight = `${available}px`;
+  }
+
+  function visionSenseFor(panelId) {
+    const id = String(panelId || '').trim();
+    return ARGUS_VISION_SENSE_STATES[id] || Object.freeze({
+      state: 'unavailable',
+      detail: 'Unknown vision function.',
+    });
+  }
+
+  function renderBiggyVisionSurfaceBody(panel, activeId) {
+    const body = panel.querySelector('[data-testid="biggy-vision-surface-body"]');
+    const selector = panel.querySelector('[data-testid="biggy-vision-function-selector"]');
+    if (!body || !selector) return;
+    const active = BIGGY_VISION_PANEL_IDS.includes(activeId) ? activeId : 'overview';
+    biggyVisionSurfaceActive = active;
+    selector.querySelectorAll('[data-vision-panel]').forEach((node) => {
+      const selected = node.getAttribute('data-vision-panel') === active;
+      node.classList.toggle('is-selected', selected);
+      node.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    });
+    const entry = BIGGY_VISION_PANELS.find((item) => item.panel === active) || BIGGY_VISION_PANELS[0];
+    const sense = visionSenseFor(active);
+    const stateClass = /^(available|on)$/i.test(sense.state)
+      ? 'is-available'
+      : (/^(off)$/i.test(sense.state) ? 'is-off' : 'is-unavailable');
+    const overviewRows = BIGGY_VISION_PANELS.map((item) => {
+      const row = visionSenseFor(item.panel);
+      return `<li data-testid="biggy-vision-overview-${item.panel}">`
+        + `<b>${item.label}</b>`
+        + `<span class="biggy-vision-sense-state">${row.state}</span>`
+        + `<small>${row.detail}</small></li>`;
+    }).join('');
+    body.innerHTML =
+      `<header class="biggy-vision-panel-heading">`
+      + `<h2 id="biggyVisionSurfaceTitle">${entry.label}</h2>`
+      + `<p class="biggy-vision-sense-pill ${stateClass}" data-testid="biggy-vision-availability">`
+      + `<span class="biggy-fleet-state" aria-hidden="true"></span>`
+      + `<span>${sense.state}</span></p>`
+      + `</header>`
+      + `<p class="biggy-vision-sense-detail" data-testid="biggy-vision-detail">${sense.detail}</p>`
+      + (active === 'overview'
+        ? `<ul class="biggy-vision-overview-list" data-testid="biggy-vision-overview-list">${overviewRows}</ul>`
+        : `<p class="biggy-vision-idle-note">This panel is a selectable ARGUS control surface only. `
+          + `It never launches Planner Workspace or an external window, and it performs no `
+          + `automatic capture, focus, gesture, guidance, or machine-control action.</p>`);
+    panel.setAttribute('aria-labelledby', 'biggyVisionSurfaceTitle');
+    panel.dataset.activePanel = active;
+  }
+
+  function closeBiggyVisionSurface({ restoreFocus = true } = {}) {
+    const panel = biggyVisionSurfacePanel;
+    document.body.classList.remove(VISION_SURFACE_BODY_CLASS);
+    if (panel && panel.parentNode) panel.remove();
+    biggyVisionSurfacePanel = null;
+    biggyVisionSurfaceActive = '';
+    syncVisionToggleSelection();
+    if (restoreFocus) {
+      try { document.getElementById('biggyVision')?.focus({ preventScroll: true }); } catch (_err) { /* ignore */ }
+    }
+  }
+
+  function openBiggyVisionSurface(panelId) {
+    const id = String(panelId || '').trim();
+    if (!BIGGY_VISION_PANEL_IDS.includes(id)) return;
+    // Hard guarantee: Vision choices never open Planner Workspace or external windows.
+    if (biggyPlannerWorkspacePanel) {
+      closeBiggyPlannerWorkspace({ restorePlanner: false, restoreFocus: false });
+    }
+    if (biggyVisionSurfacePanel) {
+      renderBiggyVisionSurfaceBody(biggyVisionSurfacePanel, id);
+      positionBiggyVisionSurface();
+      syncVisionToggleSelection();
+      const selected = biggyVisionSurfacePanel.querySelector(
+        `[data-vision-panel="${id}"]`,
+      );
+      try { selected?.focus({ preventScroll: true }); } catch (_err) { /* ignore */ }
+      return;
+    }
+
+    const panel = document.createElement('section');
+    panel.id = 'biggyVisionSurface';
+    panel.className = 'biggy-vision-surface';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', 'ARGUS Vision controls');
+    panel.setAttribute('data-testid', 'biggy-vision-surface');
+
+    const bar = document.createElement('div');
+    bar.className = 'biggy-vision-surface-bar';
+    const title = document.createElement('b');
+    title.textContent = 'ARGUS Vision';
+    const exit = document.createElement('button');
+    exit.type = 'button';
+    exit.id = 'biggyVisionCloseSurface';
+    exit.className = 'biggy-vision-close-surface';
+    exit.setAttribute('data-testid', 'biggy-vision-close-surface');
+    exit.setAttribute('aria-label', 'Close Vision panel');
+    exit.textContent = 'Close Vision';
+    exit.addEventListener('click', (event) => {
+      event.preventDefault();
+      closeBiggyVisionSurface();
+    });
+    bar.append(title, exit);
+
+    const selector = document.createElement('div');
+    selector.className = 'biggy-vision-function-selector';
+    selector.setAttribute('role', 'toolbar');
+    selector.setAttribute('aria-label', 'Vision function selector');
+    selector.setAttribute('data-testid', 'biggy-vision-function-selector');
+    BIGGY_VISION_PANELS.forEach((entry) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'biggy-vision-function';
+      button.setAttribute('data-vision-panel', entry.panel);
+      button.setAttribute('data-testid', `biggy-vision-surface-${entry.panel}`);
+      button.setAttribute('aria-pressed', 'false');
+      button.textContent = entry.label;
+      button.addEventListener('click', (event) => {
+        event.preventDefault();
+        renderBiggyVisionSurfaceBody(panel, entry.panel);
+      });
+      selector.appendChild(button);
+    });
+
+    const body = document.createElement('div');
+    body.className = 'biggy-vision-surface-body';
+    body.setAttribute('data-testid', 'biggy-vision-surface-body');
+    panel.append(bar, selector, body);
+    document.body.append(panel);
+    document.body.classList.add(VISION_SURFACE_BODY_CLASS);
+    biggyVisionSurfacePanel = panel;
+    renderBiggyVisionSurfaceBody(panel, id);
+    positionBiggyVisionSurface();
+    syncVisionToggleSelection();
+    installBiggyVisionSurfaceLifecycle();
+    try { exit.focus({ preventScroll: true }); } catch (_err) { /* ignore */ }
+  }
+
+  function installBiggyVisionSurfaceLifecycle() {
+    if (biggyVisionSurfaceBound) return;
+    biggyVisionSurfaceBound = true;
+    window.addEventListener('resize', () => {
+      if (biggyVisionSurfacePanel) positionBiggyVisionSurface();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || !biggyVisionSurfacePanel) return;
+      // Prefer closing the menu first when both are conceptually open.
+      const menu = document.getElementById('biggyVisionMenu');
+      if (menu && !menu.hidden) return;
+      event.preventDefault();
+      closeBiggyVisionSurface();
+    }, true);
+    window.addEventListener('pagehide', () => {
+      closeBiggyVisionSurface({ restoreFocus: false });
+    }, { once: true });
+  }
+
+  function positionBiggyVisionMenu(wrap, menu) {
+    if (!wrap || !menu || menu.hidden) return;
+    menu.style.left = '50%';
+    menu.style.right = 'auto';
+    menu.style.transform = 'translateX(-50%)';
+    const rect = menu.getBoundingClientRect();
+    const pad = 8;
+    let shift = 0;
+    if (rect.left < pad) shift = pad - rect.left;
+    else if (rect.right > window.innerWidth - pad) {
+      shift = (window.innerWidth - pad) - rect.right;
+    }
+    if (shift) menu.style.transform = `translateX(calc(-50% + ${shift}px))`;
+    const after = menu.getBoundingClientRect();
+    if (after.bottom > window.innerHeight - pad) {
+      menu.style.top = 'auto';
+      menu.style.bottom = 'calc(100% + 8px)';
+    } else {
+      menu.style.top = 'calc(100% + 8px)';
+      menu.style.bottom = 'auto';
+    }
+  }
+
+  function makeVisionControl() {
+    const wrap = el('span', 'biggy-vision-wrap');
+    wrap.setAttribute('data-testid', 'biggy-vision-wrap');
+    const items = BIGGY_VISION_PANELS.map((entry) => (
+      `<button type="button" role="menuitem" class="biggy-vision-menu-item" `
+      + `data-panel="${entry.panel}" data-testid="biggy-vision-${entry.panel}">`
+      + `${entry.label}</button>`
+    )).join('');
+    wrap.innerHTML =
+      '<button id="biggyVision" class="biggy-fleet-machine is-offline" type="button" '
+      + 'data-testid="biggy-vision" aria-expanded="false" aria-haspopup="menu" '
+      + 'aria-pressed="false" aria-controls="biggyVisionMenu" '
+      + 'title="Open ARGUS Vision control panels">'
+      + '<span class="biggy-fleet-state" aria-hidden="true"></span>'
+      + '<span>VISION</span></button>'
+      + `<div id="biggyVisionMenu" class="biggy-vision-menu" role="menu" `
+      + 'aria-label="ARGUS Vision control panels" hidden data-testid="biggy-vision-menu">'
+      + items
+      + '</div>';
+    installBiggyVisionMenu(wrap);
+    return wrap;
+  }
+
+  function installBiggyVisionMenu(wrap) {
+    const toggle = wrap && wrap.querySelector('#biggyVision');
+    const menu = wrap && wrap.querySelector('#biggyVisionMenu');
+    if (!toggle || !menu || toggle.dataset.bound === '1') return;
+    toggle.dataset.bound = '1';
+
+    const setOpen = (open) => {
+      menu.hidden = !open;
+      syncVisionToggleSelection();
+      if (open) {
+        positionBiggyVisionMenu(wrap, menu);
+        const first = menu.querySelector('[role="menuitem"]');
+        if (first) first.focus({ preventScroll: true });
+      } else {
+        menu.style.left = '';
+        menu.style.right = '';
+        menu.style.top = '';
+        menu.style.bottom = '';
+        menu.style.transform = '';
+      }
+    };
+
+    const close = () => {
+      if (menu.hidden) return;
+      setOpen(false);
+    };
+
+    toggle.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setOpen(menu.hidden);
+    });
+
+    menu.addEventListener('click', (event) => {
+      const item = event.target instanceof Element
+        ? event.target.closest('[role="menuitem"][data-panel]')
+        : null;
+      if (!item || !menu.contains(item)) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const panel = String(item.getAttribute('data-panel') || '');
+      close();
+      openBiggyVisionSurface(panel);
+    });
+
+    menu.addEventListener('keydown', (event) => {
+      const items = Array.from(menu.querySelectorAll('[role="menuitem"]'));
+      if (!items.length) return;
+      const index = items.indexOf(document.activeElement);
+      if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+        event.preventDefault();
+        const next = items[(Math.max(index, 0) + 1) % items.length];
+        next.focus({ preventScroll: true });
+      } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+        event.preventDefault();
+        const prev = items[(index <= 0 ? items.length : index) - 1];
+        prev.focus({ preventScroll: true });
+      } else if (event.key === 'Home') {
+        event.preventDefault();
+        items[0].focus({ preventScroll: true });
+      } else if (event.key === 'End') {
+        event.preventDefault();
+        items[items.length - 1].focus({ preventScroll: true });
+      } else if (event.key === 'Enter' || event.key === ' ') {
+        const item = event.target instanceof Element
+          ? event.target.closest('[role="menuitem"][data-panel]')
+          : null;
+        if (!item || !menu.contains(item)) return;
+        event.preventDefault();
+        const panel = String(item.getAttribute('data-panel') || '');
+        close();
+        openBiggyVisionSurface(panel);
+      }
+    });
+
+    if (window.__biggyVisionMenuDocBound) return;
+    window.__biggyVisionMenuDocBound = true;
+
+    document.addEventListener('click', (event) => {
+      const liveMenu = document.getElementById('biggyVisionMenu');
+      const liveToggle = document.getElementById('biggyVision');
+      const liveWrap = liveToggle && liveToggle.closest('.biggy-vision-wrap');
+      if (!liveMenu || !liveToggle || !liveWrap || liveMenu.hidden) return;
+      const target = event.target;
+      if (target instanceof Node && liveWrap.contains(target)) return;
+      liveMenu.hidden = true;
+      syncVisionToggleSelection();
+    }, true);
+
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape') return;
+      const liveMenu = document.getElementById('biggyVisionMenu');
+      const liveToggle = document.getElementById('biggyVision');
+      if (!liveMenu || !liveToggle || liveMenu.hidden) return;
+      event.preventDefault();
+      liveMenu.hidden = true;
+      syncVisionToggleSelection();
+      liveToggle.focus({ preventScroll: true });
+    }, true);
+
+    window.addEventListener('resize', () => {
+      const liveMenu = document.getElementById('biggyVisionMenu');
+      const liveToggle = document.getElementById('biggyVision');
+      const liveWrap = liveToggle && liveToggle.closest('.biggy-vision-wrap');
+      if (!liveMenu || !liveWrap || liveMenu.hidden) return;
+      positionBiggyVisionMenu(liveWrap, liveMenu);
+    });
+  }
+
   function renderFleetStrip(strip, payload) {
     if (!strip || !payload || !Array.isArray(payload.machines)) return;
     const machines = payload.machines;
@@ -1001,6 +1633,7 @@
   }
 
   let sharedCenterlineTimer = null;
+  let railDeckResizeObserver = null;
 
   function syncBiggySharedCenterline() {
     sharedCenterlineTimer = null;
@@ -1018,6 +1651,19 @@
       deck.style.setProperty('width', `${railWidth}px`);
     }
     const axisRect = (deck || prompt).getBoundingClientRect();
+    const railDock = document.getElementById('biggyTravelMapDialog');
+    if (railDock && !railDock.hidden) {
+      const topRail = document.getElementById('biggyTopRailGroup');
+      const parent = railDock.offsetParent || mainChat;
+      const top = Math.max(12, (topRail?.getBoundingClientRect().bottom || 0) + 12);
+      railDock.style.setProperty('--biggy-rail-panel-top', `${Math.ceil(top - parent.getBoundingClientRect().top)}px`);
+      const available = Math.max(0, Math.min(axisRect.top, window.innerHeight) - railDock.getBoundingClientRect().top - 12);
+      const value = `${Math.floor(available)}px`;
+      if (railDock.style.getPropertyValue('--biggy-rail-panel-height') !== value) {
+        railDock.style.setProperty('--biggy-rail-panel-height', value);
+        scheduleTravelMapCameraFit('resize');
+      }
+    }
     // The label, prompt deck, and Hermes rail carry a 6px optical correction
     // so the G in A.R.G.U.S. sits on the fixed Orb axis. Remove that display
     // offset here so the Orb and upper rails retain the true layout center.
@@ -1054,6 +1700,14 @@
   window.scheduleBiggySharedCenterline = scheduleBiggySharedCenterline;
 
   function installBiggyDeckLayoutObserver(mainChat) {
+    if (railDeckResizeObserver) railDeckResizeObserver.disconnect();
+    if (typeof ResizeObserver === 'function') {
+      railDeckResizeObserver = new ResizeObserver(scheduleBiggySharedCenterline);
+      const deck = document.getElementById('biggyPromptDeck');
+      if (deck) railDeckResizeObserver.observe(deck);
+      const topRail = document.getElementById('biggyTopRailGroup');
+      if (topRail) railDeckResizeObserver.observe(topRail);
+    }
     if (sharedCenterlineLayoutObserver) sharedCenterlineLayoutObserver.disconnect();
     sharedCenterlineLayoutObserver = null;
     if (!mainChat || typeof MutationObserver !== 'function') return;
@@ -1089,10 +1743,11 @@
     });
     strip.appendChild(filter);
 
-    const rag = el('button', 'biggy-fleet-machine biggy-cockpit-action biggy-cockpit-rag');
+    const rag = el('button', 'biggy-fleet-machine biggy-cockpit-rag is-offline');
     rag.id = 'biggyCockpitRag';
     rag.type = 'button';
-    rag.textContent = 'RAG';
+    rag.setAttribute('aria-pressed', 'false');
+    rag.innerHTML = '<span class="biggy-fleet-state" aria-hidden="true"></span><span>RAG</span>';
     rag.addEventListener('click', (event) => {
       event.preventDefault();
       const overview = document.getElementById('biggyArgusRagOverview');
@@ -1104,15 +1759,25 @@
     setArgusRagPanelVisible(false, rag, false);
 
     const ptt = controls.querySelector('#biggyPtt');
+    const vision = controls.querySelector('.biggy-vision-wrap') || makeVisionControl();
     const route = controls.querySelector('#biggyAudioRoute');
-    [ptt, route].forEach((button) => {
-      if (!button) return;
-      button.classList.add('biggy-fleet-machine', 'biggy-cockpit-action');
-      strip.appendChild(button);
+    // Exact COCKPIT action order after RAG: PTT → VISION → ROOM.
+    // PTT/ROOM keep cockpit-action availability chrome; RAG/VISION use fleet-state
+    // dots so availability never conflates with selection border/text.
+    [ptt, vision, route].forEach((node) => {
+      if (!node) return;
+      if (node === vision) {
+        const nested = node.querySelector('button');
+        if (nested) nested.classList.add('biggy-fleet-machine');
+      } else if (node.tagName === 'BUTTON') {
+        node.classList.add('biggy-fleet-machine', 'biggy-cockpit-action');
+      }
+      strip.appendChild(node);
     });
     if (ptt) ptt.textContent = 'PTT';
     controls.remove();
     group.prepend(strip);
+    installCockpitServiceAvailabilityPolling();
     return strip;
   }
 
@@ -1523,6 +2188,54 @@
       visible: () => !dialog.hidden,
     });
     new MutationObserver(() => { if (dialog.hidden) reviewDictation.cancel(); }).observe(dialog, {attributes: true, attributeFilter: ['hidden']});
+    dialog.style.gridTemplateRows = 'auto auto minmax(0,1fr) auto';
+    const reviewPlannerBar = el('div', 'biggy-project-dictation-status');
+    reviewPlannerBar.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;padding:8px 14px';
+    const reviewPlannerModal = document.createElement('dialog');
+    reviewPlannerModal.style.cssText = 'width:min(900px,94vw);height:85vh;padding:12px;background:#071118;color:#d9e9ed;border:1px solid #305360;border-radius:12px';
+    reviewPlannerModal.setAttribute('aria-label', 'Project Review planner');
+    const plannerClose = document.createElement('button');plannerClose.textContent = 'Return to review';plannerClose.type = 'button';
+    plannerClose.onclick = () => reviewPlannerModal.close();reviewPlannerModal.appendChild(plannerClose);document.body.appendChild(reviewPlannerModal);
+    const launchReviewPlanner = (capture) => {
+      if (!dialogProject) return;
+      const selection = window.getSelection();
+      const messages = dialog.querySelector('#biggyProjectDialogMessages');
+      const selectedText = selection && messages.contains(selection.anchorNode) && messages.contains(selection.focusNode) ? String(selection).trim() : '';
+      if (capture && !selectedText) { dictationStatus.textContent = 'Select the finding or action text in the review, then choose Capture selected finding.';return; }
+      if (capture && selectedText.length > 5000) { dictationStatus.textContent = 'Select a shorter excerpt (up to 5,000 characters).';return; }
+      reviewPlannerModal.querySelector('iframe')?.remove();
+      const frame = document.createElement('iframe');frame.title = 'Project Review planner';frame.style.cssText = 'display:block;width:100%;height:calc(100% - 45px);border:0;margin-top:8px';
+      const context = {type:'argus-review-context',project_id:String(dialogProject.project_id),name:dialogProject.name,text:capture?selectedText:''};
+      frame.onload = () => frame.contentWindow.postMessage(context,location.origin);
+      frame.src = '/static/office-planner/index.html?review_id='+encodeURIComponent(context.project_id);
+      reviewPlannerModal.appendChild(frame);reviewPlannerModal.showModal();
+    };
+    for (const [label,capture] of [['Project tasks / dates',false],['Capture selected finding',true]]) {
+      const b = document.createElement('button');b.type='button';b.textContent=label;b.className='biggy-fleet-machine';b.onclick=()=>launchReviewPlanner(capture);reviewPlannerBar.appendChild(b);
+    }
+    const insertSchedule = document.createElement('button');insertSchedule.type='button';insertSchedule.textContent='Insert task schedule';insertSchedule.className='biggy-fleet-machine';
+    insertSchedule.onclick = async () => {
+      if (!dialogProject) return;
+      const id=String(dialogProject.project_id),input=dialog.querySelector('#biggyProjectDialogInput');
+      if(input.value.trim()){dictationStatus.textContent='Your review draft is preserved. Send or clear it before inserting the task schedule.';return;}
+      insertSchedule.disabled=true;
+      try {
+        const snapshot=await window.api('/api/biggy/pa/planner');
+        if(dialog.hidden||String(dialogProject?.project_id)!==id)return;
+        const tasks=(snapshot.tasks||[]).filter(t=>t.review_project_id===id&&t.status!=='archived');
+        if(!tasks.length){dictationStatus.textContent='No PA tasks are linked to this review yet.';return;}
+        const lines=[];let length=0;
+        for(const t of tasks){
+          const line='- '+String(t.title).slice(0,180)+' | '+t.status+' | due '+(t.due||'not set')+(t.waiting_on?' | waiting on '+t.waiting_on:'')+' | planner '+t.id+(t.source?'\n  Source: '+String(t.source).replace(/[\r\n]+/g,' '):'');
+          if(lines.length===20||length+line.length>7000)break;
+          lines.push(line);length+=line.length+1;
+        }
+        const draft='Review these owner-maintained PA tasks and dates. Treat them as scheduling context, not verified engineering evidence or approval. Identify missing information and follow-ups; do not assume a due date is a booked calendar event.\nSnapshot: '+new Date().toISOString()+'\n'+lines.join('\n')+(tasks.length>lines.length?'\nOnly '+lines.length+' of '+tasks.length+' tasks are included. Open Project tasks / dates for the complete list.':'');
+        if(input.value.trim()){dictationStatus.textContent='Your draft changed while tasks loaded; it was preserved.';return;}
+        input.value=draft.slice(0,8000);input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();dictationStatus.textContent='Schedule inserted as a draft. Review it, then send to Smedley when ready.';
+      } catch (_) {dictationStatus.textContent='Linked tasks could not be loaded. No review message was sent.';} finally {insertSchedule.disabled=false;}
+    };
+    reviewPlannerBar.appendChild(insertSchedule);dialog.querySelector('#biggyProjectDialogMessages').before(reviewPlannerBar);
     const reviewSpeechGate = createProjectReviewSpeechGate();
     const reviewVoiceAllowed = () => !dialog.hidden
       && document.getElementById('biggyAudioRoute')?.dataset.outputMuted !== 'true';
@@ -1554,6 +2267,8 @@
       }
     };
     let readinessPoll = null;
+    let readinessFetch = null;
+    let readinessUnavailable = false;
     const setStatus = (message, bad = false) => {
       status.textContent = message || '';
       status.classList.toggle('is-error', !!bad);
@@ -1566,6 +2281,29 @@
       selectedPath.textContent = folder
         ? `${folder} · ${String(readiness?.state || 'unverified').replace(/_/g, ' ').toUpperCase()}${readiness?.reason ? ` — ${readiness.reason}` : ''}`
         : 'Select or create a project review to ingest documents.';
+      let details = pane.querySelector('#biggyReviewReadinessDetails');
+      if (!details) {
+        details = document.createElement('div');
+        details.id = 'biggyReviewReadinessDetails';
+        details.setAttribute('aria-live', 'polite');
+        pane.querySelector('.biggy-projects-library').append(details);
+      }
+      const documents = [...(readiness?.documents || [])].sort((a,b) => (b.published_at || 0) - (a.published_at || 0));
+      const faultMarkup = readiness?.fault ? `<p role="alert">${esc(readiness.fault)} — ${esc(readiness.reason || '')}</p>` : '';
+      const readinessMarkup = faultMarkup + documents.map((doc) => {
+        const stages = [...new Set((doc.history || []).map((event) => event.state))];
+        return `<article class="biggy-review-readiness-document"><strong>${esc(doc.basename || doc.source)}</strong>
+          <span data-review-readiness="${esc(doc.readiness)}">${esc(doc.readiness || 'NEEDS_REVIEW')}</span>
+          <p>${esc(doc.reason || '')}</p><small>${stages.map(esc).join(' → ')}</small>
+          <details><summary>Source evidence</summary><p>Current hash: ${esc(doc.source_hash || 'Source unavailable')}</p>
+          <p>Validated hash: ${esc(doc.validated_source_hash || 'Not yet validated')}</p>
+          <p>Active generation: ${esc(doc.generation || 'None')}</p></details></article>`;
+      }).join('');
+      if (details.dataset.rendered !== readinessMarkup) {
+        details.innerHTML = readinessMarkup;
+        details.dataset.rendered = readinessMarkup;
+      }
+      window.dispatchEvent(new CustomEvent('argus-review-readiness-visible', {detail: {at: Date.now(), documents, folder:readiness, fetch:readinessFetch}}));
       dispatch.disabled = !selected || !ready;
       // Evidence problems are discussed and corrected in the Smedley dialog;
       // they only block governed queue dispatch/sign-off, never conversation.
@@ -1649,6 +2387,7 @@
         dialog.querySelector('#biggyProjectDialogMessages').innerHTML = `<p class="biggy-project-dialog-empty is-error">Dialog unavailable: ${esc(String(error.message || error))}</p>`;
       }
     };
+    window.__argusPAReviewContext=()=>!dialog.hidden?String(dialogProject?.project_id||''):(!pane.hidden?String(selected?.project_id||''):'');
     const openReviewDialog = async () => {
       if (!selected) return;
       reviewDictation.cancel();
@@ -1669,9 +2408,12 @@
     };
     const render = async () => {
       const list = pane.querySelector('#biggyProjectReviewList');
-      list.innerHTML = '<p>Loading project reviews…</p>';
+      if (!list.children.length) list.innerHTML = '<p>Loading project reviews…</p>';
       try {
+        const requestedAt = Date.now();
         const payload = await window.api('/api/biggy/projects/reviews', { timeoutToast: false });
+        readinessFetch = {requestedAt, receivedAt:Date.now()};
+        if (readinessUnavailable) { setStatus(''); readinessUnavailable = false; }
         const projects = Array.isArray(payload?.projects) ? payload.projects : [];
         if (!projects.length) {
           list.innerHTML = '<p>No project reviews yet. Create the first Smedley review package above.</p>';
@@ -1689,13 +2431,14 @@
           setSelected(projects.find((project) => project.project_id === button.dataset.biggyReviewId));
         }));
         setSelected(projects.find((project) => project.project_id === selected?.project_id) || projects[0]);
-        if (readinessPoll) { clearTimeout(readinessPoll); readinessPoll = null; }
-        if (!pane.hidden && ['processing'].includes(String(selected?.review?.ingest_readiness?.state || ''))) {
-          readinessPoll = window.setTimeout(() => render(), 2000);
-        }
       } catch (error) {
         list.innerHTML = '<p>Project review library is unavailable.</p>';
+        readinessUnavailable = true;
+        if (selected) setSelected({...selected, review:{...selected.review, ingest_readiness:{ready:false, state:'failed', fault:'READINESS_UNAVAILABLE', reason:'Readiness service is unavailable; retrying.', documents:[]}}});
         setStatus(String(error.message || error), true);
+      } finally {
+        if (readinessPoll) { clearTimeout(readinessPoll); readinessPoll = null; }
+        if (!pane.hidden) readinessPoll = window.setTimeout(() => render(), 500);
       }
     };
     const ragFolder = pane.querySelector('#biggyProjectRagFolder');
@@ -3341,6 +4084,14 @@
     setArgusOrbState('thinking', 'request in flight');
     if (note) note.textContent = 'A.R.G.U.S. thinking…';
     try {
+      const paSession=await ensureGuiSession();
+      const paReply=await jsonPost('/api/biggy/pa/conversation',{session_id:paSession,message:question,pa_review_id:window.__argusPAReviewContext?.()||''});
+      if(paReply.pa_conversation){
+        if(typeof window.loadSession==='function')await window.loadSession(paSession,{force:true});
+        setArgusOrbState('online','PA reply received');if(note)note.textContent='';
+        if(typeof window.autoReadLastAssistant==='function')window.autoReadLastAssistant();
+        return;
+      }
       const data = await jsonPost(V6_CHAT_PATH, {
         message: question,
         session: `biggy-v6-${currentHermesSessionId() || 'local'}`,
@@ -3625,6 +4376,16 @@
     const overview = ensureArgusRagOverview(host);
     const control = button || document.getElementById('biggyCockpitRag');
     const next = visible !== false;
+    if (next && persist) {
+      dismissedTravelCorrelation = String(window.__askArgusActiveCorrelation || '');
+      invalidateTravelVisuals();
+      const lane = document.getElementById('biggyArgusConversationLane');
+      if (lane) {
+        lane.dataset.homeHidden = '1';
+        lane.hidden = true;
+        syncNativeTranscriptPresentation(lane);
+      }
+    }
     // The graph is intentionally not part of the boot path.  Constructing the
     // iframe starts the WebGL module and lays out the full corpus, which was
     // both a visible one-frame Galaxy flash and needless startup work when RAG
@@ -3635,7 +4396,8 @@
     if (overview) overview.hidden = !next;
     if (host) host.classList.toggle('biggy-rag-panel-off', !next);
     if (control) {
-      control.classList.toggle('ok', next);
+      // Selection alone drives green border/text. Availability stays on the dot.
+      control.classList.remove('ok', 'down', 'muted', 'active');
       control.setAttribute('aria-pressed', next ? 'true' : 'false');
       control.title = next ? 'Hide the A.R.G.U.S. RAG panel' : 'Show the A.R.G.U.S. RAG panel';
       control.setAttribute('aria-label', control.title);
@@ -4629,12 +5391,26 @@
   function makeHeader() {
     const header = el('div', 'biggy-brand-header');
     header.dataset.biggyLayer = 'header';
-    header.innerHTML =
-      `<div class="biggy-brand-controls">` +
-      `<button id="biggyPtt" type="button" data-testid="biggy-ptt" title="Foot-pedal PTT status">● PTT</button>` +
-      `<button id="biggyAudioRoute" type="button" data-testid="biggy-audio-route" title="Cycle Room / Headset / Mute audio">ROOM</button>` +
-      `</div>` +
-      `<div class="biggy-brand-status" aria-label="A.R.G.U.S. controls"></div>`;
+    const controls = el('div', 'biggy-brand-controls');
+    const ptt = el('button');
+    ptt.id = 'biggyPtt';
+    ptt.type = 'button';
+    ptt.setAttribute('data-testid', 'biggy-ptt');
+    ptt.title = 'Foot-pedal PTT status';
+    ptt.textContent = '● PTT';
+    controls.appendChild(ptt);
+    controls.appendChild(makeVisionControl());
+    const route = el('button');
+    route.id = 'biggyAudioRoute';
+    route.type = 'button';
+    route.setAttribute('data-testid', 'biggy-audio-route');
+    route.title = 'Cycle Room / Headset / Mute audio';
+    route.textContent = 'ROOM';
+    controls.appendChild(route);
+    header.appendChild(controls);
+    const status = el('div', 'biggy-brand-status');
+    status.setAttribute('aria-label', 'A.R.G.U.S. controls');
+    header.appendChild(status);
     return header;
   }
 
@@ -4751,6 +5527,7 @@
     'Filter',
     'Phone',
     'Travel',
+    'Planner',
     'Calendar',
     'Mail',
     'Weather',
@@ -5108,6 +5885,7 @@
 
   function mapRecCategoryToRail(category) {
     const c = String(category || '').trim().toLowerCase();
+    if (c === 'planner') return 'planner';
     if (c === 'filter') return 'filter';
     if (c === 'phone' || c === 'sms' || c === 'text' || c === 'call') return 'phone';
     if (!c || c === 'travel') return 'travel';
@@ -5308,6 +6086,18 @@
   async function renderPhoneWorkspace(panel, dlg, phone) {
     clearOperatorPanel(panel);
     panel.appendChild(operatorHeading('Galaxy S25 Ultra'));
+    const deviceControls = operatorButton('Device apps and screen → planner', '');
+    deviceControls.type = 'button';
+    deviceControls.addEventListener('click', () => {
+      deviceControls.disabled = true;
+      const frame = document.createElement('iframe');
+      frame.title = 'Phone device and planner';
+      frame.src = '/static/office-planner/index.html?phone=1';
+      frame.style.cssText = 'width:100%;height:65vh;min-height:450px;border:0';
+      deviceControls.after(frame);
+    });
+    panel.appendChild(deviceControls);
+
     const state = String(phone.state || 'disconnected');
     const google = phone.google_messages && typeof phone.google_messages === 'object' ? phone.google_messages : {};
     const googleReady = Boolean(google.ready);
@@ -5325,6 +6115,52 @@
     if (!phone.connected) {
       const missing = Array.isArray(phone.missing) ? phone.missing.join(', ') : '';
       appendOperatorRow(panel, 'Phone setup required.', missing || `Add the profile-local configuration at ${String(phone.config_path_hint || '~/.hermes/profiles/biggy/biggy-phone.json')}.`, 'warning');
+    }
+
+    const conversation = phone.conversation || {};
+    if (conversation.configured) {
+      panel.appendChild(operatorHeading('Talk with Biggy'));
+      const talk = operatorButton('Have Biggy call my cell', 'primary');
+      talk.type = 'button';
+      talk.disabled = !conversation.voice_enabled;
+      talk.addEventListener('click', async () => {
+        if (!window.confirm('Have Biggy call your configured cell using Austin’s voice?')) return;
+        talk.disabled = true;
+        try {
+          await operatorFetch('/api/biggy/phone/call/start', { method: 'POST', body: { mode: 'biggy', confirmed: true } });
+          operatorFormStatus(panel, 'Biggy is calling your cell.', 'ready');
+        } catch (error) {
+          operatorFormStatus(panel, String(error.message || 'Call status is uncertain. Check your phone before retrying.'), 'warning');
+        }
+        talk.disabled = !conversation.voice_enabled;
+      });
+      panel.appendChild(talk);
+      appendOperatorRow(panel, 'Biggy text conversations', conversation.sms_enabled ? 'Review replies below before sending.' : 'Carrier approval is pending. Incoming requests and reply drafts can be reviewed here; sending remains disabled.', conversation.sms_enabled ? 'ready' : 'warning');
+      const reviewAction = (label, item, action, question, disabled) => {
+        const button = operatorButton(label, '');
+        button.type = 'button';
+        button.disabled = Boolean(disabled);
+        button.addEventListener('click', async () => {
+          if (!window.confirm(question)) return;
+          button.disabled = true;
+          try {
+            await operatorFetch('/api/biggy/phone/conversation/review', { method: 'POST', body: { action, id: item.id, confirmed: true } });
+            await refreshOperatorPanel(dlg, 'phone');
+          } catch (error) {
+            operatorFormStatus(panel, String(error.message || 'Review action failed.'), 'warning');
+            button.disabled = Boolean(disabled);
+          }
+        });
+        panel.appendChild(button);
+      };
+      (conversation.pending_consent || []).slice(0, 30).forEach((item) => {
+        appendOperatorRow(panel, `Permission request · ${String(item.name || item.phone)}`, String(item.phone || ''), 'warning');
+        reviewAction('Confirm verified permission', item, 'verify', `Confirm you have verified that ${item.phone} belongs to this recipient and they consent to Biggy messages.`, false);
+      });
+      (conversation.drafts || []).slice(0, 30).forEach((item) => {
+        appendOperatorRow(panel, `Reply draft · ${String(item.phone || '')}`, String(item.reply || ''), 'ready');
+        reviewAction('Approve and send reply', item, 'send', `Send this reply to ${item.phone}?\n\n${item.reply}`, !conversation.sms_enabled);
+      });
     }
 
     const sms = document.createElement('form');
@@ -6066,6 +6902,16 @@
     const current = () => dlg.getAttribute('data-active-category') === key;
     operatorMessage(panel, 'Loading local status…', 'loading');
     try {
+      if (key === 'planner') {
+        if (!current()) return;
+        clearOperatorPanel(panel);
+        const frame = document.createElement('iframe');
+        frame.title = 'Office planner';
+        frame.src = '/static/office-planner/index.html';
+        frame.style.cssText = 'display:block;width:100%;height:100%;min-height:0;border:0;border-radius:10px';
+        panel.appendChild(frame);
+        return;
+      }
       if (key === 'mail') {
         const mail = await operatorFetch('/api/biggy/pa/mail');
         if (!current()) return;
@@ -6204,6 +7050,9 @@
       `<div class="biggy-travel-map-chrome">` +
       `<button type="button" id="biggyTravelDockCollapse" class="biggy-travel-dock-collapse" title="Collapse panel" aria-expanded="false">⟩</button>` +
       `<div class="biggy-travel-map-title" id="biggyTravelPanelTitle">Travel</div>` +
+      `<button type="button" id="biggyPlannerOpenWorkspace" class="biggy-planner-open-workspace" hidden ` +
+      `data-testid="biggy-planner-open-workspace" aria-expanded="false" aria-controls="biggyPlannerWorkspace" ` +
+      `title="Open Biggy Workspace (PLATO)">Open Workspace</button>` +
       `<div class="biggy-travel-map-meta" id="biggyTravelMapMeta"></div>` +
       `<button type="button" id="biggyTravelMapClose" class="biggy-travel-map-close" title="Close panel">×</button>` +
       `</div>` +
@@ -6238,6 +7087,7 @@
       `<div class="biggy-galaxy-filter-tree" id="biggyGalaxyFilterTree" role="tree" aria-label="RAG directory tree"></div>` +
       `</section>` +
       `<div class="biggy-operator-state" id="biggyOperatorState" hidden>` +
+      `<div class="biggy-operator-panel" data-biggy-operator-panel="planner" hidden></div>` +
       `<div class="biggy-operator-panel" data-biggy-operator-panel="phone" hidden></div>` +
       `<div class="biggy-operator-panel" data-biggy-operator-panel="calendar" hidden></div>` +
       `<div class="biggy-operator-panel" data-biggy-operator-panel="mail" hidden></div>` +
@@ -6287,6 +7137,12 @@
       if (titleEl) {
         titleEl.textContent = TRAVEL_CATEGORIES.find((x) => railCategoryKey(x) === key) || 'Travel';
       }
+      const openWorkspaceBtn = dlg.querySelector('#biggyPlannerOpenWorkspace');
+      if (openWorkspaceBtn) {
+        const showOpenWorkspace = key === 'planner';
+        openWorkspaceBtn.hidden = !showOpenWorkspace;
+        if (!showOpenWorkspace) openWorkspaceBtn.setAttribute('aria-expanded', 'false');
+      }
       const mapCanvas = dlg.querySelector('#biggyTravelMapCanvas');
       const mapStage = dlg.querySelector('#biggyTravelMapStage');
       const mapActions = dlg.querySelector('#biggyTravelMapActions');
@@ -6299,7 +7155,7 @@
       const showTravel = key === 'travel';
       const showWeather = key === 'weather';
       const showFilter = key === 'filter';
-      const showOperator = ['phone', 'calendar', 'mail', 'tasks', 'notes', 'alerts'].includes(key);
+      const showOperator = ['phone', 'planner', 'calendar', 'mail', 'tasks', 'notes', 'alerts'].includes(key);
       const recommendationKey = lodging
         ? mapRecCategoryToRail(lodging.getAttribute('data-rec-category') || '')
         : '';
@@ -6329,6 +7185,7 @@
       if (open) {
         dlg.hidden = false;
         setCollapsed(false);
+        scheduleBiggySharedCenterline();
       }
     };
     dlg.__biggySetActiveCategory = setActiveCategory;
@@ -6351,7 +7208,7 @@
         setActiveCategory(key, { open: true });
         if (key === 'filter') refreshGalaxyFilterPanel(dlg);
         if (key === 'weather') refreshWeatherPanel(dlg, savedWeatherZip());
-        if (['phone', 'calendar', 'mail', 'tasks', 'notes', 'alerts'].includes(key)) refreshOperatorPanel(dlg, key);
+        if (['phone', 'planner', 'calendar', 'mail', 'tasks', 'notes', 'alerts'].includes(key)) refreshOperatorPanel(dlg, key);
       });
     });
 
@@ -6374,6 +7231,15 @@
       closeBtn.addEventListener('click', (ev) => {
         ev.preventDefault();
         setCollapsed(true);
+      });
+    }
+    const openWorkspaceBtn = dlg.querySelector('#biggyPlannerOpenWorkspace');
+    if (openWorkspaceBtn && openWorkspaceBtn.dataset.bound !== '1') {
+      openWorkspaceBtn.dataset.bound = '1';
+      installBiggyPlannerWorkspaceLifecycle();
+      openWorkspaceBtn.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        openBiggyPlannerWorkspace();
       });
     }
     const collapseBtn = dlg.querySelector('#biggyTravelDockCollapse');
@@ -6458,6 +7324,7 @@
   // initialization is asynchronous; without this generation check an older
   // travel request can finish later and reopen its panel over a RAG result.
   let travelVisualEpoch = 0;
+  let dismissedTravelCorrelation = '';
 
   function invalidateTravelVisuals() {
     travelVisualEpoch += 1;
@@ -7407,6 +8274,7 @@
       const m = list[i];
       if (!m || m.role !== 'assistant' || m.ask_argus_pending || m.ask_jarvis_pending) continue;
       const corr = String(correlationId || m._correlation_id || window.__askArgusActiveCorrelation || '');
+      if (corr && corr === dismissedTravelCorrelation) return false;
       if (corr) window.__askArgusActiveCorrelation = corr;
       const mvm = m.map_view_model;
       const rvm = m.recommendation_view_model;
@@ -7667,7 +8535,7 @@
     if (!customElements.get('argus-cockpit-pet') && !document.getElementById('argusCockpitObjectRuntime')) {
       const objectScript = document.createElement('script');
       objectScript.id = 'argusCockpitObjectRuntime';
-      objectScript.src = `/static/argus-cockpit-pet-poc.js?v=${BUILD_ID}`;
+      objectScript.src = `/static/argus-cockpit-pet-poc.js?v=${BUILD_ID}&layout=inset-20260909`;
       objectScript.onerror = () => {
         objectScript.remove();
         if (document.getElementById('argusOrbLoadRetry')) return;
@@ -7802,3 +8670,12 @@
     start();
   }
 })();
+
+// Planner links in PA replies open inside the authenticated GUI.
+document.addEventListener('click',event=>{
+ const link=event.target.closest?.('a');if(!link)return;
+ let url;try{url=new URL(link.href);}catch{return;}
+ if(url.origin!==location.origin||url.pathname!=='/static/office-planner/index.html')return;
+ event.preventDefault();const modal=document.createElement('dialog');modal.setAttribute('aria-label','Review PA task');modal.style.cssText='width:min(900px,94vw);height:88vh;background:#071118;color:#d9e9ed;padding:12px;border:1px solid #305360';
+ const close=document.createElement('button');close.textContent='Return to conversation';close.onclick=()=>modal.close();const frame=document.createElement('iframe');frame.title='PA task review';frame.src=url.pathname+url.search;frame.style.cssText='width:100%;height:calc(100% - 40px);border:0';modal.append(close,frame);modal.addEventListener('close',()=>modal.remove());document.body.append(modal);modal.showModal();
+});

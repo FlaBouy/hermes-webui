@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "project": "argus-gui",
+  "session_id": "",
+  "task_id": "",
+  "objective": "",
+  "status": "idle",
+  "decisions": [],
+  "files_touched": [],
+  "git": {
+    "branch": "",
+    "head": ""
+  },
+  "tests": [],
+  "deployment_state": "",
+  "blockers": [],
+  "next_action": "",
+  "workers": [],
+  "pending_owner_decisions": [],
+  "evidence": [],
+  "source": "explicit_checkpoint",
+  "baseline": "",
+  "confidence": "observed",
+  "superseded_by": null
+}

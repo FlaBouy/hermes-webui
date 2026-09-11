@@ -1499,6 +1499,13 @@ class Session:
         if not skip_index:
             _write_session_index(updates=[self])
 
+        # Derived bounded handoff only after the canonical sidecar is durable.
+        try:
+            from api.argus_continuity import checkpoint_session
+            checkpoint_session(self)
+        except Exception:
+            logger.warning('Derived Argus continuity unavailable; canonical session saved')
+
         # #4985 belt-and-suspenders self-heal: a successful save with at
         # least one real message on the sidecar is unconditional proof the
         # row is alive (the #4985 "zero-message orphan" only ever exists

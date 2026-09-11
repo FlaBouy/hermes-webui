@@ -650,16 +650,19 @@ def _auto_fingerprint_local_asset(item: str) -> str:
 
 
 def _auto_fingerprint_static_asset(item: str) -> str:
-    """Replace ``v=auto`` on a local static asset with its content digest.
+    """Replace ``v=auto`` (and stale hand pins) with the asset content digest.
 
     Locally maintained extensions otherwise have to pin a hand-written query
     value in their installed manifest.  That pin routinely leaves a browser on
-    a stale skin after the source file changes.  ``v=auto`` keeps the manifest
-    stable while preserving immutable caching for the actual content URL.
+    a stale skin after the source file changes, because fingerprinted static
+    URLs are served ``immutable``.  ``v=auto`` keeps the manifest stable while
+    preserving immutable caching for the actual content URL.  A non-auto ``v``
+    that no longer matches the on-disk digest is rewritten the same way so a
+    pinned gallery install cannot keep serving a year-cached prior body.
     """
     parsed = urlsplit(item)
     query = parse_qsl(parsed.query, keep_blank_values=True)
-    if not any(key == "v" and value == "auto" for key, value in query):
+    if not any(key == "v" for key, _value in query):
         return item
     if not parsed.path.startswith("/static/"):
         return item
@@ -675,7 +678,12 @@ def _auto_fingerprint_static_asset(item: str) -> str:
         digest = hashlib.sha256(asset.read_bytes()).hexdigest()[:16]
     except (OSError, ValueError):
         return item
-    resolved_query = [(key, digest if key == "v" and value == "auto" else value) for key, value in query]
+    if all(value in ("", digest) for key, value in query if key == "v"):
+        return item
+    resolved_query = [
+        (key, digest if key == "v" and value not in ("", digest) else value)
+        for key, value in query
+    ]
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, urlencode(resolved_query), parsed.fragment))
 
 

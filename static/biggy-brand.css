@@ -135,6 +135,25 @@ body.biggy-brand:has(main.main[data-biggy-hermes-panel="todos"]) .layout > .side
 .biggy-brand-controls button.active{border-color:#b0882e;color:#f0c14b;background:#1a1200}
 .biggy-brand-controls button.down{border-color:#8b3030;color:#f06b64;background:#1a0d0d}
 .biggy-brand-controls button.muted{border-color:#b83d3d;color:#ff8178;background:#210b0b;box-shadow:inset 0 0 0 1px rgba(255,90,80,.14)}
+.biggy-vision-wrap{position:relative;display:inline-flex;align-items:center;flex:0 0 auto}
+.biggy-vision-menu{
+  position:absolute;z-index:130;left:50%;top:calc(100% + 8px);transform:translateX(-50%);
+  display:grid;gap:2px;min-width:168px;padding:6px;
+  border:1px solid rgba(98,219,255,.42);border-radius:5px;
+  background:rgba(4,10,16,.96);box-shadow:0 8px 24px rgba(0,0,0,.5);
+  text-align:left;
+}
+.biggy-vision-menu[hidden]{display:none}
+.biggy-vision-menu-item{
+  display:block;width:100%;box-sizing:border-box;margin:0;cursor:pointer;
+  padding:7px 9px;border:1px solid transparent;border-radius:4px;
+  background:transparent;color:#bcefff;text-align:left;
+  font:700 9px/1.25 'SF Mono',ui-monospace,monospace;letter-spacing:.04em;
+}
+.biggy-vision-menu-item:hover,
+.biggy-vision-menu-item:focus{
+  outline:none;border-color:rgba(98,219,255,.45);background:rgba(12,32,42,.94);color:#e8fbff;
+}
 .biggy-brand-header-note{
   position:absolute;left:0;top:calc(100% + 4px);
   font:700 8px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
@@ -585,7 +604,7 @@ body.biggy-brand:has(#mainSettings[data-biggy-settings-menu="composerReasoningDr
   position:absolute;
   /* The category rail lives in Hermes's right workspace panel; this is only
      the on-demand content surface that opens over the galaxy. */
-  top:116px;
+  top:var(--biggy-rail-panel-top, 69px);
   /* Default: clear workspace-panel-edge-toggle (fixed right:~10px, 34px wide, z-index 120).
      That control otherwise sits on the vertical category rail and obscures Fuel. */
   right:64px;
@@ -594,7 +613,7 @@ body.biggy-brand:has(#mainSettings[data-biggy-settings-menu="composerReasoningDr
   display:flex;
   flex-direction:row;
   align-items:stretch;
-  max-height:calc(100% - 116px - 120px);
+  max-height:none;
   pointer-events:auto;
   background:transparent;
   border:0;
@@ -606,7 +625,7 @@ html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo .biggy-travel-dock{
   right:8px;
 }
 #mainChat.biggy-brand-iwo .biggy-travel-dock.has-lodging{
-  max-height:calc(100% - 150px - 100px);
+  max-height:none;
 }
 #mainChat.biggy-brand-iwo .biggy-travel-dock[hidden]{display:none!important}
 
@@ -734,8 +753,8 @@ body.biggy-brand #btnWorkspacePanelEdgeToggle{display:none!important}
   border:1px solid rgba(148,163,184,.35);
   border-radius:10px;
   overflow:hidden;
-  height:min(68vh, 720px);
-  min-height:420px;
+  height:var(--biggy-rail-panel-height, calc(100dvh - 228px));
+  min-height:0;
 }
 #mainChat.biggy-brand-iwo .biggy-travel-dock.is-collapsed .biggy-travel-panel{
   display:none!important;
@@ -1061,8 +1080,8 @@ body.biggy-brand #btnWorkspacePanelEdgeToggle{display:none!important}
 }
 @media(max-width:1100px){
   #mainChat.biggy-brand-iwo .biggy-travel-dock{
-    top:116px;
-    max-height:calc(100% - 116px - 110px);
+    top:var(--biggy-rail-panel-top, 69px);
+    max-height:none;
     right:64px;
   }
   html[data-workspace-panel="open"] #mainChat.biggy-brand-iwo .biggy-travel-dock{
@@ -1070,8 +1089,7 @@ body.biggy-brand #btnWorkspacePanelEdgeToggle{display:none!important}
   }
   #mainChat.biggy-brand-iwo .biggy-travel-panel{
     width:min(var(--biggy-travel-dock-width, 520px), calc(100vw - 140px));
-    height:min(66vh, 660px);
-    min-height:360px;
+    min-height:0;
   }
 }
 /* Review dictation is scoped to its composer; no changes to the Orb or rails. */
@@ -1081,3 +1099,142 @@ body.biggy-brand #btnWorkspacePanelEdgeToggle{display:none!important}
 .biggy-project-dictation-status:empty{display:none}
 #biggyProjectDialogVoice.is-active{color:#75e5b8;border-color:#38c792;background:#082a20}
 @media(max-width:900px){.biggy-project-dialog-compose .biggy-fleet-machine{width:auto!important}.biggy-project-dialog-compose textarea{flex-basis:100%}}
+
+/* Project Review evidence stays distinct from aggregate folder readiness. */
+#biggyReviewReadinessDetails { max-height: 290px; overflow: auto; font: 11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace; }
+.biggy-review-readiness-document { padding: .65rem; margin: .5rem 0; border: 1px solid #526778; border-radius: 6px; }
+.biggy-review-readiness-document strong { display: block; overflow-wrap: anywhere; }
+.biggy-review-readiness-document p { margin: .35rem 0; overflow-wrap: anywhere; }
+.biggy-review-readiness-document [data-review-readiness] { display: inline-block; padding: .2rem .4rem; border: 1px solid #758598; }
+.biggy-review-readiness-document [data-review-readiness="READY"] { color: #80e7ac; }
+.biggy-review-readiness-document [data-review-readiness="NEEDS_REVIEW"] { color: #ffd27d; }
+.biggy-review-readiness-document [data-review-readiness="FAILED"] { color: #ff9b9b; }
+
+/* Planner fills the shared rail surface while its own page owns scrolling. */
+#mainChat.biggy-brand-iwo [data-biggy-operator-panel="planner"]{height:100%;min-height:0}
+
+/* Biggy Planner Workspace — central surface between top rail and message rail. */
+#biggyPlannerWorkspace.biggy-planner-workspace{
+  position:fixed;z-index:117;display:flex;flex-direction:column;
+  background:#04050a;border:1px solid rgba(98,219,255,.34);border-radius:8px;
+  overflow:hidden;box-shadow:0 15px 80px rgba(0,0,0,.55);
+}
+#biggyPlannerWorkspace .biggy-planner-workspace-bar{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:6px 12px;border-bottom:1px solid rgba(98,219,255,.28);flex:none;
+  color:#d7e4ec;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em;
+}
+#biggyPlannerWorkspace .biggy-planner-workspace-bar b{font-weight:700}
+#biggyPlannerWorkspace .biggy-planner-close-workspace{
+  min-height:36px;background:#09161f;color:#d7e4ec;border:1px solid rgba(98,219,255,.34);
+  border-radius:5px;padding:6px 12px;font:11px inherit;cursor:pointer;letter-spacing:.08em;
+}
+#biggyPlannerWorkspace .biggy-planner-close-workspace:focus-visible{
+  outline:1px solid rgba(103,232,249,.72);outline-offset:2px;
+}
+#biggyPlannerWorkspace iframe{
+  flex:1;min-height:0;width:100%;border:0;background:#04050a;
+}
+#mainChat.biggy-brand-iwo .biggy-planner-open-workspace{
+  flex:0 0 auto;border:1px solid rgba(98,219,255,.42);border-radius:5px;
+  background:rgba(9,22,31,.92);color:#9edcff;padding:4px 8px;cursor:pointer;
+  font:700 9px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;
+  text-transform:uppercase;
+}
+#mainChat.biggy-brand-iwo .biggy-planner-open-workspace[hidden]{display:none!important}
+#mainChat.biggy-brand-iwo .biggy-planner-open-workspace:hover{
+  color:#ecfeff;border-color:rgba(103,232,249,.72);
+}
+#mainChat.biggy-brand-iwo .biggy-planner-open-workspace:focus-visible{
+  outline:1px solid rgba(103,232,249,.72);outline-offset:1px;
+}
+/* Suppress Orb + central interaction while the Planner Workspace owns the galaxy region. */
+body.argus-planner-workspace-active #biggyArgusReactor,
+body.argus-planner-workspace-active #j-orb{
+  visibility:hidden!important;pointer-events:none!important;
+}
+@media(max-width:760px){
+  #biggyPlannerWorkspace.biggy-planner-workspace{left:6px!important;right:6px!important}
+}
+
+/* Native ARGUS Vision control surface — centered tool panel between top rail and Orb. */
+#biggyVisionSurface.biggy-vision-surface{
+  position:fixed;z-index:117;left:50%;right:auto;width:min(920px,calc(100vw - 96px));
+  max-width:calc(100vw - 96px);transform:translateX(-50%);
+  display:flex;flex-direction:column;
+  background:#04050a;border:1px solid rgba(78,204,163,.34);border-radius:8px;
+  overflow:hidden;box-shadow:0 15px 80px rgba(0,0,0,.55);
+}
+#biggyVisionSurface .biggy-vision-surface-bar{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:6px 12px;border-bottom:1px solid rgba(78,204,163,.28);flex:none;
+  color:#d7e4ec;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em;
+}
+#biggyVisionSurface .biggy-vision-surface-bar b{font-weight:700}
+#biggyVisionSurface .biggy-vision-close-surface{
+  min-height:36px;background:#09161f;color:#d7e4ec;border:1px solid rgba(78,204,163,.34);
+  border-radius:5px;padding:6px 12px;font:11px inherit;cursor:pointer;letter-spacing:.08em;
+}
+#biggyVisionSurface .biggy-vision-close-surface:focus-visible{
+  outline:1px solid rgba(117,240,181,.72);outline-offset:2px;
+}
+#biggyVisionSurface .biggy-vision-function-selector{
+  display:flex;flex-wrap:wrap;gap:6px;padding:8px 12px;
+  border-bottom:1px solid rgba(78,204,163,.18);flex:none;
+}
+#biggyVisionSurface .biggy-vision-function{
+  appearance:none;min-height:30px;padding:5px 9px;border:1px solid rgba(148,163,184,.28);
+  border-radius:5px;background:rgba(13,17,23,.82);color:#aab8c4;cursor:pointer;
+  font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;
+  text-transform:uppercase;
+}
+#biggyVisionSurface .biggy-vision-function.is-selected,
+#biggyVisionSurface .biggy-vision-function[aria-pressed="true"]{
+  color:#75f0b5;border-color:rgba(52,211,153,.78);background:rgba(8,45,35,.92);
+}
+#biggyVisionSurface .biggy-vision-function:focus-visible{
+  outline:1px solid rgba(117,240,181,.72);outline-offset:2px;
+}
+#biggyVisionSurface .biggy-vision-surface-body{
+  flex:1;min-height:0;overflow:auto;padding:14px 16px;color:#d7e4ec;
+  font:12px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+#biggyVisionSurface .biggy-vision-panel-heading{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 10px;
+}
+#biggyVisionSurface .biggy-vision-panel-heading h2{
+  margin:0;color:#75e5b8;font:800 13px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
+  letter-spacing:.1em;text-transform:uppercase;
+}
+#biggyVisionSurface .biggy-vision-sense-pill{
+  display:inline-flex;align-items:center;gap:6px;margin:0;padding:4px 8px;
+  border:1px solid rgba(148,163,184,.28);border-radius:999px;color:#aab8c4;
+  font:800 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;
+  text-transform:uppercase;
+}
+#biggyVisionSurface .biggy-vision-sense-pill.is-available .biggy-fleet-state{background:#34d399;box-shadow:0 0 8px rgba(52,211,153,.9)}
+#biggyVisionSurface .biggy-vision-sense-pill.is-off .biggy-fleet-state{background:#f0b429;box-shadow:0 0 8px rgba(240,180,41,.9)}
+#biggyVisionSurface .biggy-vision-sense-pill.is-unavailable .biggy-fleet-state{background:#f06464;box-shadow:0 0 8px rgba(240,100,100,.8)}
+#biggyVisionSurface .biggy-vision-sense-detail,
+#biggyVisionSurface .biggy-vision-idle-note{margin:0 0 12px;color:#8eb4c8}
+#biggyVisionSurface .biggy-vision-overview-list{
+  list-style:none;margin:0;padding:0;display:grid;gap:8px;
+}
+#biggyVisionSurface .biggy-vision-overview-list li{
+  display:grid;gap:3px;padding:10px;border:1px solid rgba(78,204,163,.22);
+  border-radius:6px;background:rgba(3,12,19,.72);
+}
+#biggyVisionSurface .biggy-vision-overview-list b{color:#d9f7ff;font:800 11px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace}
+#biggyVisionSurface .biggy-vision-sense-state{
+  color:#75e5b8;font:800 9px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.1em;
+  text-transform:uppercase;
+}
+#biggyVisionSurface .biggy-vision-overview-list small{color:#7896a6}
+/* Vision stays above the Orb: do not hide or disable #biggyArgusReactor / #j-orb.
+   Narrow screens keep gutters; never stretch edge-to-edge via left/right. */
+@media(max-width:760px){
+  #biggyVisionSurface.biggy-vision-surface{
+    left:50%!important;right:auto!important;width:calc(100vw - 24px)!important;
+    max-width:calc(100vw - 24px)!important;transform:translateX(-50%)!important;
+  }
+}
