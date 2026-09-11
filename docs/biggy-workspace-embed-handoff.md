@@ -1,16 +1,20 @@
-# Biggy Workspace embed — Atlas deployment handoff
+# Biggy Workspace embed — deployed bridge and historical handoff
 
 **Task:** `smedley-whiteboard-wiring-20260911`  
 **Scope:** Authenticated same-origin Open Workspace (no separate owner login in GUI iframe)  
 **Deploy/restart PLATO:** **not authorized for Cursor** — Atlas deploys after review.
 
-**Ops facts (current):**
+## Current disposition — closed September 11, 2026
+
+The bridge was deployed earlier by Atlas and the authenticated owner flow was rechecked by Codex in the Smedley browser. Open Workspace requires no second login; View opens the full-width Visual Planner. The deployment instructions below are retained for reference, not a pending deployment request. Unauthenticated login redirects are expected and do not prove the bridge is broken. See [final GUI closeout](whiteboard-workspace-embed-closeout-20260911.md).
+
+**Recorded deployment facts:**
 - Owner Biggy GUI origin: `http://127.0.0.1:8790`
 - Workspace upstream: `https://plato.tail061f03.ts.net`
 - PLATO container name: `biggy-workspace-poc-biggy-workspace-1`
 - Atlas has SSH to PLATO
 
-## What shipped (code only)
+## Shipped bridge components
 
 ### biggy-workspace
 - `POST /api/v1/session/hermes-bridge` — S2S owner-session mint (bridge secret only)
@@ -34,7 +38,7 @@
 
 Owner password on direct PLATO URL remains. Bridge does not disable Workspace or Hermes auth.
 
-## Atlas deploy order (not performed by Cursor)
+## Historical Atlas deploy order (not an outstanding task)
 
 1. Update env on `biggy-workspace-poc-biggy-workspace-1` (bridge secret + embed origin). Preserve DB/state.
 2. Recreate/restart **only** that container after env is set.
@@ -47,9 +51,9 @@ Owner password on direct PLATO URL remains. Bridge does not disable Workspace or
 - Unset Workspace bridge secret → mint `bridge_not_configured`; direct owner login unchanged.
 - Backups: `hermes-webui/backups/workspace-session-embed-*`, `workspace-embed-origin-fix-*`
 
-## Non-claims
+## Execution boundary
 
-No deploy/restart performed by Cursor. No production state mutation. No owner-facing login steps generated.
+Cursor implemented the bridge; Atlas handled the earlier deployment. The final coordinator review made no production configuration changes or service restarts.
 
 
 ## Atlas execution (deterministic script)
