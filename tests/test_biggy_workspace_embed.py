@@ -85,6 +85,26 @@ class _UpstreamRecorder(BaseHTTPRequestHandler):
                 return self._json(403, {"error": "origin_refused"})
             payload = json.loads(body.decode("utf-8") or "{}")
             return self._json(201, {"task": {"title": payload.get("title"), "id": "t1"}})
+        if path == "/api/v1/commands":
+            cookie = self.headers.get("Cookie") or ""
+            if f"biggy_owner_session={OWNER_TOKEN}" not in cookie:
+                return self._json(401, {"error": "unauthorized"})
+            origin = self.headers.get("Origin") or ""
+            if origin and origin != GUI_ORIGIN:
+                return self._json(403, {"error": "origin_refused"})
+            if not origin:
+                return self._json(403, {"error": "origin_refused"})
+            payload = json.loads(body.decode("utf-8") or "{}")
+            if payload.get("command") == "ai_assist":
+                return self._json(
+                    200,
+                    {
+                        "command": "ai_assist",
+                        "available": True,
+                        "result": {"text": "LOCAL_AI_OK", "state": "ok"},
+                    },
+                )
+            return self._json(200, {"command": payload.get("command"), "ok": True})
         if path == "/redirect-trap":
             # Off-origin Location — proxy must refuse to follow with Cookie/Bearer.
             self.send_response(302)
@@ -511,3 +531,102 @@ def test_html_roundtrip_preserves_scoped_same_origin_frame_headers(upstream):
     csp = handler.sent_headers.get("content-security-policy") or ""
     assert "frame-ancestors 'self'" in csp
     assert "frame-ancestors 'none'" not in csp
+
+
+def test_proxy_timeout_selector_extends_only_ai_assist_commands():
+    """Observable contract: ai_assist commands get 60s; everything else stays 30s."""
+    ai_body = json.dumps(
+        {"command": "ai_assist", "params": {"prompt": "draft only"}}
+    ).encode("utf-8")
+    other_body = json.dumps(
+        {"command": "create_task", "params": {"title": "x"}}
+    ).encode("utf-8")
+    assert embed._proxy_timeout_seconds("/api/v1/commands", "POST", ai_body) == 60
+    assert embed._proxy_timeout_seconds("/api/v1/commands", "POST", other_body) == 30
+    assert embed._proxy_timeout_seconds("/api/v1/commands", "GET", ai_body) == 30
+    assert embed._proxy_timeout_seconds("/api/v1/tasks", "POST", ai_body) == 30
+    assert embed._proxy_timeout_seconds("/", "GET", b"") == 30
+    # Malformed / hostile bodies must not receive the extended budget.
+    assert embed._proxy_timeout_seconds("/api/v1/commands", "POST", b"{") == 30
+    assert embed._proxy_timeout_seconds("/api/v1/commands", "POST", b"") == 30
+
+
+def test_ai_assist_proxy_open_uses_extended_timeout(upstream, monkeypatch):
+    """Behavioral: opener.open for ai_assist gets 60s; neighboring POST stays 30s."""
+    seen: list[dict] = []
+    real_opener = embed._upstream_opener()
+
+    class _RecordingOpener:
+        def open(self, request, timeout=None):  # noqa: ANN001
+            seen.append(
+                {
+                    "url": request.full_url,
+                    "method": request.get_method(),
+                    "timeout": timeout,
+                    "body": request.data or b"",
+                }
+            )
+            return real_opener.open(request, timeout=timeout)
+
+    monkeypatch.setattr(embed, "_upstream_opener", lambda: _RecordingOpener())
+
+    ai_body = json.dumps(
+        {
+            "command": "ai_assist",
+            "params": {
+                "prompt": (
+                    "Give me a simple three-step plan for organizing a desk. "
+                    "Draft only; do not create tasks."
+                )
+            },
+        }
+    ).encode("utf-8")
+    handler, handled = _call(
+        "POST",
+        "/biggy-workspace/api/v1/commands",
+        body=ai_body,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Origin": GUI_ORIGIN,
+        },
+    )
+    assert handled is True
+    assert handler.status == 200
+    payload = json.loads(handler.wfile.written.decode("utf-8"))
+    assert payload.get("command") == "ai_assist"
+    assert payload.get("available") is True
+
+    command_opens = [
+        row
+        for row in seen
+        if row["method"] == "POST" and "/api/v1/commands" in row["url"]
+    ]
+    assert command_opens, f"expected commands open, seen={seen!r}"
+    assert command_opens[-1]["timeout"] == 60
+
+    seen.clear()
+    task_body = json.dumps({"title": "neighbor"}).encode("utf-8")
+    task_handler, task_ok = _call(
+        "POST",
+        "/biggy-workspace/api/v1/tasks",
+        body=task_body,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Origin": GUI_ORIGIN,
+        },
+    )
+    assert task_ok is True
+    assert task_handler.status == 201
+    task_opens = [
+        row for row in seen if row["method"] == "POST" and "/api/v1/tasks" in row["url"]
+    ]
+    assert task_opens
+    assert task_opens[-1]["timeout"] == 30
+
+    # Mint path remains on the short mint timeout (not the proxy AI budget).
+    mint_opens = [row for row in seen if "/hermes-bridge" in row["url"]]
+    # Cache may already hold a session from the first call; either way mint ≠ 60.
+    for row in mint_opens:
+        assert row["timeout"] == embed._MINT_TIMEOUT_SECONDS

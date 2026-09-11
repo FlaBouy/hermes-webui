@@ -29,6 +29,9 @@ _PLACEHOLDERS = frozenset(
 _REFRESH_SKEW_SECONDS = 60
 _MINT_TIMEOUT_SECONDS = 10
 _PROXY_TIMEOUT_SECONDS = 30
+# Owner ai_assist can legitimately take Workspace adapter wall-clock (45s) plus
+# a bounded inventory probe (~3s). Extend only that command path.
+_PROXY_AI_ASSIST_TIMEOUT_SECONDS = 60
 _MAX_BODY_BYTES = 8 * 1024 * 1024
 
 _lock = threading.RLock()
@@ -188,6 +191,31 @@ def _proxy_upstream_request(
         headers=headers,
         method=method_u,
     )
+
+
+def _is_ai_assist_commands_request(upstream_path: str, method: str, body: bytes) -> bool:
+    """True only for POST /api/v1/commands with command=ai_assist."""
+    if str(method or "").upper() != "POST":
+        return False
+    path = str(upstream_path or "").rstrip("/") or "/"
+    if path != "/api/v1/commands":
+        return False
+    if not body:
+        return False
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    return payload.get("command") == "ai_assist"
+
+
+def _proxy_timeout_seconds(upstream_path: str, method: str, body: bytes) -> float:
+    """Default 30s; ai_assist commands alone use the extended budget."""
+    if _is_ai_assist_commands_request(upstream_path, method, body):
+        return float(_PROXY_AI_ASSIST_TIMEOUT_SECONDS)
+    return float(_PROXY_TIMEOUT_SECONDS)
 
 
 def _mint_session(upstream: str, bridge_secret: str) -> tuple[str, int]:
@@ -398,8 +426,9 @@ def handle_biggy_workspace_embed(handler, parsed, method: str) -> bool | None:
         url, method=method, headers=headers, body=body
     )
     opener = _upstream_opener()
+    proxy_timeout = _proxy_timeout_seconds(upstream_path, method, body)
     try:
-        with opener.open(request, timeout=_PROXY_TIMEOUT_SECONDS) as response:
+        with opener.open(request, timeout=proxy_timeout) as response:
             resp_body = response.read()
             status = int(getattr(response, "status", 200))
             content_type = response.headers.get("Content-Type") or "application/octet-stream"
