@@ -28,6 +28,9 @@
 .biggy-presentation-body{padding:10px 12px;display:grid;gap:8px}
 .biggy-presentation-status{margin:0;color:#75e5b8}
 .biggy-presentation-note{margin:0;color:#8eb4c8}
+.biggy-presentation-opt{display:grid;gap:4px;color:#a8c4d4;font:11px/1.35 inherit}
+.biggy-presentation-opt input[type="checkbox"]{margin-right:6px}
+.biggy-presentation-opt select{max-width:100%;min-height:32px;background:rgba(13,17,23,.9);color:#d7e4ec;border:1px solid rgba(148,163,184,.34);border-radius:5px}
 .biggy-presentation-controls{display:flex;flex-wrap:wrap;gap:8px}
 .biggy-presentation-panel details{color:#7896a6}
 .biggy-presentation-panel pre{

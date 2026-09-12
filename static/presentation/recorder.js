@@ -42,6 +42,15 @@
   let drainWaiters = [];
   let stopping = false;
   let lastStatusMsg = "";
+  let micEnabledPref = false;
+  let micStream = null;
+  let micMuted = false;
+  let paused = false;
+  let pausedAccumMs = 0;
+  let pauseStartedAt = 0;
+  let linkTaskId = "";
+  let linkedFileIds = new Set();
+  let linkedEvidenceKeys = new Set();
 
   function csrfHeaders(extra) {
     const h = Object.assign({}, extra || {});
@@ -70,20 +79,44 @@
     );
   }
 
-  function pickMime() {
-    const prefs = [
+  function pickMime(wantAudio) {
+    const withAudio = [
+      "video/webm;codecs=vp9,opus",
+      "video/webm;codecs=vp8,opus",
+      "video/webm;codecs=vp9",
+      "video/webm;codecs=vp8",
+      "video/webm",
+      "video/mp4",
+    ];
+    const videoOnly = [
       "video/mp4;codecs=avc1",
       "video/mp4",
       "video/webm;codecs=vp9",
       "video/webm;codecs=vp8",
       "video/webm",
     ];
-    for (const t of prefs) {
+    const prefs = wantAudio ? withAudio : videoOnly;
+    for (const cand of prefs) {
       try {
-        if (MediaRecorder.isTypeSupported(t)) return t;
+        if (MediaRecorder.isTypeSupported(cand)) return cand;
       } catch (_) {}
     }
     return "";
+  }
+
+  function selectedLinkTaskId() {
+    const sel = shell && shell.querySelector('[data-testid="biggy-presentation-task"]');
+    if (!sel) return linkTaskId || "";
+    if (sel.value) {
+      linkTaskId = sel.value;
+      return linkTaskId;
+    }
+    // Empty select: honor explicit none only when the latched option is present.
+    // If the panel was rebuilt without that option, keep the latched choice.
+    if (!linkTaskId) return "";
+    const hasLatchOption = Array.from(sel.options || []).some((o) => o.value === linkTaskId);
+    if (hasLatchOption) return "";
+    return linkTaskId;
   }
 
   function formatLabel(m) {
@@ -140,7 +173,8 @@
       el.textContent = "00:00";
       return;
     }
-    const sec = Math.floor((Date.now() - startedAt) / 1000);
+    const pausedExtra = paused && pauseStartedAt ? (Date.now() - pauseStartedAt) : 0;
+    const sec = Math.floor(Math.max(0, Date.now() - startedAt - pausedAccumMs - pausedExtra) / 1000);
     const m = String(Math.floor(sec / 60)).padStart(2, "0");
     const s = String(sec % 60).padStart(2, "0");
     el.textContent = `${m}:${s}`;
@@ -159,6 +193,14 @@
       } catch (_) {}
     }
     mediaStream = null;
+    if (micStream) {
+      try {
+        micStream.getTracks().forEach((t) => t.stop());
+      } catch (_) {}
+    }
+    micStream = null;
+    paused = false;
+    pauseStartedAt = 0;
   }
 
   async function sha256Hex(buf) {
@@ -384,6 +426,8 @@
           `max_chunk_bytes=${limits.max_chunk_bytes}`,
           `max_total_bytes=${limits.max_total_bytes}`,
           `audio_default=off`,
+          `session_ttl_sec=7200`,
+          `pause_compatible=client_pause_within_session_ttl`,
           `format_pref=MP4 then WebM`,
         ].join("\n")
       );
@@ -476,13 +520,45 @@
       if (startData.max_chunks) limits.max_chunks = startData.max_chunks;
       sessionId = startData.session_id;
       const sid = sessionId;
-      mime = pickMime();
+      const wantMic = !!(shell && shell.querySelector('[data-testid="biggy-presentation-mic"]')
+        && shell.querySelector('[data-testid="biggy-presentation-mic"]').checked);
+      micEnabledPref = wantMic;
+      linkTaskId = selectedLinkTaskId();
+      mime = pickMime(wantMic);
       setStatus("Select the Biggy GUI window/tab to record…");
-      mediaStream = await navigator.mediaDevices.getDisplayMedia({
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
         video: { displaySurface: "browser" },
         audio: false,
         preferCurrentTab: true,
       });
+      mediaStream = displayStream;
+      micMuted = false;
+      pausedAccumMs = 0;
+      pauseStartedAt = 0;
+      paused = false;
+      if (wantMic) {
+        try {
+          micStream = await navigator.mediaDevices.getUserMedia({
+            audio: { echoCancellation: true, noiseSuppression: true },
+            video: false,
+          });
+          micStream.getAudioTracks().forEach((t) => {
+            mediaStream.addTrack(t);
+            t.addEventListener("ended", () => {
+              if (generation === gen && (phase === "recording" || phase === "uploading")) {
+                setStatus("Microphone disconnected — video continues without narration.");
+                syncShellControls();
+              }
+            });
+          });
+        } catch (micErr) {
+          displayStream.getTracks().forEach((tr) => { try { tr.stop(); } catch (_) {} });
+          mediaStream = null;
+          throw new Error(micErr && micErr.name === "NotAllowedError"
+            ? "Microphone permission denied — recording not started."
+            : (`Microphone unavailable: ${micErr.message || micErr}`));
+        }
+      }
       if (gen !== generation) {
         releaseTracks();
         await abortSession(sid, "superseded", gen);
@@ -504,7 +580,7 @@
         failUpload(new Error("recorder_error"), gen);
       };
       // Hide settings before the first recorded frame — consent already granted.
-      setStatus(`Recording… format=${formatLabel(mime)} · audio=off · session=${sid.slice(0, 12)}…`);
+      setStatus(`Recording… format=${formatLabel(mime)} · audio=${wantMic ? 'on' : 'off'} · session=${sid.slice(0, 12)}…`);
       hideSettingsKeepRecording();
       // Two rAFs: let the browser paint without the settings panel before start.
       const paintOk = await new Promise((resolve) => {
@@ -522,7 +598,11 @@
       startedAt = Date.now();
       timerId = window.setInterval(() => {
         setTimer();
-        if (startedAt && Date.now() - startedAt >= limits.max_duration_ms) {
+        const pausedExtra = paused && pauseStartedAt ? (Date.now() - pauseStartedAt) : 0;
+        const activeMs = startedAt
+          ? Math.max(0, Date.now() - startedAt - pausedAccumMs - pausedExtra)
+          : 0;
+        if (startedAt && activeMs >= limits.max_duration_ms) {
           setStatus("Max duration reached — stopping…");
           stopRecording({ reason: "max_duration" }).catch(() => {});
         }
@@ -580,8 +660,14 @@
       timerId = 0;
     }
     shell?.classList.remove("is-recording");
-    const wallMs = startedAt ? Math.max(1, Date.now() - startedAt) : 0;
+    if (paused && pauseStartedAt) {
+      pausedAccumMs += Math.max(0, Date.now() - pauseStartedAt);
+      pauseStartedAt = 0;
+      paused = false;
+    }
+    const wallMs = startedAt ? Math.max(1, Date.now() - startedAt - pausedAccumMs) : 0;
     startedAt = 0;
+    pausedAccumMs = 0;
     setTimer();
     const durationMs = resolveDurationMs(wallMs, reason);
 
@@ -687,6 +773,17 @@
       );
       const openBtn = shell && shell.querySelector('[data-testid="biggy-presentation-open"]');
       if (openBtn) openBtn.disabled = false;
+      try {
+        await linkPresentationToTask(data);
+      } catch (linkErr) {
+        // File is already saved — never demote to failed/interrupted for optional task link.
+        setStatus(
+          `Saved ${data.filename} · ${Math.round((data.duration_ms || 0) / 1000)}s · ${formatLabel(data.mime)}`
+          + ` · task link failed: ${linkErr && linkErr.message ? linkErr.message : linkErr}`
+        );
+        const openBtn2 = shell && shell.querySelector('[data-testid="biggy-presentation-open"]');
+        if (openBtn2) openBtn2.disabled = false;
+      }
     } catch (err) {
       if (gen === generation) {
         setPhase("failed");
@@ -771,6 +868,177 @@
     panel.querySelector('[data-testid="biggy-presentation-open"]').addEventListener("click", () => {
       openSaved().catch(() => {});
     });
+    panel.querySelector('[data-testid="biggy-presentation-pause"]').addEventListener("click", () => {
+      togglePause();
+    });
+    panel.querySelector('[data-testid="biggy-presentation-mute"]').addEventListener("click", () => {
+      toggleMicMute();
+    });
+    loadPresentationTasks(panel);
+  }
+
+  async function loadPresentationTasks(panel) {
+    const sel = panel.querySelector('[data-testid="biggy-presentation-task"]');
+    if (!sel) return;
+    if (!sel.dataset.boundChange) {
+      sel.dataset.boundChange = "1";
+      sel.addEventListener("change", () => {
+        linkTaskId = sel.value || "";
+      });
+    }
+    try {
+      const res = await fetch("/biggy-workspace/api/v1/tasks", {
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return;
+      const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+      tasks.forEach((task) => {
+        if (!task || !task.id) return;
+        const opt = document.createElement("option");
+        opt.value = task.id;
+        opt.textContent = task.title || task.id;
+        sel.appendChild(opt);
+      });
+      if (linkTaskId) {
+        if (!Array.from(sel.options).some((o) => o.value === linkTaskId)) {
+          const opt = document.createElement("option");
+          opt.value = linkTaskId;
+          opt.textContent = linkTaskId;
+          sel.appendChild(opt);
+        }
+        sel.value = linkTaskId;
+      }
+    } catch (_) {}
+  }
+
+
+  async function linkPresentationToTask(meta) {
+    const taskId = selectedLinkTaskId();
+    if (!taskId || !meta || !meta.file_id) return;
+    if (!/^prv_[A-Za-z0-9_-]{8,64}$/.test(String(meta.file_id))) {
+      setStatus(`${lastStatusMsg} · task link skipped: invalid file id`);
+      return;
+    }
+    const key = `${taskId}:${meta.file_id}`;
+    if (linkedFileIds.has(key)) return;
+    const playUrl = `/api/presentation/file/${meta.file_id}`;
+    const text =
+      `Presentation recording linked (share reference only; video not copied).\n`
+      + `file_id=${meta.file_id}\n`
+      + `file=${meta.filename || ""}\n`
+      + `duration_ms=${meta.duration_ms || 0}\n`
+      + `play_url=${playUrl}`;
+    const tinyPng =
+      "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
+    if (!linkedEvidenceKeys.has(key)) {
+      const saveRes = await fetch("/biggy-workspace/api/v1/commands", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: csrfHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+        body: JSON.stringify({
+          command: "vision_evidence_save",
+          params: {
+            task_id: taskId,
+            kind: "image_intake",
+            content_type: "image/png",
+            image_base64: tinyPng,
+            source: "presentation_recording_ref",
+            host: "browser",
+            captured_at: new Date().toISOString(),
+            source_state: "ok",
+            guidance: {
+              label: "Presentation recording",
+              presentation_ref: {
+                file_id: meta.file_id,
+                filename: meta.filename || "",
+                play_url: playUrl,
+              },
+            },
+          },
+        }),
+        cache: "no-store",
+      });
+      const saveData = await saveRes.json().catch(() => ({}));
+      if (!saveRes.ok) {
+        throw new Error(saveData.error || saveData.detail || `HTTP ${saveRes.status}`);
+      }
+      linkedEvidenceKeys.add(key);
+    }
+    const attachRes = await fetch("/biggy-workspace/api/v1/commands", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: csrfHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+      body: JSON.stringify({
+        command: "vision_attach",
+        params: {
+          task_id: taskId,
+          text,
+          provenance: {
+            source: "presentation_recording",
+            captured_at: new Date().toISOString(),
+            model: "none",
+            endpoint_kind: "local",
+            endpoint_host: "smedley",
+          },
+        },
+      }),
+      cache: "no-store",
+    });
+    const attachData = await attachRes.json().catch(() => ({}));
+    if (!attachRes.ok) {
+      throw new Error(attachData.error || attachData.detail || `HTTP ${attachRes.status}`);
+    }
+    linkedFileIds.add(key);
+    setStatus(`${lastStatusMsg} · linked to task (Open recording from Focus evidence)`);
+  }
+
+  function togglePause() {
+    if (!recorder || phase !== "recording") return;
+    try {
+      if (!paused && recorder.state === "recording" && typeof recorder.pause === "function") {
+        recorder.pause();
+        paused = true;
+        pauseStartedAt = Date.now();
+        setStatus("Paused — time paused is not counted. Resume or Off via VISION→Presentation.");
+        syncShellControls();
+        hideSettingsKeepRecording();
+      } else if (paused && typeof recorder.resume === "function") {
+        // Hide settings before resume so the setup panel is not recorded.
+        hideSettingsKeepRecording();
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            try {
+              recorder.resume();
+              if (pauseStartedAt) pausedAccumMs += Math.max(0, Date.now() - pauseStartedAt);
+              pauseStartedAt = 0;
+              paused = false;
+              setStatus("Recording resumed.");
+              syncShellControls();
+            } catch (err) {
+              setStatus(err.message || String(err));
+            }
+          });
+        });
+      } else {
+        setStatus("Pause/resume is not supported in this browser.");
+        syncShellControls();
+      }
+    } catch (err) {
+      setStatus(err.message || String(err));
+      syncShellControls();
+    }
+  }
+
+  function toggleMicMute() {
+    if (!micStream) return;
+    micMuted = !micMuted;
+    micStream.getAudioTracks().forEach((t) => { t.enabled = !micMuted; });
+    setStatus(micMuted ? "Microphone muted." : "Microphone unmuted.");
+    syncShellControls();
+    hideSettingsKeepRecording();
   }
 
   function buildShell() {
@@ -793,9 +1061,14 @@
       + '<div class="biggy-presentation-controls">'
       + '<button type="button" data-testid="biggy-presentation-on">On</button>'
       + '<button type="button" class="danger" data-testid="biggy-presentation-off" disabled>Off</button>'
+      + '<button type="button" data-testid="biggy-presentation-pause" disabled>Pause</button>'
+      + '<button type="button" data-testid="biggy-presentation-mute" disabled>Mute mic</button>'
       + '<button type="button" data-testid="biggy-presentation-open" disabled>Open saved</button>'
       + "</div>"
-      + '<p class="biggy-presentation-note">On records the Biggy GUI you select (includes Camera feed). Settings hide while recording — reopen via VISION→Presentation for Off / Open saved. Audio off. Desktop only.</p>'
+      + '<label class="biggy-presentation-opt"><input type="checkbox" data-testid="biggy-presentation-mic" /> Include microphone (off by default; browser permission required)</label>'
+      + '<label class="biggy-presentation-opt">Link saved recording to existing task '
+      + '<select data-testid="biggy-presentation-task"><option value="">(none)</option></select></label>'
+      + '<p class="biggy-presentation-note">On records the Biggy GUI you select (includes Camera feed). Settings hide while recording — reopen via VISION→Presentation for Off / Pause / Mute / Open saved. Desktop only.</p>'
       + '<details data-testid="biggy-presentation-details"><summary>Details</summary>'
       + '<pre data-testid="biggy-presentation-details-body"></pre></details>'
       + "</div>";
@@ -816,6 +1089,26 @@
       offBtn.disabled = !(phase === "recording" || phase === "uploading" || phase === "finalizing");
     }
     if (openBtn) openBtn.disabled = !lastSaved;
+    const pauseBtn = shell.querySelector('[data-testid="biggy-presentation-pause"]');
+    const muteBtn = shell.querySelector('[data-testid="biggy-presentation-mute"]');
+    if (pauseBtn) {
+      pauseBtn.disabled = phase !== "recording";
+      pauseBtn.textContent = paused ? "Resume" : "Pause";
+    }
+    if (muteBtn) {
+      muteBtn.disabled = !(micStream && (phase === "recording" || phase === "uploading"));
+      muteBtn.textContent = micMuted ? "Unmute mic" : "Mute mic";
+    }
+    const micBox = shell.querySelector('[data-testid="biggy-presentation-mic"]');
+    if (micBox) {
+      micBox.checked = !!micEnabledPref;
+      const active = phase === "recording" || phase === "uploading" || phase === "finalizing" || phase === "choosing";
+      micBox.disabled = active;
+    }
+    const taskSel = shell.querySelector('[data-testid="biggy-presentation-task"]');
+    if (taskSel && phase === "saved") {
+      /* keep selectable for next recording */
+    }
     if (phase === "finalizing") setStatus("Finalizing…");
     else if (phase === "recording" || phase === "uploading") {
       setStatus(
@@ -823,9 +1116,11 @@
         || "Recording in progress — Off stops and saves. Close hides settings only."
       );
     } else if (phase === "saved" && lastSaved) {
-      setStatus(
-        `Saved ${lastSaved.filename} · ${Math.round((lastSaved.duration_ms || 0) / 1000)}s · ${formatLabel(lastSaved.mime)}`
-      );
+      if (!(lastStatusMsg && lastStatusMsg.indexOf(lastSaved.filename) >= 0 && /Saved/i.test(lastStatusMsg))) {
+        setStatus(
+          `Saved ${lastSaved.filename} · ${Math.round((lastSaved.duration_ms || 0) / 1000)}s · ${formatLabel(lastSaved.mime)}`
+        );
+      }
     } else if (phase === "failed") {
       if (lastStatusMsg) setStatus(lastStatusMsg);
     } else if (lastStatusMsg && (phase === "idle" || phase === "choosing")) {
@@ -878,8 +1173,14 @@
     phase: () => phase,
     lastStatus: () => lastStatusMsg,
     /** Test hooks — not for product UI. */
+    retryLinkSaved: () => (lastSaved ? linkPresentationToTask(lastSaved) : Promise.resolve()),
     _test: {
       getLimits: () => Object.assign({}, limits),
+      getLinkTaskId: () => linkTaskId,
+      setLinkTaskId: (id) => { linkTaskId = String(id || ""); },
+      getLinkedKeys: () => Array.from(linkedFileIds),
+      getLinkedEvidenceKeys: () => Array.from(linkedEvidenceKeys),
+      linkPresentationToTask,
       setLimits: (partial) => { Object.assign(limits, partial || {}); },
       getQueuedBytes: () => queuedBytes,
       getAcceptedEvents: () => acceptedEvents,

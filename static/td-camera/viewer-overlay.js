@@ -15,6 +15,8 @@
   let pollTimer = 0;
   let heartbeatTimer = 0;
   let objectUrl = null;
+  let lastRawBlob = null;
+  let lastRawAt = 0;
   let customFileUrl = null;
   let leaseId = null;
   let frameGen = 0;
@@ -209,6 +211,8 @@
       try { URL.revokeObjectURL(objectUrl); } catch (_) {}
       objectUrl = null;
     }
+    lastRawBlob = null;
+    lastRawAt = 0;
     if (customFileUrl) {
       try { URL.revokeObjectURL(customFileUrl); } catch (_) {}
       customFileUrl = null;
@@ -269,6 +273,53 @@
     }
   }
 
+  async function freezeFrame() {
+    if (!viewing) throw new Error("Camera feed is not live.");
+    if (!lastRawBlob || (Date.now() - lastRawAt) > 5000) {
+      throw new Error("No recent camera frame — wait for the feed, then Freeze again.");
+    }
+    const backdropEl = settings && settings.querySelector("#biggy-td-camera-backdrop");
+    const backdrop = (backdropEl && backdropEl.value) || "off";
+    let blob = lastRawBlob;
+    let source = "td_camera_raw";
+    if (backdrop !== "off" && feed) {
+      const canvas = feed.querySelector("#biggy-td-camera-canvas");
+      if (canvas && !canvas.hidden) {
+        blob = await new Promise((resolve, reject) => {
+          canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("preview_freeze_failed"))), "image/jpeg", 0.92);
+        });
+        source = "td_camera_preview";
+      }
+    }
+    // Open Focus panel and ingest without a second camera lease/poll.
+    if (typeof root.openBiggyVisionSurface === "function") {
+      root.openBiggyVisionSurface("focus");
+    }
+    // Ensure module exists; ingestFreeze can queue until mount.
+    if (!root.BiggyVisionFocusGuidance) {
+      await new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = "/static/vision/focus-guidance.js";
+        s.onload = resolve;
+        s.onerror = reject;
+        document.head.appendChild(s);
+      });
+    }
+    let api = root.BiggyVisionFocusGuidance;
+    if (!api || typeof api.ingestFreeze !== "function") {
+      throw new Error("Focus panel unavailable — open VISION→Focus, then Freeze.");
+    }
+    await api.ingestFreeze({ blob, contentType: blob.type || "image/jpeg", source });
+    // Give async Focus mount a moment to paint the queued freeze.
+    for (let i = 0; i < 20; i += 1) {
+      await new Promise((r) => setTimeout(r, 25));
+      const fr = api.getFrame && api.getFrame();
+      if (fr && fr.blob) break;
+    }
+    setNote(`Frozen ${source} — save from Focus to an existing task.`);
+    closeSettings();
+  }
+
   async function refreshHealthQuiet() {
     try {
       const res = await fetch("/api/td-camera/health", {
@@ -321,6 +372,8 @@
       } else {
         const blob = await frameRes.blob();
         if (myGen !== frameGen || !viewing) return;
+        lastRawBlob = blob;
+        lastRawAt = Date.now();
         if (objectUrl) {
           try { URL.revokeObjectURL(objectUrl); } catch (_) {}
         }
@@ -459,6 +512,8 @@
       viewing = true;
       if (feed) feed.classList.add("is-live");
       if (stopBtn) stopBtn.disabled = false;
+      const freezeBtn = settings && settings.querySelector('[data-testid="biggy-td-camera-freeze"]');
+      if (freezeBtn) freezeBtn.disabled = false;
       setMode("Camera previewing");
       // Hide settings so the feed (and Presentation capture) is not covered by chrome.
       closeSettings();
@@ -542,6 +597,7 @@
       + '<div class="biggy-td-camera-controls">'
       + '<button type="button" data-testid="biggy-td-camera-start">Start</button>'
       + '<button type="button" class="danger" data-testid="biggy-td-camera-stop" disabled>Stop</button>'
+      + '<button type="button" data-testid="biggy-td-camera-freeze" disabled>Freeze frame</button>'
       + '<label>Backdrop <select id="biggy-td-camera-backdrop" data-testid="biggy-td-camera-backdrop">'
       + '<option value="off" selected>Off</option>'
       + '<option value="blur">Blur</option>'
@@ -552,7 +608,7 @@
       + 'data-testid="biggy-td-camera-backdrop-file" />'
       + "</label>"
       + "</div>"
-      + '<p class="biggy-td-camera-hint">Start shows only the camera image (lower-left). Closing settings does not stop the feed.</p>'
+      + '<p class="biggy-td-camera-hint">Start shows only the camera image (lower-left). Freeze saves the current authorized frame into Focus for evidence. Closing settings does not stop the feed.</p>'
       + '<details class="biggy-td-camera-details" data-testid="biggy-td-camera-details">'
       + "<summary>Details</summary>"
       + '<pre data-testid="biggy-td-camera-details-body"></pre>'
@@ -568,6 +624,11 @@
     });
     panel.querySelector('[data-testid="biggy-td-camera-stop"]').addEventListener("click", () => {
       stopPreview().catch(() => {});
+    });
+    panel.querySelector('[data-testid="biggy-td-camera-freeze"]').addEventListener("click", () => {
+      freezeFrame().catch((err) => {
+        setNote(err.message || String(err));
+      });
     });
     const fileInput = panel.querySelector("#biggy-td-camera-backdrop-file");
     fileInput.addEventListener("change", async () => {
@@ -610,16 +671,20 @@
       refreshHealthQuiet().catch(() => {});
       const stopBtn = settings.querySelector('[data-testid="biggy-td-camera-stop"]');
       const startBtn = settings.querySelector('[data-testid="biggy-td-camera-start"]');
+      const freezeBtn = settings.querySelector('[data-testid="biggy-td-camera-freeze"]');
       if (stopBtn) stopBtn.disabled = !viewing;
       if (startBtn) startBtn.disabled = !!viewing;
+      if (freezeBtn) freezeBtn.disabled = !viewing;
       return settings;
     }
     settings = buildSettings();
     document.body.appendChild(settings);
     const stopBtn = settings.querySelector('[data-testid="biggy-td-camera-stop"]');
     const startBtn = settings.querySelector('[data-testid="biggy-td-camera-start"]');
+    const freezeBtn = settings.querySelector('[data-testid="biggy-td-camera-freeze"]');
     if (stopBtn) stopBtn.disabled = !viewing;
     if (startBtn) startBtn.disabled = !!viewing;
+    if (freezeBtn) freezeBtn.disabled = !viewing;
     setMode(viewing ? "Camera previewing" : "Camera ready");
     setNote(viewing
       ? "Feed is live lower-left. Stop ends the feed; Close hides settings only."
@@ -665,6 +730,7 @@
     isSettingsOpen,
     isViewing,
     stopPreview,
+    freezeFrame,
     subscribeRawFrames,
     frameStats,
     /** Test hooks — not for product UI. */
@@ -675,6 +741,7 @@
       applyFeedRect,
       frameStats,
       subscriberCount: () => rawFrameSubscribers.size,
+      setLastRawBlob: (blob) => { lastRawBlob = blob; lastRawAt = Date.now(); },
     },
   };
 })(typeof window !== "undefined" ? window : globalThis);

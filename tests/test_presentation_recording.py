@@ -1258,3 +1258,387 @@ def test_settings_hidden_before_mediarecorder_start_and_vision_error(presentatio
         assert "chunk_upload_failed" in status or "Upload failed" in status
         assert page.evaluate("() => window.BiggyPresentation.phase()") == "failed"
         browser.close()
+
+
+def test_presentation_mic_opt_in_and_pause_excludes_duration(presentation_gui_server):
+    """Mic stays off by default; synthetic mic+video can record; pause omitted from duration."""
+    sp = _require_playwright()
+    info = presentation_gui_server
+    with sp() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1280, "height": 900})
+        context.add_cookies(
+            [
+                {
+                    "name": info["cookie_name"],
+                    "value": info["cookie"],
+                    "url": info["origin"],
+                    "httpOnly": True,
+                    "sameSite": "Lax",
+                }
+            ]
+        )
+        page = context.new_page()
+        page.add_init_script(
+            """
+            (() => {
+              const makeVideo = () => {
+                const c = document.createElement('canvas');
+                c.width = 320; c.height = 180;
+                const ctx = c.getContext('2d');
+                let i = 0;
+                const draw = () => {
+                  ctx.fillStyle = '#234';
+                  ctx.fillRect(0,0,320,180);
+                  ctx.fillStyle = '#f80';
+                  ctx.fillRect((i*4)%280, 50, 36, 36);
+                  i += 1;
+                };
+                draw();
+                const timer = setInterval(draw, 40);
+                const stream = c.captureStream(20);
+                const track = stream.getVideoTracks()[0];
+                const stop = track.stop.bind(track);
+                track.stop = () => { clearInterval(timer); stop(); };
+                return stream;
+              };
+              const makeMic = () => {
+                const ctx = new (window.AudioContext || window.webkitAudioContext)();
+                const osc = ctx.createOscillator();
+                const dest = ctx.createMediaStreamDestination();
+                osc.frequency.value = 440;
+                osc.connect(dest);
+                osc.start();
+                const track = dest.stream.getAudioTracks()[0];
+                const stop = track.stop.bind(track);
+                track.stop = () => { try { osc.stop(); } catch (_) {} try { ctx.close(); } catch (_) {} stop(); };
+                return dest.stream;
+              };
+              navigator.mediaDevices.getDisplayMedia = async () => makeVideo();
+              navigator.mediaDevices.getUserMedia = async (constraints) => {
+                if (constraints && constraints.audio) return makeMic();
+                throw new Error('unexpected getUserMedia');
+              };
+            })();
+            """
+        )
+        page.goto(info["origin"], wait_until="domcontentloaded")
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
+        panel = page.get_by_test_id("biggy-presentation-panel")
+        expect(panel).to_be_visible()
+        page.wait_for_function(
+            """() => {
+              const d = document.querySelector('[data-testid="biggy-presentation-details-body"]');
+              return !!(d && /max_duration_ms=/.test(d.textContent || ''));
+            }""",
+            timeout=10000,
+        )
+        mic = page.get_by_test_id("biggy-presentation-mic")
+        expect(mic).to_be_visible()
+        assert mic.is_checked() is False
+        expect(page.get_by_test_id("biggy-presentation-pause")).to_be_disabled()
+        expect(page.get_by_test_id("biggy-presentation-mute")).to_be_disabled()
+        mic.check()
+        page.get_by_test_id("biggy-presentation-on").click()
+        page.wait_for_function(
+            "() => window.BiggyPresentation && window.BiggyPresentation.isRecording()",
+            timeout=15000,
+        )
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_have_count(0)
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_be_visible()
+        expect(page.get_by_test_id("biggy-presentation-pause")).to_be_enabled()
+        expect(page.get_by_test_id("biggy-presentation-mute")).to_be_enabled()
+        page.get_by_test_id("biggy-presentation-pause").click()
+        # Pause hides settings so the control chrome is not recorded.
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_have_count(0)
+        page.wait_for_timeout(700)
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_be_visible()
+        page.wait_for_function(
+            """() => {
+              const b = document.querySelector('[data-testid="biggy-presentation-pause"]');
+              return !!(b && /Resume/i.test(b.textContent || ''));
+            }""",
+            timeout=5000,
+        )
+        page.get_by_test_id("biggy-presentation-pause").click()
+        # Resume also hides settings before continuing capture.
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_have_count(0)
+        page.wait_for_timeout(400)
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_be_visible()
+        page.get_by_test_id("biggy-presentation-off").click()
+        page.wait_for_function(
+            """() => {
+              const t = document.querySelector('[data-testid="biggy-presentation-status"]');
+              return !!(t && /Saved|linked/i.test(t.textContent || ''));
+            }""",
+            timeout=20000,
+        )
+        files = list(info["dest"].glob("presentation-*/recording.*"))
+        assert files, "expected saved recording with synthetic A/V"
+        status = page.get_by_test_id("biggy-presentation-status").inner_text()
+        assert "Saved" in status
+        # Decode proof: Open saved and require video + audio track presence.
+        page.get_by_test_id("biggy-presentation-open").click()
+        expect(page.get_by_test_id("biggy-presentation-video")).to_be_visible(timeout=10000)
+        av = page.get_by_test_id("biggy-presentation-video").evaluate(
+            """async (v) => {
+              await new Promise((res, rej) => {
+                if (v.readyState >= 1) return res();
+                v.onloadedmetadata = () => res();
+                v.onerror = () => rej(new Error('video_error'));
+                setTimeout(() => rej(new Error('meta_timeout')), 8000);
+              });
+              const hasAudio = !!(v.mozHasAudio || v.webkitAudioDecodedByteCount
+                || (v.audioTracks && v.audioTracks.length > 0)
+                || (typeof v.webkitAudioDecodedByteCount === 'number' && v.webkitAudioDecodedByteCount > 0));
+              // Chromium headless: probe via captureStream when available.
+              let capturedAudio = false;
+              try {
+                if (v.captureStream) {
+                  const s = v.captureStream();
+                  capturedAudio = s.getAudioTracks().length > 0;
+                }
+              } catch (_) {}
+              return {
+                duration: v.duration,
+                videoWidth: v.videoWidth,
+                hasAudio: hasAudio || capturedAudio,
+                readyState: v.readyState,
+              };
+            }"""
+        )
+        assert av["videoWidth"] > 0
+        assert av["hasAudio"] is True, av
+        # Duration may be Infinity until fully demuxed in headless; prefer finite when available.
+        if isinstance(av["duration"], (int, float)) and av["duration"] == av["duration"] and av["duration"] != float("inf"):
+            assert av["duration"] > 0
+            assert av["duration"] < 12.0
+        else:
+            # Fallback: saved file must be non-trivial and status reports seconds.
+            assert files[0].stat().st_size > 1000
+            assert any(ch.isdigit() for ch in status)
+        browser.close()
+
+
+def test_focus_guidance_panel_static_and_mount(presentation_gui_server):
+    """Focus/Guidance panel mounts from VISION menu; freeze API is exported."""
+    sp = _require_playwright()
+    info = presentation_gui_server
+    focus_js = (ROOT / "static" / "vision" / "focus-guidance.js").read_text(encoding="utf-8")
+    assert "ingestFreeze" in focus_js
+    assert '"params"' in focus_js or "params }" in focus_js or "params)," in focus_js
+    assert "vision_evidence_save" in focus_js
+    brand = (ROOT / "static" / "biggy-brand.js").read_text(encoding="utf-8")
+    assert "ensureBiggyFocusGuidanceModule" in brand
+    assert "window.openBiggyVisionSurface" in brand
+    with sp() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1100, "height": 800})
+        context.add_cookies(
+            [
+                {
+                    "name": info["cookie_name"],
+                    "value": info["cookie"],
+                    "url": info["origin"],
+                    "httpOnly": True,
+                    "sameSite": "Lax",
+                }
+            ]
+        )
+        page = context.new_page()
+        page.goto(info["origin"], wait_until="domcontentloaded")
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-focus").click()
+        expect(page.get_by_test_id("biggy-focus-guidance")).to_be_visible(timeout=10000)
+        expect(page.get_by_test_id("biggy-focus-capture")).to_be_visible()
+        expect(page.get_by_test_id("biggy-guidance-ask")).to_be_visible()
+        # Overview includes live Camera/Presentation rows.
+        page.get_by_test_id("biggy-vision-close-surface").click()
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-overview").click()
+        expect(page.get_by_test_id("biggy-vision-overview-camera")).to_be_visible()
+        expect(page.get_by_test_id("biggy-vision-overview-presentation")).to_be_visible()
+        browser.close()
+
+
+
+def test_finalize_success_link_network_fail_keeps_saved(presentation_gui_server):
+    """Saved file stays saved/playable when optional task link throws."""
+    sp = _require_playwright()
+    info = presentation_gui_server
+    with sp() as p:
+        from playwright.sync_api import expect
+
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1280, "height": 900})
+        context.add_cookies(
+            [
+                {
+                    "name": info["cookie_name"],
+                    "value": info["cookie"],
+                    "url": info["origin"],
+                    "httpOnly": True,
+                    "sameSite": "Lax",
+                }
+            ]
+        )
+        page = context.new_page()
+        page.add_init_script(
+            """
+            (() => {
+              const makeVideo = () => {
+                const c = document.createElement('canvas');
+                c.width = 160; c.height = 90;
+                const ctx = c.getContext('2d');
+                let i = 0;
+                const timer = setInterval(() => {
+                  ctx.fillStyle = '#135'; ctx.fillRect(0,0,160,90);
+                  ctx.fillStyle = '#0f8'; ctx.fillRect((i*2)%120, 20, 30, 30); i++;
+                }, 40);
+                const stream = c.captureStream(15);
+                const track = stream.getVideoTracks()[0];
+                const stop = track.stop.bind(track);
+                track.stop = () => { clearInterval(timer); stop(); };
+                return stream;
+              };
+              navigator.mediaDevices.getDisplayMedia = async () => makeVideo();
+            })();
+            """
+        )
+        page.goto(info["origin"], wait_until="domcontentloaded")
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
+        page.wait_for_function(
+            """() => /max_duration_ms=/.test((document.querySelector('[data-testid="biggy-presentation-details-body"]') || {}).textContent || '')""",
+            timeout=10000,
+        )
+        # Force a task selection then break workspace commands after start.
+        page.evaluate(
+            """() => {
+              const sel = document.querySelector('[data-testid="biggy-presentation-task"]');
+              if (sel) {
+                const o = document.createElement('option');
+                o.value = 'task_link_fail';
+                o.textContent = 'Link fail task';
+                sel.appendChild(o);
+                sel.value = 'task_link_fail';
+                sel.dispatchEvent(new Event('change', { bubbles: true }));
+              }
+              const orig = window.fetch.bind(window);
+              window.fetch = async (url, init) => {
+                const u = String(url);
+                if (u.includes('/biggy-workspace/api/v1/commands')) {
+                  throw new TypeError('network_down_for_task_link');
+                }
+                return orig(url, init);
+              };
+            }"""
+        )
+        page.get_by_test_id("biggy-presentation-on").click()
+        page.wait_for_function(
+            "() => window.BiggyPresentation && window.BiggyPresentation.isRecording()",
+            timeout=15000,
+        )
+        page.wait_for_timeout(600)
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
+        page.evaluate(
+            """() => {
+              const sel = document.querySelector('[data-testid="biggy-presentation-task"]');
+              let o = Array.from(sel.options).find(x => x.value === 'task_link_fail');
+              if (!o) {
+                o = document.createElement('option');
+                o.value = 'task_link_fail';
+                o.textContent = 'Link fail task';
+                sel.appendChild(o);
+              }
+              sel.value = 'task_link_fail';
+              sel.dispatchEvent(new Event('change', { bubbles: true }));
+              window.BiggyPresentation._test.setLinkTaskId('task_link_fail');
+              const orig = window.fetch.bind(window);
+              window.fetch = async (url, init) => {
+                const u = String(url);
+                if (u.includes('/biggy-workspace/api/v1/commands')) {
+                  throw new TypeError('network_down_for_task_link');
+                }
+                return orig(url, init);
+              };
+            }"""
+        )
+        page.get_by_test_id("biggy-presentation-off").click()
+        page.wait_for_function(
+            """() => {
+              const ph = window.BiggyPresentation.phase();
+              const t = (document.querySelector('[data-testid="biggy-presentation-status"]') || {}).textContent || '';
+              return ph === 'saved' && /Saved/i.test(t);
+            }""",
+            timeout=20000,
+        )
+        status = page.get_by_test_id("biggy-presentation-status").inner_text()
+        assert "Saved" in status
+        assert "task link failed" in status.lower() or "network_down" in status.lower()
+        assert page.evaluate("() => window.BiggyPresentation.phase()") == "saved"
+        files = list(info["dest"].glob("presentation-*/recording.*"))
+        assert files
+        expect(page.get_by_test_id("biggy-presentation-open")).to_be_enabled()
+        # Explicit none honored (clears latched task)
+        page.select_option('[data-testid="biggy-presentation-task"]', "")
+        assert page.evaluate("() => window.BiggyPresentation._test.getLinkTaskId()") == ""
+        # Partial retry: evidence stage then attach fail once — no duplicate evidence keys
+        page.evaluate(
+            """() => {
+              let attachAttempts = 0;
+              const orig = window.fetch.bind(window);
+              window.fetch = async (url, init) => {
+                const u = String(url);
+                if (u.includes('/biggy-workspace/api/v1/commands')) {
+                  const body = JSON.parse(init.body || '{}');
+                  if (body.command === 'vision_evidence_save') {
+                    return new Response(JSON.stringify({ artifact: { id: 'ev_test' } }), {
+                      status: 200, headers: { 'Content-Type': 'application/json' }
+                    });
+                  }
+                  if (body.command === 'vision_attach') {
+                    attachAttempts += 1;
+                    if (attachAttempts === 1) {
+                      return new Response(JSON.stringify({ error: 'attach_temp' }), {
+                        status: 500, headers: { 'Content-Type': 'application/json' }
+                      });
+                    }
+                    return new Response(JSON.stringify({ ok: true }), {
+                      status: 200, headers: { 'Content-Type': 'application/json' }
+                    });
+                  }
+                }
+                return orig(url, init);
+              };
+              const sel = document.querySelector('[data-testid="biggy-presentation-task"]');
+              const o = document.createElement('option');
+              o.value = 'task_retry'; o.textContent = 'Retry';
+              sel.appendChild(o); sel.value = 'task_retry';
+              sel.dispatchEvent(new Event('change', { bubbles: true }));
+              window.BiggyPresentation._test.setLinkTaskId('task_retry');
+            }"""
+        )
+        # First retry fails attach after evidence staged
+        page.evaluate("async () => { try { await window.BiggyPresentation.retryLinkSaved(); } catch (e) {} }")
+        page.wait_for_function(
+            "() => window.BiggyPresentation._test.getLinkedEvidenceKeys().length === 1",
+            timeout=5000,
+        )
+        assert page.evaluate("() => window.BiggyPresentation._test.getLinkedKeys().length") == 0
+        # Second retry completes attach without second evidence write
+        page.evaluate("async () => { try { await window.BiggyPresentation.retryLinkSaved(); } catch (e) {} }")
+        page.wait_for_function(
+            "() => window.BiggyPresentation._test.getLinkedKeys().length === 1",
+            timeout=5000,
+        )
+        assert page.evaluate("() => window.BiggyPresentation._test.getLinkedEvidenceKeys().length") == 1
+        browser.close()

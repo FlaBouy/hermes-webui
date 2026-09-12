@@ -1447,6 +1447,42 @@
       });
   }
 
+  function ensureBiggyFocusGuidanceModule() {
+    if (window.BiggyVisionFocusGuidance) {
+      return Promise.resolve(window.BiggyVisionFocusGuidance);
+    }
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-biggy-focus-guidance]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(window.BiggyVisionFocusGuidance));
+        existing.addEventListener('error', () => reject(new Error('focus_guidance_script_failed')));
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = '/static/vision/focus-guidance.js';
+      s.dataset.biggyFocusGuidance = '1';
+      s.onload = () => resolve(window.BiggyVisionFocusGuidance);
+      s.onerror = () => reject(new Error('focus_guidance_script_failed'));
+      document.head.appendChild(s);
+    });
+  }
+
+  function mountBiggyFocusGuidancePanel(host) {
+    if (!host) return;
+    ensureBiggyFocusGuidanceModule()
+      .then((api) => {
+        if (!biggyVisionSurfacePanel) return;
+        if (biggyVisionSurfaceActive !== 'focus' && biggyVisionSurfaceActive !== 'guidance') return;
+        if (api && typeof api.mount === 'function') api.mount(host);
+      })
+      .catch((err) => {
+        host.innerHTML =
+          '<p class="biggy-vision-idle-note" data-testid="biggy-vision-idle-note">'
+          + 'Focus / Guidance module failed to load.</p>'
+          + `<pre>${String(err && err.message ? err.message : err)}</pre>`;
+      });
+  }
+
   function syncVisionActivityChrome() {
     const toggle = document.getElementById('biggyVision');
     const cam = window.BiggyTdCameraOverlay;
@@ -1496,8 +1532,28 @@
         presItem.classList.remove('is-error-activity');
       }
     }
+    // Keep Overview honest when Camera / Presentation phase changes while open.
+    if (biggyVisionSurfacePanel && biggyVisionSurfaceActive === 'overview') {
+      const list = biggyVisionSurfacePanel.querySelector('[data-testid="biggy-vision-overview-list"]');
+      if (list) {
+        const overviewEntries = [
+          ...BIGGY_VISION_PANELS.slice(0, 2),
+          BIGGY_VISION_CAMERA_ENTRY,
+          BIGGY_VISION_PRESENTATION_ENTRY,
+          ...BIGGY_VISION_PANELS.slice(2),
+        ];
+        list.innerHTML = overviewEntries.map((item) => {
+          const row = visionSenseFor(item.panel);
+          return `<li data-testid="biggy-vision-overview-${item.panel}">`
+            + `<b>${item.label}</b>`
+            + `<span class="biggy-vision-sense-state">${row.state}</span>`
+            + `<small>${row.detail}</small></li>`;
+        }).join('');
+      }
+    }
   }
   window.__biggySyncVisionActivity = syncVisionActivityChrome;
+  window.openBiggyVisionSurface = openBiggyVisionSurface;
 
   function visionSenseFor(panelId) {
     const id = String(panelId || '').trim();
@@ -1519,10 +1575,63 @@
     if (id === 'vision' || id === 'overview') {
       const live = ownerVisionCapabilityCopy(biggyVisionLiveCapability);
       if (id === 'vision') return live;
-      // Overview shows honest capture capability, not a stale disconnected claim.
       return Object.freeze({
         state: live.state,
         detail: live.detail,
+      });
+    }
+    if (id === 'camera') {
+      const cam = window.BiggyTdCameraOverlay;
+      const viewing = !!(cam && typeof cam.isViewing === 'function' && cam.isViewing());
+      return Object.freeze({
+        state: viewing ? 'on' : 'off',
+        detail: viewing
+          ? 'Camera feed is live (image-only lower-left).'
+          : 'Camera feed is off. Open VISION→Camera to start.',
+      });
+    }
+    if (id === 'presentation') {
+      const pres = window.BiggyPresentation;
+      const phase = pres && typeof pres.phase === 'function' ? String(pres.phase() || '') : 'idle';
+      if (pres && typeof pres.isRecording === 'function' && pres.isRecording()) {
+        return Object.freeze({
+          state: 'on',
+          detail: phase === 'finalizing'
+            ? 'Presentation is saving the recording.'
+            : 'Presentation is recording the selected GUI.',
+        });
+      }
+      if (phase === 'failed') {
+        return Object.freeze({
+          state: 'unavailable',
+          detail: (pres.lastStatus && pres.lastStatus()) || 'Presentation error — reopen settings.',
+        });
+      }
+      if (phase === 'saved') {
+        return Object.freeze({
+          state: 'available',
+          detail: 'Last presentation saved. Open VISION→Presentation for playback.',
+        });
+      }
+      return Object.freeze({
+        state: 'off',
+        detail: 'Presentation recording is off (mic stays off until you enable it).',
+      });
+    }
+    if (id === 'focus') {
+      return Object.freeze({
+        state: biggyVisionSurfaceActive === 'focus' ? 'available' : 'off',
+        detail: biggyVisionSurfaceActive === 'focus'
+          ? 'Focus panel is open — capture or intake an image; crop optional.'
+          : 'Focus is idle. Open Focus to capture a window/tab or intake an image.',
+      });
+    }
+    if (id === 'guidance') {
+      return Object.freeze({
+        state: (biggyVisionSurfaceActive === 'guidance' || biggyVisionSurfaceActive === 'focus')
+          ? 'available'
+          : 'off',
+        detail: 'Screen Guidance asks the local vision model about the Focus image. It never clicks or types.',
       });
     }
     return ARGUS_VISION_SENSE_STATES[id] || Object.freeze({
@@ -1551,7 +1660,13 @@
     const stateClass = /^(available|on)$/i.test(sense.state)
       ? 'is-available'
       : (/^(off)$/i.test(sense.state) ? 'is-off' : 'is-unavailable');
-    const overviewRows = BIGGY_VISION_PANELS.map((item) => {
+    const overviewEntries = [
+      ...BIGGY_VISION_PANELS.slice(0, 2),
+      BIGGY_VISION_CAMERA_ENTRY,
+      BIGGY_VISION_PRESENTATION_ENTRY,
+      ...BIGGY_VISION_PANELS.slice(2),
+    ];
+    const overviewRows = overviewEntries.map((item) => {
       const row = visionSenseFor(item.panel);
       return `<li data-testid="biggy-vision-overview-${item.panel}">`
         + `<b>${item.label}</b>`
@@ -1575,6 +1690,11 @@
         `<div class="biggy-gestures-host" data-testid="biggy-gestures-host">`
         + `<p class="biggy-vision-idle-note">Loading gestures…</p>`
         + `</div>`;
+    } else if (active === 'focus' || active === 'guidance') {
+      mainHtml =
+        `<div class="biggy-focus-host" data-testid="biggy-focus-host">`
+        + `<p class="biggy-vision-idle-note">Loading Focus / Guidance…</p>`
+        + `</div>`;
     } else if (active === 'control') {
       mainHtml =
         `<p class="biggy-vision-idle-note" data-testid="biggy-vision-idle-note">`
@@ -1590,6 +1710,15 @@
         if (window.BiggyGestures && typeof window.BiggyGestures.unmount === 'function') {
           window.BiggyGestures.unmount();
         }
+      } catch (_err) { /* ignore */ }
+    }
+    if ((previous === 'focus' || previous === 'guidance')
+        && active !== 'focus' && active !== 'guidance') {
+      try {
+        const api = window.BiggyVisionFocusGuidance;
+        // Soft detach keeps Focus snapshot for return from Overview / sibling panels.
+        if (api && typeof api.detach === 'function') api.detach();
+        else if (api && typeof api.unmount === 'function') api.unmount();
       } catch (_err) { /* ignore */ }
     }
 
@@ -1610,6 +1739,9 @@
     if (active === 'gestures') {
       mountBiggyGesturesPanel(body.querySelector('[data-testid="biggy-gestures-host"]'));
     }
+    if (active === 'focus' || active === 'guidance') {
+      mountBiggyFocusGuidancePanel(body.querySelector('[data-testid="biggy-focus-host"]'));
+    }
     // Refresh live capability into overview/vision copy without blocking first paint.
     refreshBiggyVisionCapability(false).then((cap) => {
       if (!biggyVisionSurfacePanel || biggyVisionSurfaceActive !== active) return;
@@ -1620,7 +1752,13 @@
       if (pill) pill.textContent = next.state;
       const list = panel.querySelector('[data-testid="biggy-vision-overview-list"]');
       if (list && active === 'overview') {
-        list.innerHTML = BIGGY_VISION_PANELS.map((item) => {
+        const overviewEntries = [
+          ...BIGGY_VISION_PANELS.slice(0, 2),
+          BIGGY_VISION_CAMERA_ENTRY,
+          BIGGY_VISION_PRESENTATION_ENTRY,
+          ...BIGGY_VISION_PANELS.slice(2),
+        ];
+        list.innerHTML = overviewEntries.map((item) => {
           const row = visionSenseFor(item.panel);
           return `<li data-testid="biggy-vision-overview-${item.panel}">`
             + `<b>${item.label}</b>`
@@ -1638,6 +1776,13 @@
       try {
         if (window.BiggyGestures && typeof window.BiggyGestures.unmount === 'function') {
           window.BiggyGestures.unmount();
+        }
+      } catch (_err) { /* ignore */ }
+    }
+    if (biggyVisionSurfaceActive === 'focus' || biggyVisionSurfaceActive === 'guidance') {
+      try {
+        if (window.BiggyVisionFocusGuidance && typeof window.BiggyVisionFocusGuidance.unmount === 'function') {
+          window.BiggyVisionFocusGuidance.unmount();
         }
       } catch (_err) { /* ignore */ }
     }

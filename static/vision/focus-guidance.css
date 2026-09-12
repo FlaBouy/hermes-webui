@@ -1,0 +1,41 @@
+.biggy-focus-guidance{
+  display:grid;gap:10px;padding:4px 2px 12px;color:#d7e4ec;
+  font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+.biggy-focus-note{margin:0;color:#8eb4c8}
+.biggy-focus-status{margin:0;color:#75e5b8}
+.biggy-focus-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.biggy-focus-row button,.biggy-focus-file{
+  appearance:none;min-height:34px;padding:6px 10px;cursor:pointer;
+  border:1px solid rgba(148,163,184,.34);border-radius:5px;
+  background:rgba(13,17,23,.9);color:#d7e4ec;font:11px inherit;
+}
+.biggy-focus-file{display:inline-flex;align-items:center}
+.biggy-focus-canvas{
+  width:min(100%,560px);max-height:360px;background:#000;border:1px solid rgba(78,204,163,.35);
+  border-radius:6px;cursor:crosshair;touch-action:none;
+}
+.biggy-focus-meta{display:grid;gap:8px;grid-template-columns:repeat(auto-fit,minmax(180px,1fr))}
+.biggy-focus-meta label{display:grid;gap:4px;color:#8eb4c8}
+.biggy-focus-meta select,.biggy-focus-meta input,textarea[data-testid="biggy-guidance-question"]{
+  box-sizing:border-box;width:100%;min-height:34px;padding:6px 8px;
+  border:1px solid rgba(148,163,184,.34);border-radius:5px;
+  background:#09161f;color:#d7e4ec;font:11px inherit;
+}
+.biggy-focus-evidence{margin:0;padding-left:0;list-style:none;color:#8eb4c8;display:grid;gap:8px}
+.biggy-focus-evidence-item{border:1px solid rgba(78,204,163,.22);border-radius:5px;padding:8px;display:grid;gap:6px}
+.biggy-focus-evidence-actions{display:flex;flex-wrap:wrap;gap:6px}
+.biggy-focus-evidence-actions button{
+  appearance:none;min-height:30px;padding:4px 8px;cursor:pointer;
+  border:1px solid rgba(148,163,184,.34);border-radius:5px;
+  background:rgba(13,17,23,.9);color:#d7e4ec;font:11px inherit;
+}
+.biggy-focus-sep{border:0;border-top:1px solid rgba(78,204,163,.22);margin:4px 0}
+.biggy-guidance-answer{
+  margin:0;padding:8px;min-height:3em;white-space:pre-wrap;word-break:break-word;
+  border:1px solid rgba(78,204,163,.22);border-radius:5px;background:rgba(4,10,16,.7);color:#c9d1d9;
+}
+.biggy-focus-guidance h3{margin:0;color:#75e5b8;font:800 11px/1.2 inherit;letter-spacing:.08em;text-transform:uppercase}
+@media(max-width:760px){
+  .biggy-focus-row button,.biggy-focus-file{min-height:40px}
+}
