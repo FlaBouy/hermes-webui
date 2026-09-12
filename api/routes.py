@@ -12834,6 +12834,11 @@ def handle_get(handler, parsed) -> bool:
     if embed_result is not False:
         return embed_result
 
+    if str(getattr(parsed, "path", "") or "").startswith("/api/td-camera"):
+        from api.td_camera_http import handle_td_camera
+
+        return handle_td_camera(handler, parsed, "GET")
+
     if parsed.path.startswith('/sentinel/'):
         from api.sentinel import handle_get as handle_sentinel_get
         return handle_sentinel_get(handler, parsed)
@@ -15215,6 +15220,16 @@ def handle_post(handler, parsed) -> bool:
         finally:
             if diag:
                 diag.finish()
+
+    if str(getattr(parsed, "path", "") or "").startswith("/api/td-camera"):
+        from api.td_camera_http import handle_td_camera
+
+        try:
+            return handle_td_camera(handler, parsed, "POST")
+        finally:
+            if diag:
+                diag.finish()
+
     if parsed.path == "/api/biggy/pa/visual-plans":
         from api.pa_visual import handle
         return handle(handler, parsed, post=True)

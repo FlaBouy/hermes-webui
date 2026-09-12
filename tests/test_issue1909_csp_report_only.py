@@ -58,7 +58,7 @@ def test_handler_can_skip_report_only_once_for_scoped_embed(monkeypatch):
 def test_csp_report_only_keeps_legacy_inline_allowances_for_current_ui():
     policy = Handler.csp_report_only_policy()
 
-    assert "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net" in policy
+    assert "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.jsdelivr.net" in policy
     assert "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net" in policy
     # unsafe-eval was dropped after Opus stage-339 verification — no production
     # JS uses eval(), new Function(), or string-form setTimeout/setInterval.

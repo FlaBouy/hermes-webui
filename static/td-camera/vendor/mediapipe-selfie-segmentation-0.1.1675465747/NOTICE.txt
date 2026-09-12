@@ -1,0 +1,5 @@
+Package: @mediapipe/selfie_segmentation
+Version: 0.1.1675465747
+License: Apache-2.0
+Source: https://www.npmjs.com/package/@mediapipe/selfie_segmentation
+Pinned: 2026-09-12 for Biggy TD camera producer (local only; no CDN at runtime).
