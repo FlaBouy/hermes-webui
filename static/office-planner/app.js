@@ -1,4 +1,4 @@
-import {mountVisual, mountPhone} from './visual-ui.js?v=whiteboard-20260911-view';
+import {mountVisual, mountPhone} from './visual-ui.js?v=phone-20260912-connect';
 import {mountEvidence} from './evidence-ui.js?v=20260909';
 import {mountSituation} from './situation-ui.js?v=20260909';
 import {actionDrafts,workGaps,suggestWork,meetingBrief} from './work-tools.js?v=meeting-prep-20260909';

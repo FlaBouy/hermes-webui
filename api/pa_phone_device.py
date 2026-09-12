@@ -13,21 +13,34 @@ def adb_path():
     return shutil.which('adb') or (str(candidate) if candidate.is_file() else None)
 
 
-def run(args):
+def run(args, *, check: bool = True):
+    """Run a fixed adb argv list. Soft mode (check=False) is for cleanup only."""
     binary = adb_path()
     if not binary:
         raise ValueError('Android Platform Tools are not installed. Device pairing is required before phone control.')
     result = subprocess.run([binary, *args], capture_output=True, timeout=15, check=False, env={**os.environ, "ADB_LIBUSB": "1"})
-    if result.returncode:
+    if check and result.returncode:
         raise ValueError('Phone command failed. Check that the phone is connected, unlocked and authorized.')
     return result.stdout.decode('utf-8', errors='replace')
 
 
 def devices():
+    """List adb devices. Never raises — always returns a structured connection status."""
     if not adb_path():
         return {'devices': [], 'ready': False, 'detail': 'Install Android Platform Tools and authorize this Mac on the phone. Existing SMS and calling remain available.'}
+    try:
+        listing = run(['devices'])
+    except (ValueError, OSError, subprocess.TimeoutExpired):
+        return {
+            'devices': [],
+            'ready': False,
+            'detail': (
+                'Phone command failed. Check that the phone is connected with a USB data '
+                'cable, unlocked, and authorized for USB debugging, then refresh devices.'
+            ),
+        }
     rows = []
-    for line in run(['devices']).splitlines()[1:]:
+    for line in listing.splitlines()[1:]:
         parts = line.split()
         if len(parts) >= 2:
             rows.append({'id': parts[0], 'state': parts[1]})
@@ -43,6 +56,27 @@ def devices():
     else:
         detail = 'No authorized phone is ready. Check the connection and USB debugging authorization, then refresh devices.'
     return {'devices': rows, 'ready': ready, 'detail': detail}
+
+
+def _cleanup_window_dump(ident: str) -> bool:
+    """Remove the accessibility dump. True if cleanup succeeded; False if residual capture may remain.
+
+    Soft path only — must never raise into a successful read.
+    """
+    binary = adb_path()
+    if not binary:
+        return False
+    try:
+        result = subprocess.run(
+            [binary, '-s', ident, 'shell', 'rm', '-f', '/sdcard/argus-window.xml'],
+            capture_output=True,
+            timeout=15,
+            check=False,
+            env={**os.environ, 'ADB_LIBUSB': '1'},
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
 
 
 def operate(body):
@@ -71,12 +105,14 @@ def operate(body):
         run(['-s', ident, 'shell', 'monkey', '-p', package, '-c', 'android.intent.category.LAUNCHER', '1'])
         return {'detail': 'App launch requested. Read the current screen to verify.'}
     if action == 'read':
+        cleaned = False
         try:
             run(['-s', ident, 'shell', 'uiautomator', 'dump', '/sdcard/argus-window.xml'])
             content = run(['-s', ident, 'shell', 'cat', '/sdcard/argus-window.xml'])
         finally:
             # A failed dump/read can still leave a partial accessibility capture.
-            run(['-s', ident, 'shell', 'rm', '/sdcard/argus-window.xml'])
+            # Cleanup must not turn a successful read into a false connection failure.
+            cleaned = _cleanup_window_dump(ident)
         root = ET.fromstring(content)
         items = []
         for item in root.iter('node'):
@@ -85,9 +121,23 @@ def operate(body):
             text = item.get('text') or item.get('content-desc')
             if text:
                 items.append(text[:1000])
-        return {'text': '\n'.join(dict.fromkeys(items))[:16000], 'detail': 'Current screen only. Text stays in this pane unless you choose to create a task.', 'source': 'Android accessibility tree'}
+        # Additive optional warning only — existing keys/contracts unchanged.
+        payload = {
+            'text': '\n'.join(dict.fromkeys(items))[:16000],
+            'detail': 'Current screen only. Text stays in this pane unless you choose to create a task.',
+            'source': 'Android accessibility tree',
+        }
+        if not cleaned:
+            payload['warning'] = (
+                'Temporary on-device accessibility dump may still remain at '
+                '/sdcard/argus-window.xml after this read. Cleanup failed; remove it on the phone if needed.'
+            )
+            payload['detail'] = (
+                payload['detail']
+                + ' Warning: temporary on-device capture cleanup failed; residual dump may remain.'
+            )
+        return payload
     raise ValueError('Unsupported phone action')
-
 
 def handle(handler, parsed, post=False):
     from api.helpers import j
