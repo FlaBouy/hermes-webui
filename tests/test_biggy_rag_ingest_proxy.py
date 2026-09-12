@@ -64,3 +64,45 @@ def test_biggy_rag_proxy_does_not_claim_unrelated_routes():
 def test_biggy_rag_proxy_rejects_open_proxy_and_folder_escape(path, method, query, error):
     with pytest.raises(error):
         _biggy_rag_proxy_target(parsed(path, query), method)
+
+@pytest.mark.parametrize('kind,name', [('doc','Vendor Data/Allen Bradley/1756/1756-um001_-en-p.pdf'), ('preview','Vendor Data/Honeywell/manual.ocr.txt')])
+def test_corpus_document_route_without_extension(kind, name):
+    from urllib.parse import quote
+    assert _biggy_rag_proxy_target(parsed('/api/biggy/rag/'+kind+'/'+quote(name)), 'GET') == 'http://127.0.0.1:5004/'+kind+'/'+quote(name)
+
+@pytest.mark.parametrize('name', ['../secret', '%2e%2e/secret', '%252e%252e/secret', '/etc/passwd', 'foo%5cbar', 'foo%00bar'])
+def test_corpus_document_rejects_unsafe_paths(name):
+    with pytest.raises(ValueError):
+        _biggy_rag_proxy_target(parsed('/api/biggy/rag/doc/'+name), 'GET')
+
+def test_corpus_document_rejects_method_and_query():
+    with pytest.raises(PermissionError):
+        _biggy_rag_proxy_target(parsed('/api/biggy/rag/doc/manual.pdf'), 'POST')
+    with pytest.raises(ValueError):
+        _biggy_rag_proxy_target(parsed('/api/biggy/rag/doc/manual.pdf', 'url=http://evil'), 'GET')
+
+@pytest.mark.parametrize('trusted', [True, False])
+def test_corpus_document_streams_with_provenance_without_extension(monkeypatch, trusted):
+    import io
+    from api import routes
+    body = b'%PDF-1.4\n' + b'x' * (600 * 1024)
+    class Response(io.BytesIO):
+        status = 200
+        headers = {'Content-Type': 'application/pdf', 'Content-Length': str(len(body))}
+    class Opener:
+        def open(self, request, timeout):
+            assert request.full_url == 'http://127.0.0.1:5004/doc/Vendor%20Data/manual.pdf'
+            return Response(body)
+    monkeypatch.setattr(routes, '_extension_sidecar_proxy_same_origin_opener', lambda origin: Opener())
+    statuses = []
+    handler = SimpleNamespace(
+        headers={'Host':'localhost:8790', 'Referer':('http://localhost:8790/' if trusted else 'http://evil/')},
+        send_response=statuses.append, send_header=lambda *args: None,
+        end_headers=lambda: None, wfile=io.BytesIO(),
+    )
+    assert routes._handle_biggy_rag_sidecar_proxy(handler, parsed('/api/biggy/rag/doc/Vendor%20Data/manual.pdf'), 'GET') is not False
+    assert statuses == [200 if trusted else 403]
+    if trusted:
+        assert handler.wfile.getvalue() == body
+    else:
+        assert b'%PDF' not in handler.wfile.getvalue()

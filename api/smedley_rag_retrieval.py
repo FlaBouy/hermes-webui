@@ -19,7 +19,7 @@ DEFAULT_SNIPPET_CHARS = 220
 MAX_TOPK = 20
 MAX_SNIPPET_CHARS = 2000
 CORPUS_BASE_URL = os.environ.get("CORPUS_URL", "http://192.168.0.15:8789").rstrip("/")
-WEBUI_CORPUS_SIDECAR = "/api/extensions/smedley-engineering/sidecar"
+WEBUI_CORPUS_SIDECAR = "/api/biggy/rag"
 PLATO_UNC_ROOT = os.environ.get(
     "PLATO_UNC_ROOT",
     r"\\192.168.0.25\RAG_Pool\Library",
@@ -88,6 +88,131 @@ def _library_only(body: dict[str, Any]) -> bool:
     if value is not True:
         raise RequestValidationError("only library_only retrieval is supported")
     return True
+
+
+# Failed / quarantined library chunks are excluded. Other quality_state values
+# (verified, needs_review, missing) are returned as stored — never upgraded.
+_LIBRARY_EXCLUDED_QUALITY = frozenset({"failed", "quarantined", "quarantine"})
+
+_LIBRARY_COVERAGE = (
+    "Library excerpts from non-project indexed chunks. "
+    "quality_state is as stored (not upgraded to verified). "
+    "Failed/quarantined chunks excluded. "
+    "Project Review readiness registry is not applied to general library search."
+)
+
+
+def _normalize_source_path(source: object) -> str:
+    raw = str(source or "").strip().replace("\\", "/")
+    while "//" in raw:
+        raw = raw.replace("//", "/")
+    return raw.lstrip("/")
+
+
+def _normalize_quality_token(value: object) -> str:
+    """Lowercase alnum-only token for failed/quarantine variant matching."""
+    return re.sub(r"[^a-z0-9]+", "", str(value or "").strip().lower())
+
+
+def _quality_excluded(value: object) -> bool:
+    token = _normalize_quality_token(value)
+    if not token:
+        return False
+    if token in {_normalize_quality_token(v) for v in _LIBRARY_EXCLUDED_QUALITY}:
+        return True
+    if token.startswith("quarantine") or token.endswith("quarantine"):
+        return True
+    if token == "failed" or token.startswith("failed") or token.endswith("failed"):
+        return True
+    return False
+
+
+def _excluded_quality_match_values() -> list[str]:
+    """Values for Qdrant keyword must_not (case variants of excluded states)."""
+    out: set[str] = set()
+    for v in _LIBRARY_EXCLUDED_QUALITY:
+        out.add(v)
+        out.add(v.lower())
+        out.add(v.upper())
+        out.add(v.capitalize())
+    return sorted(out)
+
+
+def _project_metadata_nonempty(payload: dict[str, Any]) -> bool:
+    """True when payload carries a nonempty project field (any type)."""
+    if "project" not in payload:
+        return False
+    proj = payload.get("project")
+    if proj is None:
+        return False
+    if isinstance(proj, bool):
+        return True
+    if isinstance(proj, (int, float)) and not isinstance(proj, bool):
+        return True
+    if isinstance(proj, str):
+        return bool(proj.strip())
+    if isinstance(proj, (list, tuple, set, dict)):
+        return len(proj) > 0
+    return bool(proj)
+
+
+def library_qdrant_filter() -> dict[str, Any]:
+    """Operational general-library Qdrant filter (not Project Review readiness).
+
+    Pre-readiness contract and August 2026 retrieve backups: library_only means
+    ``is_empty(project)`` only. Project Review ``active_filter`` / READY
+    generations must not gate the whole vendor library.
+    """
+    return {
+        "must": [{"is_empty": {"key": "project"}}],
+        "must_not": [
+            {
+                "key": "quality_state",
+                "match": {"any": _excluded_quality_match_values()},
+            }
+        ],
+    }
+
+
+def library_hit_allowed(payload: dict[str, Any]) -> bool:
+    """Post-filter for library hits — exclude failed and any project-scoped chunk."""
+    if not isinstance(payload, dict):
+        return False
+    if _quality_excluded(payload.get("quality_state")):
+        return False
+    if _project_metadata_nonempty(payload):
+        return False
+    source = _normalize_source_path(payload.get("source"))
+    if not source or source == "?":
+        return False
+    if source.lower().startswith("projects/"):
+        return False
+    return bool(str(payload.get("text") or "").strip())
+
+
+def library_hit_identity(hit: dict[str, Any]) -> str:
+    """Stable dedupe key: point id, else chunk_id, else source+page+text.
+
+    Legacy library points often lack ``chunk_id``; using only that field collapses
+    distinct hits under ``None``.
+    """
+    if not isinstance(hit, dict):
+        return "invalid:"
+    point_id = hit.get("id")
+    if point_id is not None and str(point_id).strip() != "":
+        return f"id:{point_id}"
+    payload = hit.get("payload") if isinstance(hit.get("payload"), dict) else {}
+    chunk_id = payload.get("chunk_id")
+    if chunk_id is not None and str(chunk_id).strip() != "":
+        return f"chunk:{chunk_id}"
+    source = _normalize_source_path(payload.get("source"))
+    page = payload.get("pdf_page")
+    if isinstance(page, bool) or not isinstance(page, (int, float)):
+        page_s = ""
+    else:
+        page_s = str(int(page))
+    text = re.sub(r"\s+", " ", str(payload.get("text") or "")).strip()[:500]
+    return f"fb:{source}|{page_s}|{text}"
 
 
 def _spec_tokens(query: str) -> set[str]:
@@ -377,21 +502,21 @@ def build_retrieve_response(
         ranked = []
         seen_sources = set()
 
-    from api.argus_review_contract import active_filter, filter_hits
-
-    try:
-        eligibility_filter = active_filter(collection)
-    except RuntimeError:
-        return {"matches": [], "collection": collection, "readiness": "NEEDS_REVIEW", "reason": "Shared readiness registry unavailable"}
+    # General library semantic path — do NOT apply Project Review readiness
+    # (active_filter / READY generation). That registry gates project grounding
+    # only (see project_folder → project_matches). Historical library retrieve
+    # used is_empty(project) alone; readiness bolt-on emptied whole-library
+    # discovery while 241k+ non-project vectors remained indexed.
     vectors = embed_fn([expanded])
     if not vectors:
         raise RuntimeError("embedding service returned no vector")
 
+    lib_filter = library_qdrant_filter()
     search_body = {
         "vector": vectors[0],
         "limit": max(topk * 3, topk),
         "with_payload": True,
-        "filter": {"must": [{"is_empty": {"key": "project"}}, *eligibility_filter["must"]]},
+        "filter": lib_filter,
     }
     result = qd_fn(f"/collections/{collection}/points/search", search_body)
     hits = result.get("result", []) if isinstance(result, dict) else []
@@ -406,9 +531,10 @@ def build_retrieve_response(
                 {
                     "filter": {
                         "must": [
-                            {"is_empty": {"key": "project"}},
+                            *lib_filter["must"],
                             {"key": "source", "match": {"text": tok}},
-                        ]
+                        ],
+                        "must_not": list(lib_filter.get("must_not") or []),
                     },
                     "limit": max(topk, 8),
                     "with_payload": True,
@@ -420,17 +546,27 @@ def build_retrieve_response(
         if not isinstance(points, list):
             continue
         for point in points:
-            # Fake a vector-hit shape so the merge loop is uniform.
-            hits.append({"score": 0.82, "payload": point.get("payload") or {}})
+            # Preserve point id for dedupe; legacy payloads often lack chunk_id.
+            hits.append(
+                {
+                    "id": point.get("id"),
+                    "score": 0.82,
+                    "payload": point.get("payload") or {},
+                }
+            )
 
-    seen_chunks = set()
-    for hit in filter_hits(hits, collection):
+    seen_chunks: set[str] = set()
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
         payload = hit.get("payload") or {}
-        source = str(payload.get("source") or "?")
-        identity = payload.get("chunk_id")
+        if not library_hit_allowed(payload):
+            continue
+        identity = library_hit_identity(hit)
         if identity in seen_chunks:
             continue
         seen_chunks.add(identity)
+        source = _normalize_source_path(payload.get("source")) or "?"
         # When TDC index already answered a part-number query, do not let
         # semantic near-family / wrong-product PDFs outrank or dilute it.
         if tdc_matches:
@@ -450,14 +586,29 @@ def build_retrieve_response(
             "lan_url": f"{CORPUS_BASE_URL}/{urllib.parse.quote(source.lstrip('/'), safe='/')}",
             "score": round(base + _source_bonus(source, tokens), 6),
         }
-        for key in ("source_hash", "source_version", "generation", "pdf_page", "printed_page", "chunk_id", "quality_state", "extraction_method", "items"):
+        for key in (
+            "source_hash",
+            "source_version",
+            "generation",
+            "pdf_page",
+            "printed_page",
+            "chunk_id",
+            "quality_state",
+            "extraction_method",
+            "items",
+        ):
             match[key] = payload.get(key)
         match["support_text"] = str(payload.get("text") or "")
         ranked.append(match)
 
     ranked.sort(key=lambda m: m.get("score", 0.0), reverse=True)
     ranked = _enrich_wiring_figure_packets(query, ranked)
-    out: dict[str, Any] = {"matches": ranked[:topk], "collection": collection}
+    out: dict[str, Any] = {
+        "matches": ranked[:topk],
+        "collection": collection,
+        "coverage": _LIBRARY_COVERAGE,
+        "retrieval": "library_semantic",
+    }
     if tdc_matches:
         out["retrieval"] = "tdc3000_custom_index"
     return out

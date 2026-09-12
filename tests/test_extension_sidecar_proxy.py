@@ -723,6 +723,77 @@ def test_extension_sidecar_proxy_get_allows_top_level_navigation_provenance(monk
     assert json.loads(handler.body.decode("utf-8")) == {"ok": True}
 
 
+def test_extension_sidecar_proxy_get_allows_same_origin_referer_without_origin(monkeypatch):
+    """Owner Chrome Open-source click: top-level nav sends Referer, often no Origin.
+
+    Matches Workspace links with rel=noopener + referrerPolicy=same-origin
+    (noreferrer would omit Referer and fail require_provenance).
+    """
+    from api import routes
+
+    payload = b"%PDF-1.4 fixture"
+
+    class FakeResponse:
+        def __init__(self):
+            self.status = 200
+            self.headers = {
+                "Content-Type": "application/pdf",
+                "Content-Length": str(len(payload)),
+            }
+            self._buf = io.BytesIO(payload)
+
+        def read(self, size=-1):
+            return self._buf.read(size)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    class FakeOpener:
+        def open(self, request, timeout=10):
+            return FakeResponse()
+
+    monkeypatch.setattr(
+        "api.extensions.resolve_extension_sidecar_proxy_target",
+        lambda extension_id, proxy_path, query="": {
+            "extension_id": extension_id,
+            "origin": "http://127.0.0.1:17787",
+            "proxy_path": "/api/extensions/smedley-engineering/sidecar/",
+            "upstream_url": "http://127.0.0.1:17787/doc/x.pdf",
+        },
+    )
+    monkeypatch.setattr(
+        routes,
+        "_extension_sidecar_proxy_same_origin_opener",
+        lambda allowed_origin: FakeOpener(),
+    )
+
+    handler = FakeHandler()
+    handler.headers = {
+        "Host": "127.0.0.1:8790",
+        "Referer": "http://127.0.0.1:8790/biggy-workspace/",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Fetch-Mode": "navigate",
+        "Sec-Fetch-Dest": "document",
+    }
+
+    result = routes.handle_get(
+        handler,
+        SimpleNamespace(
+            path=(
+                "/api/extensions/smedley-engineering/sidecar/doc/"
+                "Vendor%20Data/Allen%20Bradley/1756/1756-um001_-en-p.pdf"
+            ),
+            query="",
+        ),
+    )
+    assert result is True
+    assert handler.status == 200
+    assert handler.body.startswith(b"%PDF")
+
+
 def test_extension_sidecar_proxy_route_rejects_oversized_upstream_response(monkeypatch):
     from api import routes
 

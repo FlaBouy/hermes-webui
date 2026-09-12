@@ -655,9 +655,16 @@ def test_rag_search_fulfilled_on_smedley_not_forwarded_to_plato(upstream, monkey
                             "score": 0.9,
                             "pdf_page": 2,
                             "source_hash": "abc",
+                            "url": (
+                                "/api/biggy/rag/doc/"
+                                "library/demo.pdf"
+                            ),
                         }
                     ],
-                    "coverage": "Indexed excerpts only.",
+                    "coverage": (
+                        "library_semantic quality_state passthrough; "
+                        "registry/is_empty; not upgraded to verified"
+                    ),
                     "collection": "library",
                 }
                 raw = json.dumps(sidecar_payload).encode("utf-8")
@@ -689,6 +696,12 @@ def test_rag_search_fulfilled_on_smedley_not_forwarded_to_plato(upstream, monkey
     assert payload.get("state") == "ok"
     assert payload["result"]["endpoint_kind"] == "hermes_localhost_retrieve"
     assert payload["result"]["citations"][0]["source"] == "library/demo.pdf"
+    assert payload["result"]["citations"][0]["url"] == (
+        "/api/biggy/rag/doc/library/demo.pdf#page=2"
+    )
+    assert "Found 1 matching library source" in payload["result"]["answer"]
+    assert "quality_state" not in payload["result"]["answer"]
+    assert "Verified excerpt for owner Library search" not in payload["result"]["answer"]
     assert payload["result"]["freshness"]["state"] == "unknown"
     assert payload["result"]["freshness"]["observed_at"] is None
     assert payload["result"]["retrieved_at"]
@@ -790,3 +803,48 @@ def test_rag_search_index_freshness_from_indexed_at_only(upstream, monkeypatch):
     assert payload["result"]["freshness"]["state"] == "fresh"
     assert payload["result"]["freshness"]["observed_at"] == "2099-01-01T00:00:00Z"
     assert payload["result"]["retrieved_at"] != "2099-01-01T00:00:00Z"
+
+
+def test_safe_corpus_open_url_allowlist_rejects_arbitrary():
+    doc = "/api/biggy/rag/doc/Vendor%20Data/x.pdf"
+    assert embed._safe_corpus_open_url(doc, page=3) == f"{doc}#page=3"
+    assert embed._safe_corpus_open_url(
+        "/api/biggy/rag/preview/a.txt"
+    ) == "/api/biggy/rag/preview/a.txt"
+    assert embed._safe_corpus_open_url("https://evil.example/x") is None
+    assert embed._safe_corpus_open_url("//evil.example/x") is None
+    assert embed._safe_corpus_open_url("/api/other/sidecar/doc/x.pdf") is None
+    assert (
+        embed._safe_corpus_open_url(
+            "/api/biggy/rag/doc/../secret"
+        )
+        is None
+    )
+    cites = embed._normalize_library_citations(
+        [
+            {
+                "source": "library/a.pdf",
+                "snippet": "body",
+                "pdf_page": 1,
+                "url": "javascript:alert(1)",
+            },
+            {
+                "source": "library/b.pdf",
+                "snippet": "body2",
+                "pdf_page": 9,
+                "url": "/api/biggy/rag/doc/library/b.pdf",
+            },
+        ]
+    )
+    assert cites[0]["url"] is None
+    assert cites[1]["url"].endswith("#page=9")
+    answer = embed._answer_from_citations(
+        cites,
+        coverage="quality_state registry is_empty not upgraded to verified",
+    )
+    assert "quality_state" not in answer
+    assert "body2" not in answer
+
+
+def test_legacy_sidecar_citation_is_mapped_to_current_biggy_route():
+    assert embed._safe_corpus_open_url('/api/extensions/smedley-engineering/sidecar/doc/Vendor%20Data/manual.pdf', page=2) == '/api/biggy/rag/doc/Vendor%20Data/manual.pdf#page=2'

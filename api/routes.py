@@ -6288,6 +6288,17 @@ def _biggy_rag_proxy_target(parsed, method: str) -> str | None:
         return None
     endpoint = path[len(_BIGGY_RAG_PROXY_PREFIX):]
     verb = str(method or "").upper()
+    if endpoint.startswith(("doc/", "preview/")):
+        if verb != "GET":
+            raise PermissionError("method not allowed")
+        kind, encoded = endpoint.split("/", 1)
+        rel = unquote(encoded)
+        if (getattr(parsed, "query", "") or len(rel) > 4096
+                or any(ord(c) < 32 for c in rel)
+                or any(c in rel for c in ("\\", "%", ":"))
+                or any(part in {"", ".", ".."} for part in rel.split("/"))):
+            raise ValueError("invalid corpus document path")
+        return f"{_BIGGY_RAG_SIDECAR_ORIGIN}/{kind}/{quote(rel, safe='/')}"
     if endpoint not in _BIGGY_RAG_ALLOWED_METHODS:
         raise ValueError("unsupported Biggy RAG operation")
     if verb not in _BIGGY_RAG_ALLOWED_METHODS[endpoint]:
@@ -6341,12 +6352,21 @@ def _handle_biggy_rag_sidecar_proxy(
         status = 413 if "too large" in str(exc).lower() else 400
         return bad(handler, str(exc), status=status)
 
+    is_document = parsed.path.startswith((
+        _BIGGY_RAG_PROXY_PREFIX + "doc/", _BIGGY_RAG_PROXY_PREFIX + "preview/",
+    ))
+    if is_document and not _check_same_origin_browser_request(handler, require_provenance=True):
+        return j(handler, {"error": _csrf_rejection_error(handler)}, status=403)
     proxied_headers = _extension_sidecar_proxy_request_headers(handler)
     request = Request(target, data=request_body, headers=proxied_headers, method=method)
     opener = _extension_sidecar_proxy_same_origin_opener(_BIGGY_RAG_SIDECAR_ORIGIN)
     proxy_timeout = 10
     try:
         with opener.open(request, timeout=proxy_timeout) as response:
+            if is_document:
+                return _send_extension_sidecar_proxy_stream(
+                    handler, getattr(response, "status", 200), response, response.headers,
+                )
             body = _read_extension_sidecar_proxy_body(response)
             return _send_extension_sidecar_proxy_response(
                 handler,

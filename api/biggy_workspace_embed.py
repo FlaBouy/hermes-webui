@@ -270,6 +270,44 @@ def _read_bounded(resp: Any, limit: int, *, deadline: float) -> bytes:
     return bytes(buf)
 
 
+def _safe_corpus_open_url(url: Any, *, page: Any = None) -> str | None:
+    """Allow only same-origin Hermes corpus doc/preview paths (no arbitrary URLs)."""
+    if not isinstance(url, str):
+        return None
+    raw = url.strip()
+    if not raw or "://" in raw or raw.startswith("//") or "\\" in raw or "\x00" in raw:
+        return None
+    if not raw.startswith("/"):
+        return None
+    # The live sidecar also emits historical URLs; normalize only this exact
+    # legacy prefix before applying the current route allowlist below.
+    legacy = "/api/extensions/smedley-engineering/sidecar/"
+    if raw.startswith(legacy):
+        raw = "/api/biggy/rag/" + raw[len(legacy):]
+    path = raw.split("?", 1)[0].split("#", 1)[0]
+    if any(part == ".." for part in path.split("/")):
+        return None
+    prefixes = (
+        "/api/biggy/rag/doc/",
+        "/api/biggy/rag/preview/",
+    )
+    if not any(path.startswith(p) for p in prefixes):
+        return None
+    rest = ""
+    for prefix in prefixes:
+        if path.startswith(prefix):
+            rest = path[len(prefix) :]
+            break
+    if not rest or rest.startswith("/") or ".." in rest:
+        return None
+    out = path
+    if type(page) in (int, float) and not isinstance(page, bool):
+        n = int(page)
+        if n >= 1:
+            out = f"{path}#page={n}"
+    return out
+
+
 def _normalize_library_citations(matches: Any) -> list[dict[str, Any]]:
     """Normalize sidecar ``matches`` from api.smedley_rag_retrieval only."""
     out: list[dict[str, Any]] = []
@@ -285,18 +323,29 @@ def _normalize_library_citations(matches: Any) -> list[dict[str, Any]]:
         page = raw.get("pdf_page")
         if page is not None and type(page) not in (int, float):
             page = None
+        else:
+            page = int(page) if page is not None else None
         score = raw.get("score")
         if score is not None and type(score) not in (int, float):
             score = None
+        open_url = _safe_corpus_open_url(raw.get("url"), page=page)
         out.append(
             {
                 "source": source[:500],
                 "snippet": snippet[:4000],
                 "score": float(score) if score is not None else None,
-                "page": int(page) if page is not None else None,
+                "page": page,
                 "source_hash": str(raw.get("source_hash") or "")[:128] or None,
                 "generation": str(raw.get("generation") or "")[:128] or None,
                 "chunk_id": str(raw.get("chunk_id") or "")[:128] or None,
+                # As stored — never upgraded to verified by the embed layer.
+                "quality_state": (
+                    str(raw.get("quality_state")).strip()[:64]
+                    if raw.get("quality_state") is not None
+                    and str(raw.get("quality_state")).strip()
+                    else None
+                ),
+                "url": open_url,
             }
         )
     return out
@@ -335,17 +384,43 @@ def _index_freshness(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _plain_owner_coverage(coverage: str) -> str:
+    text = str(coverage or "").strip()
+    if not text:
+        return ""
+    lowered = text.lower()
+    if any(
+        tok in lowered
+        for tok in (
+            "quality_state",
+            "registry",
+            "is_empty",
+            "library_semantic",
+            "project review readiness",
+            "not upgraded to verified",
+        )
+    ):
+        return (
+            "Excerpts come from the engineering library. "
+            "Each citation shows how confident the stored extraction is."
+        )
+    if "synthetic" in lowered or "fixture" in lowered:
+        return ""
+    return text[:500]
+
+
 def _answer_from_citations(citations: list[dict[str, Any]], *, coverage: str) -> str:
     if not citations:
         return "No matching library excerpts were found."
-    lines = ["Here are matching library excerpts:"]
-    if coverage:
-        lines.append(coverage[:500])
-    for i, c in enumerate(citations, start=1):
-        page = f", page {c['page']}" if c.get("page") is not None else ""
-        lines.append(f"{i}. {c['source']}{page}")
-        lines.append(c["snippet"][:500])
-    return "\n".join(lines)[:16_000]
+    lines = [
+        f"Found {len(citations)} matching library source(s). "
+        "Open a citation below to view the original."
+    ]
+    plain = _plain_owner_coverage(coverage)
+    if plain:
+        lines.append(plain)
+    # Do not duplicate full citation snippets here — the citation list owns that.
+    return "\n".join(lines)[:2_000]
 
 
 def _rag_command_payload(
