@@ -12,11 +12,12 @@
     if (url.pathname.startsWith(oldRoot)) url.pathname = '/api/biggy/rag/' + url.pathname.slice(oldRoot.length);
     const path = url.pathname;
     const evidenceOk = /^\/(?:biggy-workspace\/)?api\/v1\/evidence\/ev_[A-Za-z0-9]+\/(?:original(?:\.(?:png|jpe?g|webp))?|analysis(?:\.txt)?)$/.test(path);
-    if (!evidenceOk &&
+    const presentationOk = /^\/api\/presentation\/file\/prv_[A-Za-z0-9_-]+$/.test(path);
+    if (!evidenceOk && !presentationOk &&
         !/^\/api\/biggy\/rag\/(doc|preview)\//.test(path) &&
         !/^\/api\/biggy\/rag-file(?:-path\/|$)/.test(path) &&
         !path.startsWith('/api/jarvis-ii/rag-document/') &&
-        !/\.(pdf|txt|docx?|rtf|xlsx?|pptx?|png|jpe?g|webp|gif)(?:$)/i.test(path)) return null;
+        !/\.(pdf|txt|docx?|rtf|xlsx?|pptx?|png|jpe?g|webp|gif|mp4|webm)(?:$)/i.test(path)) return null;
     return url.href;
   }
   const style = document.createElement('style');
@@ -51,8 +52,17 @@
     const close = document.createElement('button'); close.type = 'button'; close.className = 'biggy-document-close'; close.textContent = 'Close document';
     const frame = document.createElement('iframe'); frame.className = 'biggy-document-frame'; frame.title = heading.textContent; frame.referrerPolicy = 'same-origin';
     if(new URL(url).pathname.includes('/preview/')) frame.setAttribute('sandbox','allow-same-origin');
+    const isPresentationVideo = /^\/api\/presentation\/file\//.test(new URL(url).pathname);
+    let media = frame;
+    if (isPresentationVideo) {
+      media = document.createElement('video');
+      media.className = 'biggy-document-frame';
+      media.controls = true;
+      media.playsInline = true;
+      media.setAttribute('data-testid', 'biggy-presentation-video');
+    }
     const resize = document.createElement('button'); resize.type = 'button'; resize.className = 'biggy-document-resize'; resize.textContent = '↘'; resize.setAttribute('aria-label','Resize document window');
-    header.append(heading,close); panel.append(header,frame,resize);
+    header.append(heading,close); panel.append(header,media,resize);
     const viewport = () => ({w:window.innerWidth,h:window.innerHeight});
     let box = {x:40+viewers.size*24,y:40+viewers.size*24,w:Math.min(1000,innerWidth-80),h:Math.min(760,innerHeight-80)};
     let drag = null;
@@ -62,11 +72,11 @@
       Object.assign(panel.style,{left:box.x+'px',top:box.y+'px',width:box.w+'px',height:box.h+'px'});
     }
     function raise(){panel.style.zIndex=String(++layer);}
-    function finish(){drag=null;frame.style.pointerEvents='';}
+    function finish(){drag=null;media.style.pointerEvents='';}
     function start(event,mode){
       if(event.button!==0 || event.target.closest('.biggy-document-close'))return;
       raise();drag={mode,x:event.clientX,y:event.clientY,box:{...box},id:event.pointerId};
-      event.currentTarget.setPointerCapture(event.pointerId);frame.style.pointerEvents='none';event.preventDefault();
+      event.currentTarget.setPointerCapture(event.pointerId);media.style.pointerEvents='none';event.preventDefault();
     }
     function move(event){if(!drag||drag.id!==event.pointerId)return; const dx=event.clientX-drag.x,dy=event.clientY-drag.y;
       box={...drag.box}; if(drag.mode==='move'){box.x+=dx;box.y+=dy;}else{box.w+=dx;box.h+=dy;}layout();}
@@ -76,10 +86,17 @@
       handle.addEventListener('keydown',e=>{const delta={ArrowLeft:[-20,0],ArrowRight:[20,0],ArrowUp:[0,-20],ArrowDown:[0,20]}[e.key];if(!delta)return;
         e.preventDefault();if(mode==='move'){box.x+=delta[0];box.y+=delta[1];}else{box.w+=delta[0];box.h+=delta[1];}layout();});
     }
-    function remove(){finish();window.removeEventListener('resize',layout);viewers.delete(panel);frame.src='about:blank';panel.remove();try{opener?.focus({preventScroll:true});}catch(_){}}
+    function remove(){
+      finish();window.removeEventListener('resize',layout);viewers.delete(panel);
+      if (media.tagName === 'VIDEO') { try { media.pause(); media.removeAttribute('src'); media.load(); } catch (_) {} }
+      else { media.src = 'about:blank'; }
+      panel.remove();try{opener?.focus({preventScroll:true});}catch(_){}
+    }
     close.addEventListener('click',remove);panel.addEventListener('keydown',e=>{if(e.key==='Escape'){e.stopPropagation();remove();}});
     panel.addEventListener('pointerdown',raise);window.addEventListener('resize',layout);
-    (document.fullscreenElement||document.body).append(panel);viewers.add(panel);raise();layout();frame.src=url;close.focus({preventScroll:true});
+    (document.fullscreenElement||document.body).append(panel);viewers.add(panel);raise();layout();
+    media.src = url;
+    close.focus({preventScroll:true});
     return true;
   }
   window.BiggyDocumentViewer = {open};

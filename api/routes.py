@@ -12839,6 +12839,11 @@ def handle_get(handler, parsed) -> bool:
 
         return handle_td_camera(handler, parsed, "GET")
 
+    if str(getattr(parsed, "path", "") or "").startswith("/api/presentation"):
+        from api.presentation_http import handle_presentation
+
+        return handle_presentation(handler, parsed, "GET")
+
     if parsed.path.startswith('/sentinel/'):
         from api.sentinel import handle_get as handle_sentinel_get
         return handle_sentinel_get(handler, parsed)
@@ -15226,6 +15231,15 @@ def handle_post(handler, parsed) -> bool:
 
         try:
             return handle_td_camera(handler, parsed, "POST")
+        finally:
+            if diag:
+                diag.finish()
+
+    if str(getattr(parsed, "path", "") or "").startswith("/api/presentation"):
+        from api.presentation_http import handle_presentation
+
+        try:
+            return handle_presentation(handler, parsed, "POST")
         finally:
             if diag:
                 diag.finish()

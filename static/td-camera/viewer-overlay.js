@@ -35,17 +35,20 @@
   }
 
   function ensureStyle() {
-    if (styleReady) return;
+    if (styleReady) return Promise.resolve();
     if (document.getElementById("biggy-td-camera-overlay-css")) {
       styleReady = true;
-      return;
+      return Promise.resolve();
     }
-    const link = document.createElement("link");
-    link.id = "biggy-td-camera-overlay-css";
-    link.rel = "stylesheet";
-    link.href = "/static/td-camera/viewer-overlay.css";
-    document.head.appendChild(link);
-    styleReady = true;
+    return new Promise((resolve) => {
+      const link = document.createElement("link");
+      link.id = "biggy-td-camera-overlay-css";
+      link.rel = "stylesheet";
+      link.href = "/static/td-camera/viewer-overlay.css";
+      link.onload = () => { styleReady = true; resolve(); };
+      link.onerror = () => { styleReady = true; resolve(); };
+      document.head.appendChild(link);
+    });
   }
 
   async function ensureComposite() {
@@ -65,11 +68,27 @@
   }
 
   function composerTop() {
+    // Prefer the visible message composer box — #composerWrap includes reactor
+    // chrome and would place the overlay too high.
+    const box = document.getElementById("composerBox");
     const wrap = document.getElementById("composerWrap")
       || document.querySelector(".composer-wrap");
-    if (!wrap) return window.innerHeight - 160;
-    const r = wrap.getBoundingClientRect();
-    return Math.max(120, Math.round(r.top));
+    const fallback = Math.max(120, window.innerHeight - 168);
+    if (!box) return fallback;
+    const br = box.getBoundingClientRect();
+    if (!(br.height >= 24) || !(br.bottom > 0)) return fallback;
+    // Message composer lives in the lower viewport; reject a mis-targeted box.
+    if (br.top < window.innerHeight * 0.35 && (!wrap || br.height < 40)) {
+      return fallback;
+    }
+    if (wrap) {
+      const wr = wrap.getBoundingClientRect();
+      // When wrap is a tall reactor+composer band, always use the message box top.
+      if (wr.height > br.height * 1.5) {
+        return Math.max(120, Math.round(br.top));
+      }
+    }
+    return Math.max(120, Math.round(br.top));
   }
 
   function clampRect(left, top, width, height) {
@@ -496,7 +515,6 @@
   }
 
   function open() {
-    ensureStyle();
     installGlobal();
     if (shell) {
       applyRect(clampRect(
@@ -510,7 +528,9 @@
     }
     shell = buildShell();
     document.body.appendChild(shell);
-    applyRect(defaultRect());
+    const place = () => applyRect(defaultRect());
+    place();
+    ensureStyle().then(place);
     const backdrop = shell.querySelector("#biggy-td-camera-backdrop");
     if (backdrop) backdrop.value = "off";
     setMode("Camera ready");

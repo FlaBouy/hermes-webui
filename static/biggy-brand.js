@@ -64,9 +64,14 @@
   ]);
   // Camera opens an independent lower-left overlay (not the centered Vision surface).
   const BIGGY_VISION_CAMERA_ENTRY = Object.freeze({ label: 'Camera', panel: 'camera' });
+  const BIGGY_VISION_PRESENTATION_ENTRY = Object.freeze({
+    label: 'Presentation',
+    panel: 'presentation',
+  });
   const BIGGY_VISION_MENU_ENTRIES = Object.freeze([
     ...BIGGY_VISION_PANELS.slice(0, 2),
     BIGGY_VISION_CAMERA_ENTRY,
+    BIGGY_VISION_PRESENTATION_ENTRY,
     ...BIGGY_VISION_PANELS.slice(2),
   ]);
   const BIGGY_VISION_PANEL_IDS = Object.freeze(
@@ -79,7 +84,7 @@
   const ARGUS_VISION_SENSE_STATES = Object.freeze({
     overview: Object.freeze({
       state: 'available',
-      detail: 'Vision controls are ready. Select Visual Capture for intake/analyze, or Camera for ThunderDome preview.',
+      detail: 'Vision controls are ready. Select Visual Capture for intake/analyze, Camera for ThunderDome preview, or Presentation to record the desktop GUI.',
     }),
     vision: Object.freeze({
       state: 'available',
@@ -1380,6 +1385,33 @@
       .catch(() => { /* fail closed; Start path reports errors inside overlay */ });
   }
 
+  function ensureBiggyPresentationModule() {
+    if (window.BiggyPresentation) return Promise.resolve(window.BiggyPresentation);
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-biggy-presentation]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(window.BiggyPresentation));
+        existing.addEventListener('error', () => reject(new Error('presentation_script_failed')));
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = '/static/presentation/recorder.js';
+      s.dataset.biggyPresentation = '1';
+      s.onload = () => resolve(window.BiggyPresentation);
+      s.onerror = () => reject(new Error('presentation_script_failed'));
+      document.head.appendChild(s);
+    });
+  }
+
+  function openBiggyPresentationPanel() {
+    // Opening the menu/panel does not capture — On starts recording only.
+    ensureBiggyPresentationModule()
+      .then((api) => {
+        if (api && typeof api.open === 'function') api.open();
+      })
+      .catch(() => {});
+  }
+
   function visionSenseFor(panelId) {
     const id = String(panelId || '').trim();
     if (id === 'vision' || id === 'overview') {
@@ -1499,6 +1531,10 @@
     const id = String(panelId || '').trim();
     if (id === 'camera') {
       openBiggyTdCameraOverlay();
+      return;
+    }
+    if (id === 'presentation') {
+      openBiggyPresentationPanel();
       return;
     }
     if (!BIGGY_VISION_PANEL_IDS.includes(id)) return;
