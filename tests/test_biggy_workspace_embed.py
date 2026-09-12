@@ -268,6 +268,8 @@ def test_embed_response_headers_allow_same_origin_framing_only(upstream):
     assert handler.sent_headers.get("referrer-policy") == "strict-origin"
     assert "permissions-policy" in handler.sent_headers
     assert "camera=()" in handler.sent_headers["permissions-policy"]
+    assert "display-capture=(self)" in handler.sent_headers["permissions-policy"]
+    assert "microphone=()" not in handler.sent_headers["permissions-policy"]
 
     csp = handler.sent_headers.get("content-security-policy") or ""
     assert "frame-ancestors 'self'" in csp
@@ -848,3 +850,84 @@ def test_safe_corpus_open_url_allowlist_rejects_arbitrary():
 
 def test_legacy_sidecar_citation_is_mapped_to_current_biggy_route():
     assert embed._safe_corpus_open_url('/api/extensions/smedley-engineering/sidecar/doc/Vendor%20Data/manual.pdf', page=2) == '/api/biggy/rag/doc/Vendor%20Data/manual.pdf#page=2'
+
+
+def test_vision_capability_fulfill_is_smedley_local_chat():
+    status, body, ctype = embed._fulfill_vision_capability_on_smedley()
+    assert status == 200
+    assert ctype == "application/json"
+    payload = json.loads(body.decode("utf-8"))
+    cap = payload["capability"]
+    assert cap["endpoint_kind"] == "local_chat_completions"
+    assert cap["model"] == embed._VISION_LMSTUDIO_MODEL
+    assert cap["verified"] is False
+    assert "Local analysis is configured but not yet tested" in cap["detail"]
+    assert "owner_summary" in cap
+    assert "diagnostics" in cap
+    assert "127.0.0.1" not in cap["detail"]
+    assert "reasoning_effort" not in cap["detail"]
+
+
+def test_vision_analyze_fulfill_uses_chat_completions_not_plato_loopback(monkeypatch):
+    """Hermes fulfill posts multimodal chat to injectable LM base; never /v1/vision."""
+    import base64
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    import threading
+
+    captured = {}
+    png = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+    )
+
+    class Handler(BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+
+        def log_message(self, fmt, *args):
+            return
+
+        def do_POST(self):
+            length = int(self.headers.get("Content-Length", "0"))
+            raw = self.rfile.read(length)
+            captured["path"] = self.path
+            captured["json"] = json.loads(raw.decode("utf-8"))
+            body = json.dumps(
+                {
+                    "model": "mock-vlm",
+                    "choices": [{"message": {"content": "hermes-vision-ok"}}],
+                }
+            ).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    host, port = server.server_address[:2]
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        monkeypatch.setattr(embed, "_VISION_LMSTUDIO_BASE", f"http://{host}:{port}")
+        monkeypatch.setattr(embed, "_VISION_LMSTUDIO_MODEL", "qwen/qwen3.5-35b-a3b")
+        req_body = json.dumps(
+            {
+                "content_type": "image/png",
+                "image_base64": base64.b64encode(png).decode("ascii"),
+                "prompt": "ping",
+                "source": "test",
+                "captured_at": "2026-09-12T17:00:00Z",
+                "host": "smedley",
+            }
+        ).encode()
+        status, body, ctype = embed._fulfill_vision_analyze_on_smedley(req_body)
+        assert status == 200
+        assert ctype == "application/json"
+        result = json.loads(body.decode("utf-8"))
+        assert result["available"] is True
+        assert result["text"] == "hermes-vision-ok"
+        assert result["provenance"]["route"] == "v1/chat/completions"
+        assert captured["path"] == "/v1/chat/completions"
+        assert captured["json"]["reasoning_effort"] == "none"
+        assert captured["json"]["model"] == "qwen/qwen3.5-35b-a3b"
+    finally:
+        server.shutdown()
+        server.server_close()

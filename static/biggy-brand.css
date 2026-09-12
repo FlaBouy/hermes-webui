@@ -1230,6 +1230,15 @@ body.argus-planner-workspace-active #j-orb{
   text-transform:uppercase;
 }
 #biggyVisionSurface .biggy-vision-overview-list small{color:#7896a6}
+
+#biggyVisionSurface .biggy-vision-capture-host{
+  display:flex;flex-direction:column;min-height:min(62vh,560px);height:min(62vh,560px);
+  border:1px solid rgba(78,204,163,.22);border-radius:6px;overflow:hidden;
+  background:rgba(3,12,19,.72);
+}
+#biggyVisionSurface .biggy-vision-capture-frame{
+  flex:1;width:100%;min-height:0;border:0;background:#071018;
+}
 /* Vision stays above the Orb: do not hide or disable #biggyArgusReactor / #j-orb.
    Narrow screens keep gutters; never stretch edge-to-edge via left/right. */
 @media(max-width:760px){

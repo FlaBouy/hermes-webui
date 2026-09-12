@@ -43,6 +43,9 @@ _RAG_READ_TIMEOUT_SEC = 18.0
 _RAG_READ_CHUNK_BYTES = 8192
 _RAG_MAX_CONCURRENT = 1
 _RAG_INDEX_STALE_AFTER_SEC = 300
+# Vision analyze fulfilled on Smedley LM Studio — PLATO container loopback is not LM Studio.
+_VISION_LMSTUDIO_BASE = "http://127.0.0.1:1234"
+_VISION_LMSTUDIO_MODEL = "qwen/qwen3.5-35b-a3b"
 _MAX_BODY_BYTES = 8 * 1024 * 1024
 
 _lock = threading.RLock()
@@ -444,6 +447,203 @@ def _rag_command_payload(
     return 200, json.dumps(shaped).encode("utf-8"), "application/json"
 
 
+def _fulfill_vision_capability_on_smedley() -> tuple[int, bytes, str]:
+    """Honest capability for Hermes owner path — Smedley LM Studio multimodal."""
+    capability = {
+        "image_support": "configured_unverified",
+        "verified": False,
+        # Owner-facing copy only — no endpoints, protocol names, or host prose.
+        "detail": (
+            "Local analysis is configured but not yet tested. "
+            "Capture starts only when you choose Capture or Intake."
+        ),
+        "owner_summary": "Local analysis is configured but not yet tested.",
+        "diagnostics": {
+            "endpoint_kind": "local_chat_completions",
+            "endpoint_host": "127.0.0.1",
+            "model": _VISION_LMSTUDIO_MODEL,
+            "route": "v1/chat/completions",
+            "fulfillment": "hermes_smedley",
+        },
+        "endpoint_kind": "local_chat_completions",
+        "endpoint_host": "127.0.0.1",
+        "model": _VISION_LMSTUDIO_MODEL,
+        "original_max_bytes": 1_500_000,
+        "inference_max_bytes": 400_000,
+    }
+    return 200, json.dumps({"capability": capability}).encode("utf-8"), "application/json"
+
+
+def _fulfill_vision_analyze_on_smedley(body: bytes) -> tuple[int, bytes, str]:
+    """Multimodal analyze against Smedley LM Studio — never PLATO loopback."""
+    import base64
+    from urllib.request import Request, build_opener, ProxyHandler
+
+    try:
+        data = json.loads(body.decode("utf-8") or "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        return 400, json.dumps({"error": "invalid_json"}).encode("utf-8"), "application/json"
+    if not isinstance(data, dict):
+        return 400, json.dumps({"error": "JSON body must be an object"}).encode("utf-8"), "application/json"
+    content_type = data.get("content_type", "")
+    image_b64 = data.get("image_base64", "")
+    prompt = data.get("prompt", "Describe this frame briefly for the planner.")
+    if not isinstance(content_type, str) or not isinstance(image_b64, str):
+        return (
+            400,
+            json.dumps({"error": "content_type and image_base64 are required"}).encode("utf-8"),
+            "application/json",
+        )
+    allowed = {"image/png", "image/jpeg", "image/webp"}
+    if content_type not in allowed:
+        return 400, json.dumps({"error": "Unsupported image type"}).encode("utf-8"), "application/json"
+    try:
+        image_bytes = base64.b64decode(image_b64, validate=True)
+    except Exception:
+        return 400, json.dumps({"error": "Invalid image_base64"}).encode("utf-8"), "application/json"
+    infer_type = content_type
+    infer_bytes = image_bytes
+    if isinstance(data.get("inference_image_base64"), str) and data.get("inference_image_base64"):
+        try:
+            infer_bytes = base64.b64decode(data["inference_image_base64"], validate=True)
+        except Exception:
+            return (
+                400,
+                json.dumps({"error": "Invalid inference_image_base64"}).encode("utf-8"),
+                "application/json",
+            )
+        if isinstance(data.get("inference_content_type"), str) and data["inference_content_type"]:
+            infer_type = data["inference_content_type"]
+            if infer_type not in allowed:
+                return (
+                    400,
+                    json.dumps({"error": "Unsupported inference image type"}).encode("utf-8"),
+                    "application/json",
+                )
+    if len(image_bytes) > 1_500_000:
+        return 400, json.dumps({"error": "Original image exceeds intake limit"}).encode("utf-8"), "application/json"
+    if len(infer_bytes) > 400_000:
+        return (
+            400,
+            json.dumps({"error": "Inference image exceeds 400000 bytes"}).encode("utf-8"),
+            "application/json",
+        )
+    if not isinstance(prompt, str) or not prompt.strip():
+        return 400, json.dumps({"error": "prompt must be a non-empty string"}).encode("utf-8"), "application/json"
+    data_url = f"data:{infer_type};base64," + base64.b64encode(infer_bytes).decode("ascii")
+    chat_body = {
+        "model": _VISION_LMSTUDIO_MODEL,
+        "messages": [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt.strip()[:2000]},
+                    {"type": "image_url", "image_url": {"url": data_url}},
+                ],
+            }
+        ],
+        "stream": False,
+        "temperature": 0.2,
+        "max_tokens": 512,
+        "reasoning_effort": "none",
+    }
+    req = Request(
+        f"{_VISION_LMSTUDIO_BASE}/v1/chat/completions",
+        data=json.dumps(chat_body, separators=(",", ":")).encode("utf-8"),
+        headers={"Content-Type": "application/json", "Accept": "application/json"},
+        method="POST",
+    )
+    opener = build_opener(ProxyHandler({}))
+    try:
+        with opener.open(req, timeout=60) as response:
+            raw = response.read(262_144 + 1)
+    except Exception:
+        result = {
+            "available": False,
+            "state": "unavailable",
+            "message": "Local vision endpoint did not return a usable result.",
+            "text": None,
+            "provenance": None,
+            "capability": {
+                "image_support": "configured_failed",
+                "verified": False,
+                "detail": "Local analysis is unavailable.",
+                "model": _VISION_LMSTUDIO_MODEL,
+            },
+        }
+        return 200, json.dumps(result).encode("utf-8"), "application/json"
+    if len(raw) > 262_144:
+        result = {
+            "available": False,
+            "state": "unavailable",
+            "message": "Local vision endpoint response exceeds size limit.",
+            "text": None,
+            "provenance": None,
+        }
+        return 200, json.dumps(result).encode("utf-8"), "application/json"
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception:
+        result = {
+            "available": False,
+            "state": "unavailable",
+            "message": "Local vision endpoint did not return a usable result.",
+            "text": None,
+            "provenance": None,
+        }
+        return 200, json.dumps(result).encode("utf-8"), "application/json"
+    text = None
+    try:
+        text = payload["choices"][0]["message"]["content"]
+    except Exception:
+        text = None
+    if not isinstance(text, str) or not text.strip():
+        result = {
+            "available": False,
+            "state": "unavailable",
+            "message": (
+                "Local vision model returned empty content "
+                "(ensure reasoning_effort=none; do not use non-vision models)."
+            ),
+            "text": None,
+            "provenance": None,
+            "capability": {
+                "image_support": "configured_failed",
+                "verified": False,
+                "model": _VISION_LMSTUDIO_MODEL,
+            },
+        }
+        return 200, json.dumps(result).encode("utf-8"), "application/json"
+    stamp = data.get("captured_at") if isinstance(data.get("captured_at"), str) else _now_z()
+    source = data.get("source") if isinstance(data.get("source"), str) else "screen_share"
+    host = data.get("host") if isinstance(data.get("host"), str) else "smedley"
+    model_label = payload.get("model") if isinstance(payload.get("model"), str) else _VISION_LMSTUDIO_MODEL
+    result = {
+        "available": True,
+        "state": "on",
+        "text": text.strip()[:8000],
+        "provenance": {
+            "source": source[:80],
+            "host": host[:120],
+            "captured_at": stamp[:64],
+            "model": model_label[:120],
+            "endpoint_kind": "local",
+            "endpoint_host": "127.0.0.1",
+            "route": "v1/chat/completions",
+        },
+        "capability": {
+            "image_support": "local_verified",
+            "verified": True,
+            "detail": "Local analysis is configured and working.",
+            "model": model_label[:120],
+            "endpoint_kind": "local_chat_completions",
+        },
+        "original_bytes_len": len(image_bytes),
+        "inference_bytes_len": len(infer_bytes),
+    }
+    return 200, json.dumps(result).encode("utf-8"), "application/json"
+
+
 def _fulfill_rag_search_on_smedley(body: bytes) -> tuple[int, bytes, str]:
     """Run library retrieve on localhost:5004 — never forward to PLATO.
 
@@ -692,7 +892,8 @@ def _embed_security_headers(handler) -> None:
     handler.send_header("Content-Security-Policy", csp)
     handler.send_header(
         "Permissions-Policy",
-        "camera=(), microphone=(self), geolocation=(), clipboard-write=(self)",
+        "camera=(), microphone=(self), display-capture=(self), "
+        "geolocation=(), clipboard-write=(self)",
     )
     # Global report-only still advertises frame-ancestors 'none'; skip it once
     # so it does not contradict this scoped enforced policy (same as V6 world).
@@ -798,6 +999,15 @@ def handle_biggy_workspace_embed(handler, parsed, method: str) -> bool | None:
     # needs outbound sidecar credentials and :5004 stays off the browser.
     if _is_rag_search_commands_request(upstream_path, method, body):
         status, resp_body, content_type = _fulfill_rag_search_on_smedley(body)
+        return _send_bytes(handler, status, resp_body, content_type=content_type)
+
+    # Vision analyze/capability: fulfill on Smedley LM Studio so PLATO loopback
+    # is never mistaken for the local multimodal route.
+    if method.upper() == "GET" and upstream_path == "/api/v1/vision/capability":
+        status, resp_body, content_type = _fulfill_vision_capability_on_smedley()
+        return _send_bytes(handler, status, resp_body, content_type=content_type)
+    if method.upper() == "POST" and upstream_path == "/api/v1/vision/analyze":
+        status, resp_body, content_type = _fulfill_vision_analyze_on_smedley(body)
         return _send_bytes(handler, status, resp_body, content_type=content_type)
 
     request = _proxy_upstream_request(

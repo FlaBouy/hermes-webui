@@ -51,8 +51,8 @@
   ]);
   // Native ARGUS Vision control surfaces. Allowlist matches the established
   // V7/Workspace panel contract (overview/vision/focus/gestures/guidance/control).
-  // Opening a choice never launches Planner Workspace, PLATO, or an external window,
-  // and never performs capture, gesture, guidance, or machine-control actions.
+  // Visual Capture embeds the live Workspace capture surface in-place (no Planner
+  // UI, no new tab). Capture starts only on owner gesture inside that surface.
   const BIGGY_VISION_ORIGIN = 'https://plato.tail061f03.ts.net';
   const BIGGY_VISION_PANELS = Object.freeze([
     Object.freeze({ label: 'Overview', panel: 'overview' }),
@@ -65,16 +65,18 @@
   const BIGGY_VISION_PANEL_IDS = Object.freeze(
     BIGGY_VISION_PANELS.map((entry) => entry.panel),
   );
-  // Truthful local sense states reused from the V7 Workspace adapter contract.
-  // ARGUS does not claim live adapters or broaden machine permissions here.
+  // Capture-only Workspace embed — same-origin authenticated proxy; never secrets in URL.
+  const BIGGY_VISION_CAPTURE_URL = '/biggy-workspace/?panel=vision&surface=capture';
+  // Owner-facing defaults. Vision capability is refreshed from live Workspace/Hermes.
+  // Gestures / machine control stay disabled in this increment.
   const ARGUS_VISION_SENSE_STATES = Object.freeze({
     overview: Object.freeze({
       state: 'available',
-      detail: 'Native ARGUS Vision control surface is ready. Select a function.',
+      detail: 'Vision controls are ready. Select Visual Capture to intake or analyze a frame.',
     }),
     vision: Object.freeze({
-      state: 'unavailable',
-      detail: 'Visual capture adapter is not connected in ARGUS. No automatic capture.',
+      state: 'available',
+      detail: 'Checking local analysis… Capture starts only when you press Capture or Intake.',
     }),
     focus: Object.freeze({
       state: 'off',
@@ -82,7 +84,7 @@
     }),
     gestures: Object.freeze({
       state: 'off',
-      detail: 'Gesture adapter is opt-in and idle. Pointer and keyboard remain complete controls.',
+      detail: 'Gestures stay off in this release. Pointer and keyboard remain the controls.',
     }),
     guidance: Object.freeze({
       state: 'off',
@@ -90,13 +92,16 @@
     }),
     control: Object.freeze({
       state: 'unavailable',
-      detail: 'Machine control is not armed from ARGUS. Permissions are not broadened.',
+      detail: 'Machine control stays disarmed in this release. Permissions are not broadened.',
     }),
   });
+  let biggyVisionLiveCapability = null;
+  let biggyVisionCapabilityFetch = null;
   const VISION_SURFACE_BODY_CLASS = 'argus-vision-surface-active';
   let biggyVisionSurfacePanel = null;
   let biggyVisionSurfaceActive = '';
   let biggyVisionSurfaceBound = false;
+  let biggyVisionCaptureFrame = null;
   let cockpitServiceAvailTimer = 0;
   // Central surfaces (VISION menu never opens these):
   // - Open Workspace → same-origin /biggy-workspace/ proxy (Hermes GUI session
@@ -1260,8 +1265,98 @@
     panel.style.maxHeight = `${available}px`;
   }
 
+
+  function ownerVisionCapabilityCopy(capability) {
+    const cap = capability && typeof capability === 'object' ? capability : {};
+    const support = String(cap.image_support || '');
+    if (support === 'local_verified' || cap.verified === true) {
+      return Object.freeze({
+        state: 'available',
+        detail: 'Local analysis is configured and working. Capture starts only when you choose Capture or Intake.',
+      });
+    }
+    if (support === 'configured_unverified') {
+      return Object.freeze({
+        state: 'available',
+        detail: 'Local analysis is configured but not yet tested. Capture starts only when you choose Capture or Intake.',
+      });
+    }
+    if (support === 'configured_failed') {
+      return Object.freeze({
+        state: 'unavailable',
+        detail: 'Local analysis is unavailable right now. You can still intake and save an original when a task is selected.',
+      });
+    }
+    if (support === 'unconfigured') {
+      return Object.freeze({
+        state: 'unavailable',
+        detail: 'Local analysis is not configured. Capture and save still work when a task is selected.',
+      });
+    }
+    return Object.freeze({
+      state: 'available',
+      detail: 'Visual capture is ready. Capture starts only when you choose Capture or Intake.',
+    });
+  }
+
+  function refreshBiggyVisionCapability(force) {
+    if (!force && biggyVisionLiveCapability) {
+      return Promise.resolve(biggyVisionLiveCapability);
+    }
+    if (!force && biggyVisionCapabilityFetch) return biggyVisionCapabilityFetch;
+    biggyVisionCapabilityFetch = fetch('/biggy-workspace/api/v1/vision/capability', {
+      credentials: 'same-origin',
+      headers: { Accept: 'application/json' },
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((payload) => {
+        const cap = payload && payload.capability ? payload.capability : null;
+        biggyVisionLiveCapability = cap;
+        return cap;
+      })
+      .catch(() => {
+        biggyVisionLiveCapability = null;
+        return null;
+      })
+      .finally(() => {
+        biggyVisionCapabilityFetch = null;
+      });
+    return biggyVisionCapabilityFetch;
+  }
+
+  function signalBiggyVisionCaptureRelease() {
+    const frame = biggyVisionCaptureFrame
+      || document.querySelector('[data-testid="biggy-vision-capture-frame"]');
+    if (!frame) return;
+    try {
+      frame.contentWindow?.postMessage(
+        { type: 'argus-vision-release-capture' },
+        location.origin,
+      );
+    } catch (_err) { /* ignore */ }
+  }
+
+  function releaseBiggyVisionCaptureMedia() {
+    const frame = biggyVisionCaptureFrame
+      || document.querySelector('[data-testid="biggy-vision-capture-frame"]');
+    biggyVisionCaptureFrame = null;
+    if (!frame) return;
+    signalBiggyVisionCaptureRelease();
+    try { frame.src = 'about:blank'; } catch (_err) { /* ignore */ }
+    try { frame.remove(); } catch (_err) { /* ignore */ }
+  }
+
   function visionSenseFor(panelId) {
     const id = String(panelId || '').trim();
+    if (id === 'vision' || id === 'overview') {
+      const live = ownerVisionCapabilityCopy(biggyVisionLiveCapability);
+      if (id === 'vision') return live;
+      // Overview shows honest capture capability, not a stale disconnected claim.
+      return Object.freeze({
+        state: live.state,
+        detail: live.detail,
+      });
+    }
     return ARGUS_VISION_SENSE_STATES[id] || Object.freeze({
       state: 'unavailable',
       detail: 'Unknown vision function.',
@@ -1272,7 +1367,11 @@
     const body = panel.querySelector('[data-testid="biggy-vision-surface-body"]');
     const selector = panel.querySelector('[data-testid="biggy-vision-function-selector"]');
     if (!body || !selector) return;
+    const previous = biggyVisionSurfaceActive;
     const active = BIGGY_VISION_PANEL_IDS.includes(activeId) ? activeId : 'overview';
+    if (previous === 'vision' && active !== 'vision') {
+      releaseBiggyVisionCaptureMedia();
+    }
     biggyVisionSurfaceActive = active;
     selector.querySelectorAll('[data-vision-panel]').forEach((node) => {
       const selected = node.getAttribute('data-vision-panel') === active;
@@ -1291,6 +1390,28 @@
         + `<span class="biggy-vision-sense-state">${row.state}</span>`
         + `<small>${row.detail}</small></li>`;
     }).join('');
+
+    let mainHtml = '';
+    if (active === 'overview') {
+      mainHtml = `<ul class="biggy-vision-overview-list" data-testid="biggy-vision-overview-list">${overviewRows}</ul>`;
+    } else if (active === 'vision') {
+      mainHtml =
+        `<div class="biggy-vision-capture-host" data-testid="biggy-vision-capture-host">`
+        + `<iframe class="biggy-vision-capture-frame" data-testid="biggy-vision-capture-frame" `
+        + `title="Visual capture" referrerpolicy="same-origin" `
+        + `allow="display-capture" `
+        + `src="${BIGGY_VISION_CAPTURE_URL}"></iframe>`
+        + `</div>`;
+    } else if (active === 'gestures' || active === 'control') {
+      mainHtml =
+        `<p class="biggy-vision-idle-note" data-testid="biggy-vision-idle-note">`
+        + `${entry.label} stays disabled in this release. No automatic action runs from here.</p>`;
+    } else {
+      mainHtml =
+        `<p class="biggy-vision-idle-note" data-testid="biggy-vision-idle-note">`
+        + `${entry.label} is idle. It never opens Planner or a new tab, and it performs no automatic action.</p>`;
+    }
+
     body.innerHTML =
       `<header class="biggy-vision-panel-heading">`
       + `<h2 id="biggyVisionSurfaceTitle">${entry.label}</h2>`
@@ -1299,17 +1420,37 @@
       + `<span>${sense.state}</span></p>`
       + `</header>`
       + `<p class="biggy-vision-sense-detail" data-testid="biggy-vision-detail">${sense.detail}</p>`
-      + (active === 'overview'
-        ? `<ul class="biggy-vision-overview-list" data-testid="biggy-vision-overview-list">${overviewRows}</ul>`
-        : `<p class="biggy-vision-idle-note">This panel is a selectable ARGUS control surface only. `
-          + `It never launches Planner Workspace or an external window, and it performs no `
-          + `automatic capture, focus, gesture, guidance, or machine-control action.</p>`);
+      + mainHtml;
     panel.setAttribute('aria-labelledby', 'biggyVisionSurfaceTitle');
     panel.dataset.activePanel = active;
+    if (active === 'vision') {
+      biggyVisionCaptureFrame = body.querySelector('[data-testid="biggy-vision-capture-frame"]');
+    }
+    // Refresh live capability into overview/vision copy without blocking first paint.
+    refreshBiggyVisionCapability(false).then((cap) => {
+      if (!biggyVisionSurfacePanel || biggyVisionSurfaceActive !== active) return;
+      const next = visionSenseFor(active);
+      const detail = panel.querySelector('[data-testid="biggy-vision-detail"]');
+      const pill = panel.querySelector('[data-testid="biggy-vision-availability"] span:last-child');
+      if (detail) detail.textContent = next.detail;
+      if (pill) pill.textContent = next.state;
+      const list = panel.querySelector('[data-testid="biggy-vision-overview-list"]');
+      if (list && active === 'overview') {
+        list.innerHTML = BIGGY_VISION_PANELS.map((item) => {
+          const row = visionSenseFor(item.panel);
+          return `<li data-testid="biggy-vision-overview-${item.panel}">`
+            + `<b>${item.label}</b>`
+            + `<span class="biggy-vision-sense-state">${row.state}</span>`
+            + `<small>${row.detail}</small></li>`;
+        }).join('');
+      }
+      void cap;
+    });
   }
 
   function closeBiggyVisionSurface({ restoreFocus = true } = {}) {
     const panel = biggyVisionSurfacePanel;
+    releaseBiggyVisionCaptureMedia();
     document.body.classList.remove(VISION_SURFACE_BODY_CLASS);
     if (panel && panel.parentNode) panel.remove();
     biggyVisionSurfacePanel = null;
@@ -1413,7 +1554,13 @@
     }, true);
     window.addEventListener('pagehide', () => {
       closeBiggyVisionSurface({ restoreFocus: false });
-    }, { once: true });
+    });
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') {
+        // Tab switch: release active display-media tracks without tearing the panel.
+        signalBiggyVisionCaptureRelease();
+      }
+    });
   }
 
   function positionBiggyVisionMenu(wrap, menu) {

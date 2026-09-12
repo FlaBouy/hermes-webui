@@ -11,10 +11,12 @@
     if (url.origin !== location.origin) return null;
     if (url.pathname.startsWith(oldRoot)) url.pathname = '/api/biggy/rag/' + url.pathname.slice(oldRoot.length);
     const path = url.pathname;
-    if (!/^\/api\/biggy\/rag\/(doc|preview)\//.test(path) &&
+    const evidenceOk = /^\/(?:biggy-workspace\/)?api\/v1\/evidence\/ev_[A-Za-z0-9]+\/(?:original(?:\.(?:png|jpe?g|webp))?|analysis(?:\.txt)?)$/.test(path);
+    if (!evidenceOk &&
+        !/^\/api\/biggy\/rag\/(doc|preview)\//.test(path) &&
         !/^\/api\/biggy\/rag-file(?:-path\/|$)/.test(path) &&
         !path.startsWith('/api/jarvis-ii/rag-document/') &&
-        !/\.(pdf|txt|docx?|rtf|xlsx?|pptx?)(?:$)/i.test(path)) return null;
+        !/\.(pdf|txt|docx?|rtf|xlsx?|pptx?|png|jpe?g|webp|gif)(?:$)/i.test(path)) return null;
     return url.href;
   }
   const style = document.createElement('style');
