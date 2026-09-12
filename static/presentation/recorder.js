@@ -677,17 +677,38 @@
     }
   }
 
-  function openSaved() {
+  async function openSaved() {
     if (!lastSaved || !lastSaved.play_url) {
       setStatus("No saved presentation in this session.");
       return;
     }
-    const open = root.BiggyDocumentViewer && root.BiggyDocumentViewer.open;
-    if (!open) {
+    try {
+      if (root.__biggyDocumentViewerReady) {
+        await root.__biggyDocumentViewerReady;
+      }
+    } catch (err) {
+      setStatus(`Viewer failed to load (${err && err.message ? err.message : err}).`);
+      return;
+    }
+    const api = root.BiggyDocumentViewer;
+    if (!api || typeof api.open !== "function") {
       setStatus("In-GUI viewer unavailable.");
       return;
     }
-    open(lastSaved.play_url, lastSaved.title || lastSaved.filename);
+    if (!api.supportsPresentation) {
+      setStatus("Viewer is stale (no presentation support) — reload GUI, then Open saved.");
+      return;
+    }
+    let ok = false;
+    try {
+      ok = !!api.open(lastSaved.play_url, lastSaved.title || lastSaved.filename);
+    } catch (err) {
+      setStatus(`Viewer open failed (${err && err.message ? err.message : err}).`);
+      return;
+    }
+    if (!ok) {
+      setStatus("Viewer rejected this recording URL — not opened.");
+    }
   }
 
   function onPageHide() {
@@ -721,7 +742,7 @@
       stopRecording({ reason: "owner_off" }).catch(() => {});
     });
     panel.querySelector('[data-testid="biggy-presentation-open"]').addEventListener("click", () => {
-      openSaved();
+      openSaved().catch(() => {});
     });
   }
 

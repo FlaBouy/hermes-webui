@@ -3,7 +3,6 @@
   if (window.__biggyBrandLoaded) return;
   window.__biggyBrandLoaded = true;
 
-  const documentViewerReady = import('/static/biggy-document-viewer.js?v=20260912');
   const DOC_TITLE = 'Biggy — Local Fleet Coordinator';
   const ROLE = 'Local Fleet Coordinator';
   const BRAND = 'Biggy';
@@ -27,6 +26,13 @@
     }
   })();
   const BUILD_ID = BRAND_ASSET_VERSION || 'biggy-runtime';
+  // Must track brand's own ?v= — a fixed calendar stamp left Open-saved on a
+  // stale ES module that silently rejected /api/presentation/file/….
+  const documentViewerReady = import(
+    `/static/biggy-document-viewer.js?v=${encodeURIComponent(BUILD_ID)}`
+  );
+  window.__biggyDocumentViewerReady = documentViewerReady;
+  documentViewerReady.catch(() => {});
   const ARGUS_SYNC_STORAGE_KEY = 'biggy:argus-speech-sync:v1';
   const ARGUS_RAG_PANEL_STORAGE_KEY = 'biggy:argus-rag-panel-visible:v1';
   const V6_HEALTH_PATH = '/api/biggy/v6/health';

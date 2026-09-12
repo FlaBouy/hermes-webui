@@ -1,7 +1,9 @@
 /* Shared in-GUI document windows. Modules may opt out with data-document-external. */
 (() => {
   'use strict';
-  if (window.BiggyDocumentViewer) return;
+  // Allow a cache-busted import to replace a stale viewer that lacks presentation
+  // support. Skip only when an already-capable viewer is installed.
+  if (window.BiggyDocumentViewer && window.BiggyDocumentViewer.supportsPresentation) return;
   const viewers = new Set();
   let layer = 100000;
   const oldRoot = '/api/extensions/smedley-engineering/sidecar/';
@@ -20,8 +22,10 @@
         !/\.(pdf|txt|docx?|rtf|xlsx?|pptx?|png|jpe?g|webp|gif|mp4|webm)(?:$)/i.test(path)) return null;
     return url.href;
   }
-  const style = document.createElement('style');
-  style.textContent = `
+  if (!document.getElementById('biggy-document-viewer-style')) {
+    const style = document.createElement('style');
+    style.id = 'biggy-document-viewer-style';
+    style.textContent = `
 .biggy-document-window{position:fixed;display:flex;flex-direction:column;box-sizing:border-box;min-width:0;min-height:0;background:#182a39;color:#edf5fb;border:1px solid #62899f;border-radius:9px;box-shadow:0 12px 45px #0009;overflow:hidden;font:14px system-ui}
 .biggy-document-header{display:flex;align-items:center;gap:12px;padding:8px 12px;min-height:36px;cursor:move;touch-action:none;background:#142230;flex-shrink:0}
 .biggy-document-title{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin:0;font:600 14px system-ui}
@@ -29,7 +33,8 @@
 .biggy-document-frame{flex:1;width:100%;min-height:0;border:0;background:white}
 .biggy-document-resize{position:absolute;bottom:0;right:0;width:24px;height:24px;background:#29485b;color:white;border:0;border-top-left-radius:5px;cursor:nwse-resize;touch-action:none;font-size:18px}
 `;
-  document.head.append(style);
+    document.head.append(style);
+  }
   function open(value, title, opener) {
     const url = documentURL(value);
     if (!url) return false;
@@ -44,6 +49,7 @@
     panel.className = 'biggy-document-window';
     panel.setAttribute('role', 'dialog');
     panel.setAttribute('aria-label', 'Document viewer');
+    panel.setAttribute('data-testid', 'biggy-document-viewer');
     const header = document.createElement('div'); header.className = 'biggy-document-header';
     header.tabIndex = 0; header.setAttribute('aria-label', 'Move document window');
     const heading = document.createElement('h2'); heading.className = 'biggy-document-title';
@@ -99,7 +105,7 @@
     close.focus({preventScroll:true});
     return true;
   }
-  window.BiggyDocumentViewer = {open};
+  window.BiggyDocumentViewer = { open, supportsPresentation: true };
   const watched = new WeakSet();
   function watch(doc) {
     if(watched.has(doc))return; watched.add(doc);
