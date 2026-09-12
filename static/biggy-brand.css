@@ -136,6 +136,7 @@ body.biggy-brand:has(main.main[data-biggy-hermes-panel="todos"]) .layout > .side
 .biggy-brand-controls button.down{border-color:#8b3030;color:#f06b64;background:#1a0d0d}
 .biggy-brand-controls button.muted{border-color:#b83d3d;color:#ff8178;background:#210b0b;box-shadow:inset 0 0 0 1px rgba(255,90,80,.14)}
 .biggy-vision-wrap{position:relative;display:inline-flex;align-items:center;flex:0 0 auto}
+.biggy-vision-wrap.is-menu-open{z-index:200}
 .biggy-vision-menu{
   position:absolute;z-index:130;left:50%;top:calc(100% + 8px);transform:translateX(-50%);
   display:grid;gap:2px;min-width:168px;padding:6px;
@@ -153,6 +154,24 @@ body.biggy-brand:has(main.main[data-biggy-hermes-panel="todos"]) .layout > .side
 .biggy-vision-menu-item:hover,
 .biggy-vision-menu-item:focus{
   outline:none;border-color:rgba(98,219,255,.45);background:rgba(12,32,42,.94);color:#e8fbff;
+}
+.biggy-vision-menu-item.is-live-activity{color:#75e5b8}
+.biggy-vision-menu-item.is-recording-activity{color:#ffb4ae}
+.biggy-vision-menu-item.is-error-activity{color:#f0c14b}
+#biggyVision.is-vision-live .biggy-fleet-state{
+  background:#34d399;box-shadow:0 0 8px rgba(52,211,153,.9);
+}
+#biggyVision.is-presentation-recording .biggy-fleet-state{
+  background:#f06464;box-shadow:0 0 8px rgba(240,100,100,.85);
+}
+#biggyVision.is-presentation-recording{
+  outline:1px solid rgba(240,100,100,.45);
+}
+#biggyVision.is-presentation-error .biggy-fleet-state{
+  background:#f0c14b;box-shadow:0 0 8px rgba(240,193,75,.85);
+}
+#biggyVision.is-presentation-error{
+  outline:1px solid rgba(240,193,75,.55);
 }
 .biggy-brand-header-note{
   position:absolute;left:0;top:calc(100% + 4px);

@@ -1,6 +1,7 @@
 .biggy-presentation-panel{
-  position:fixed;z-index:119;right:14px;bottom:170px;width:min(360px,calc(100vw - 28px));
-  box-sizing:border-box;background:rgba(4,8,12,.96);border:1px solid rgba(78,204,163,.42);
+  position:fixed;z-index:119;left:50%;top:12%;transform:translateX(-50%);
+  width:min(400px,calc(100vw - 28px));
+  box-sizing:border-box;background:rgba(4,8,12,.97);border:1px solid rgba(78,204,163,.42);
   border-radius:8px;box-shadow:0 14px 40px rgba(0,0,0,.55);color:#d7e4ec;
   font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;overflow:hidden;
 }
@@ -12,7 +13,8 @@
 .biggy-presentation-indicator{
   width:10px;height:10px;border-radius:50%;background:#4b5563;box-shadow:none;
 }
-.biggy-presentation-panel.is-recording .biggy-presentation-indicator{
+.biggy-presentation-panel.is-recording .biggy-presentation-indicator,
+.biggy-presentation-panel[data-phase="recording"] .biggy-presentation-indicator{
   background:#f06464;box-shadow:0 0 8px rgba(240,100,100,.9);
 }
 .biggy-presentation-timer{min-width:3.2em;color:#f0c14b;font-variant-numeric:tabular-nums}
@@ -32,5 +34,6 @@
   margin:6px 0 0;white-space:pre-wrap;word-break:break-word;font:10px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
 }
 @media(max-width:760px){
-  .biggy-presentation-panel{right:8px;left:8px;width:auto;bottom:120px}
+  .biggy-presentation-panel{left:8px;right:8px;width:auto;transform:none;top:8%}
+  .biggy-presentation-header button,.biggy-presentation-controls button{min-height:40px}
 }

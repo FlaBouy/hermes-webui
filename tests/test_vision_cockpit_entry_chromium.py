@@ -608,7 +608,7 @@ body{{margin:0;background:#05070b;color:#d7e4ec}}
 
 
 def test_cockpit_td_camera_overlay_root_gui(cockpit_td_embed_server):
-    """VISION→Camera opens lower-left root overlay (real brand + auth headers)."""
+    """VISION→Camera opens on-demand settings; Start shows feed-only lower-left."""
     sp = _require_playwright()
     info = cockpit_td_embed_server
     origin = info["origin"]
@@ -639,12 +639,9 @@ def test_cockpit_td_camera_overlay_root_gui(cockpit_td_embed_server):
         expect(vision).to_be_visible(timeout=15000)
         vision.click()
         page.get_by_test_id("biggy-vision-camera").click()
-        overlay = page.get_by_test_id("biggy-td-camera-overlay")
-        expect(overlay).to_be_visible(timeout=15000)
-        box = overlay.bounding_box()
-        assert box is not None
-        assert box["x"] < 200
-        assert box["y"] > 400  # lower half / above composer band
+        settings = page.get_by_test_id("biggy-td-camera-settings")
+        expect(settings).to_be_visible(timeout=15000)
+        expect(page.get_by_test_id("biggy-td-camera-overlay")).to_have_count(0)
         # Must not claim transport down from tunnel_process_running=false.
         page.wait_for_timeout(400)
         mode = page.get_by_test_id("biggy-td-camera-mode").inner_text()
@@ -669,17 +666,18 @@ def test_cockpit_td_camera_overlay_root_gui(cockpit_td_embed_server):
 
         page.get_by_test_id("biggy-td-camera-backdrop").select_option("blur")
         page.get_by_test_id("biggy-td-camera-start").click()
+        overlay = page.get_by_test_id("biggy-td-camera-overlay")
+        expect(overlay).to_be_visible(timeout=45000)
         expect(page.get_by_test_id("biggy-td-camera-canvas")).to_be_visible(timeout=45000)
-        page.wait_for_function(
-            """() => {
-              const t = document.querySelector('[data-testid="biggy-td-camera-note"]');
-              return !!(t && /seg=ok|Preview/i.test(t.textContent || ''));
-            }""",
-            timeout=45000,
-        )
+        # Settings hide after Start so chrome is not wrapped around the feed.
+        expect(page.get_by_test_id("biggy-td-camera-settings")).to_have_count(0)
+        box = overlay.bounding_box()
+        assert box is not None
+        assert box["x"] < 200
+        assert box["y"] > 400
         assert info["state"]["snaps"] >= 1
 
-        # Drag header + resize + viewport clamp; stay above composer.
+        # Drag + resize feed; narrow overlap with real #composerBox only.
         header = page.get_by_test_id("biggy-td-camera-header")
         hb = header.bounding_box()
         assert hb
@@ -689,9 +687,19 @@ def test_cockpit_td_camera_overlay_root_gui(cockpit_td_embed_server):
         page.mouse.up()
         after_drag = overlay.bounding_box()
         assert after_drag is not None
-        composer = page.locator("#composerWrap").bounding_box()
-        assert composer is not None
-        assert after_drag["y"] + after_drag["height"] <= composer["y"] + 2
+        composer = page.locator("#composerBox").bounding_box()
+        wrap = page.locator("#composerWrap").bounding_box()
+        assert composer is not None and wrap is not None
+        overlaps = not (
+            after_drag["x"] + after_drag["width"] <= composer["x"]
+            or after_drag["x"] >= composer["x"] + composer["width"]
+            or after_drag["y"] + after_drag["height"] <= composer["y"]
+            or after_drag["y"] >= composer["y"] + composer["height"]
+        )
+        if overlaps:
+            assert after_drag["y"] + after_drag["height"] <= composer["y"] + 2 or (
+                after_drag["x"] + after_drag["width"] <= composer["x"] + 2
+            )
 
         handle = page.get_by_test_id("biggy-td-camera-resize")
         rb = handle.bounding_box()
@@ -720,32 +728,52 @@ def test_cockpit_td_camera_overlay_root_gui(cockpit_td_embed_server):
         assert land is not None
         assert land["x"] >= 0 and land["y"] >= 0
 
-        page.get_by_test_id("biggy-td-camera-close").click()
-        expect(overlay).to_have_count(0)
-        assert page.evaluate("() => !!(window.BiggyTdCameraOverlay && !window.BiggyTdCameraOverlay.isOpen())")
-
-        # Reopen starts Off; no auto preview
-        snaps_before = info["state"]["snaps"]
+        # Reopen settings; Close hides settings only — feed stays live.
         vision.click()
         page.get_by_test_id("biggy-vision-camera").click()
-        expect(page.get_by_test_id("biggy-td-camera-overlay")).to_be_visible()
-        assert page.get_by_test_id("biggy-td-camera-backdrop").input_value() == "off"
+        expect(page.get_by_test_id("biggy-td-camera-settings")).to_be_visible()
+        page.get_by_test_id("biggy-td-camera-close").click()
+        expect(page.get_by_test_id("biggy-td-camera-settings")).to_have_count(0)
+        expect(overlay).to_be_visible()
+        assert page.evaluate("() => !!(window.BiggyTdCameraOverlay && window.BiggyTdCameraOverlay.isViewing())")
+
+        # Stop from settings ends feed.
+        vision.click()
+        page.get_by_test_id("biggy-vision-camera").click()
+        page.get_by_test_id("biggy-td-camera-stop").click()
+        page.wait_for_function(
+            "() => !!(window.BiggyTdCameraOverlay && !window.BiggyTdCameraOverlay.isViewing())",
+            timeout=10000,
+        )
+        expect(page.get_by_test_id("biggy-td-camera-canvas")).to_be_hidden()
+
+        # Reopen settings starts Off; no auto preview
+        snaps_before = info["state"]["snaps"]
+        page.get_by_test_id("biggy-td-camera-close").click()
+        vision.click()
+        page.get_by_test_id("biggy-vision-camera").click()
+        expect(page.get_by_test_id("biggy-td-camera-settings")).to_be_visible()
+        assert page.get_by_test_id("biggy-td-camera-backdrop").input_value() in ("off", "blur", "custom")
         expect(page.get_by_test_id("biggy-td-camera-canvas")).to_be_hidden()
         page.wait_for_timeout(400)
         assert info["state"]["snaps"] == snaps_before
 
         # Visual Capture must not embed camera
+        page.get_by_test_id("biggy-td-camera-close").click()
+        expect(page.get_by_test_id("biggy-td-camera-settings")).to_have_count(0)
         vision.click()
         page.get_by_test_id("biggy-vision-vision").click()
         expect(page.get_by_test_id("biggy-vision-surface")).to_be_visible()
-        # Camera overlay remains usable while Visual Capture is open
-        expect(page.get_by_test_id("biggy-td-camera-overlay")).to_be_visible()
+        # Camera settings can reopen while Visual Capture is open
+        vision.click()
+        page.get_by_test_id("biggy-vision-camera").click()
+        expect(page.get_by_test_id("biggy-td-camera-settings")).to_be_visible()
         frame = page.frame_locator('[data-testid="biggy-vision-capture-frame"]')
         expect(frame.locator("body.capture-surface")).to_be_attached(timeout=20000)
         assert frame.locator("#td-camera-viewer").count() == 0
         assert frame.locator("#td-camera-start-view").count() == 0
 
         page.get_by_test_id("biggy-td-camera-close").click()
-        expect(page.get_by_test_id("biggy-td-camera-overlay")).to_have_count(0)
+        expect(page.get_by_test_id("biggy-td-camera-settings")).to_have_count(0)
         assert not errors, errors
         browser.close()

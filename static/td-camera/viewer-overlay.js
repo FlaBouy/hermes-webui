@@ -1,16 +1,16 @@
-/* TD Camera overlay — root Biggy GUI viewer (same-origin Hermes /api/td-camera). */
+/* TD Camera — feed-only lower-left overlay; settings on-demand via VISION→Camera. */
 (function (root) {
   "use strict";
 
   const SOURCE_LABEL = "ThunderDome · Logitech C920";
-  const DEFAULT_W = 380;
-  const DEFAULT_H = 340;
-  const MIN_W = 280;
-  const MIN_H = 240;
-  const MARGIN = 10;
-  const COMPOSER_CLEARANCE = 18;
+  const DEFAULT_W = 320;
+  const ASPECT = 4 / 3;
+  const MIN_W = 200;
+  const MIN_H = 150;
+  const MARGIN = 12;
 
-  let shell = null;
+  let feed = null;
+  let settings = null;
   let viewing = false;
   let pollTimer = 0;
   let heartbeatTimer = 0;
@@ -27,11 +27,18 @@
   function csrfHeaders(extra) {
     const h = Object.assign({}, extra || {});
     try {
-      const tok =
-        (root.__HERMES_CONFIG__ && root.__HERMES_CONFIG__.csrfToken) || "";
+      const tok = (root.__HERMES_CONFIG__ && root.__HERMES_CONFIG__.csrfToken) || "";
       if (tok) h["X-Hermes-CSRF-Token"] = tok;
-    } catch (_) { /* ignore */ }
+    } catch (_) {}
     return h;
+  }
+
+  function notifyVision() {
+    try {
+      if (typeof root.__biggySyncVisionActivity === "function") {
+        root.__biggySyncVisionActivity();
+      }
+    } catch (_) {}
   }
 
   function ensureStyle() {
@@ -67,72 +74,97 @@
     return compositeReady;
   }
 
-  function composerTop() {
-    // Prefer the visible message composer box — #composerWrap includes reactor
-    // chrome and would place the overlay too high.
+  function composerBoxRect() {
     const box = document.getElementById("composerBox");
-    const wrap = document.getElementById("composerWrap")
-      || document.querySelector(".composer-wrap");
-    const fallback = Math.max(120, window.innerHeight - 168);
-    if (!box) return fallback;
+    if (!box) return null;
     const br = box.getBoundingClientRect();
-    if (!(br.height >= 24) || !(br.bottom > 0)) return fallback;
-    // Message composer lives in the lower viewport; reject a mis-targeted box.
-    if (br.top < window.innerHeight * 0.35 && (!wrap || br.height < 40)) {
-      return fallback;
+    if (!(br.width >= 40) || !(br.height >= 24)) return null;
+    // Ignore mis-targeted full-bleed elements.
+    if (br.width > window.innerWidth * 0.95 && br.height > window.innerHeight * 0.4) {
+      return null;
     }
-    if (wrap) {
-      const wr = wrap.getBoundingClientRect();
-      // When wrap is a tall reactor+composer band, always use the message box top.
-      if (wr.height > br.height * 1.5) {
-        return Math.max(120, Math.round(br.top));
-      }
-    }
-    return Math.max(120, Math.round(br.top));
+    return {
+      left: br.left,
+      top: br.top,
+      right: br.right,
+      bottom: br.bottom,
+      width: br.width,
+      height: br.height,
+    };
   }
 
+  function intersects(a, b) {
+    return !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
+  }
+
+  /**
+   * Viewport clamp + narrow overlap with the real #composerBox only.
+   * Does NOT invent a full-width bottom exclusion rail.
+   */
   function clampRect(left, top, width, height) {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
-    const maxBottom = composerTop() - COMPOSER_CLEARANCE;
-    const w = Math.min(Math.max(width, MIN_W), vw - MARGIN * 2);
-    const h = Math.min(Math.max(height, MIN_H), Math.max(MIN_H, maxBottom - MARGIN));
-    let l = left;
-    let t = top;
-    l = Math.max(MARGIN, Math.min(l, vw - w - MARGIN));
-    t = Math.max(MARGIN, Math.min(t, maxBottom - h));
-    if (t < MARGIN) t = MARGIN;
+    let w = Math.min(Math.max(width, MIN_W), vw - MARGIN * 2);
+    let h = Math.min(Math.max(height, MIN_H), vh - MARGIN * 2);
+    // Preserve feed aspect when resizing from corner.
+    if (Math.abs(w / h - ASPECT) > 0.08) {
+      h = Math.round(w / ASPECT);
+      if (h > vh - MARGIN * 2) {
+        h = vh - MARGIN * 2;
+        w = Math.round(h * ASPECT);
+      }
+    }
+    let l = Math.max(MARGIN, Math.min(left, vw - w - MARGIN));
+    let t = Math.max(MARGIN, Math.min(top, vh - h - MARGIN));
+    const box = composerBoxRect();
+    if (box) {
+      let rect = { left: l, top: t, right: l + w, bottom: t + h };
+      if (intersects(rect, box)) {
+        // Prefer staying lower-left: slide fully left of composer, else nudge up.
+        const leftOf = box.left - w - 8;
+        if (leftOf >= MARGIN) {
+          l = leftOf;
+        } else {
+          t = Math.max(MARGIN, box.top - h - 8);
+        }
+        l = Math.max(MARGIN, Math.min(l, vw - w - MARGIN));
+        t = Math.max(MARGIN, Math.min(t, vh - h - MARGIN));
+      }
+    }
     return { left: l, top: t, width: w, height: h };
   }
 
-  function applyRect(r) {
-    if (!shell) return;
-    shell.style.left = `${Math.round(r.left)}px`;
-    shell.style.top = `${Math.round(r.top)}px`;
-    shell.style.width = `${Math.round(r.width)}px`;
-    shell.style.height = `${Math.round(r.height)}px`;
-    shell.style.right = "auto";
-    shell.style.bottom = "auto";
+  function applyFeedRect(r) {
+    if (!feed) return;
+    feed.style.left = `${Math.round(r.left)}px`;
+    feed.style.top = `${Math.round(r.top)}px`;
+    feed.style.width = `${Math.round(r.width)}px`;
+    feed.style.height = `${Math.round(r.height)}px`;
+    feed.style.right = "auto";
+    feed.style.bottom = "auto";
   }
 
-  function defaultRect() {
-    const w = Math.min(DEFAULT_W, window.innerWidth - MARGIN * 2);
-    const h = Math.min(DEFAULT_H, Math.max(MIN_H, composerTop() - MARGIN - COMPOSER_CLEARANCE));
-    return clampRect(MARGIN + 2, composerTop() - COMPOSER_CLEARANCE - h, w, h);
+  function defaultFeedRect() {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const w = Math.min(DEFAULT_W, Math.max(MIN_W, Math.floor(vw * 0.28)));
+    const h = Math.round(w / ASPECT);
+    // True viewport lower-left — not anchored to a full-width composer plane.
+    return clampRect(MARGIN, vh - h - MARGIN, w, h);
   }
 
-  function setMode(mode) {
-    const el = shell && shell.querySelector('[data-testid="biggy-td-camera-mode"]');
-    if (el) el.textContent = mode;
+  function setMode(msg) {
+    const el = settings && settings.querySelector('[data-testid="biggy-td-camera-mode"]');
+    if (el) el.textContent = msg || "";
   }
 
   function setNote(msg) {
-    const el = shell && shell.querySelector('[data-testid="biggy-td-camera-note"]');
+    const el = settings && settings.querySelector('[data-testid="biggy-td-camera-note"]');
     if (el) el.textContent = msg || "";
   }
 
   function setDetails(text) {
-    const el = shell && shell.querySelector('[data-testid="biggy-td-camera-details-body"]');
+    const el = settings && settings.querySelector('[data-testid="biggy-td-camera-details-body"]');
     if (el) el.textContent = text || "";
   }
 
@@ -145,13 +177,13 @@
       try { URL.revokeObjectURL(customFileUrl); } catch (_) {}
       customFileUrl = null;
     }
-    const canvas = shell && shell.querySelector("#biggy-td-camera-canvas");
+    const canvas = feed && feed.querySelector("#biggy-td-camera-canvas");
     if (canvas) {
       const ctx = canvas.getContext("2d");
       if (ctx) ctx.clearRect(0, 0, canvas.width, canvas.height);
       canvas.hidden = true;
     }
-    const raw = shell && shell.querySelector("#biggy-td-camera-raw");
+    const raw = feed && feed.querySelector("#biggy-td-camera-raw");
     if (raw) {
       raw.removeAttribute("src");
       raw.hidden = true;
@@ -165,28 +197,24 @@
   async function stopPreview({ silent } = {}) {
     viewing = false;
     frameGen += 1;
-    if (pollTimer) {
-      clearTimeout(pollTimer);
-      pollTimer = 0;
-    }
-    if (heartbeatTimer) {
-      clearInterval(heartbeatTimer);
-      heartbeatTimer = 0;
-    }
+    if (pollTimer) { clearTimeout(pollTimer); pollTimer = 0; }
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = 0; }
     const lease = leaseId;
     leaseId = null;
     clearFrames();
     if (root.BiggyTdCameraComposite) {
       try { root.BiggyTdCameraComposite.abort(); } catch (_) {}
     }
-    const startBtn = shell && shell.querySelector('[data-testid="biggy-td-camera-start"]');
-    const stopBtn = shell && shell.querySelector('[data-testid="biggy-td-camera-stop"]');
+    const startBtn = settings && settings.querySelector('[data-testid="biggy-td-camera-start"]');
+    const stopBtn = settings && settings.querySelector('[data-testid="biggy-td-camera-stop"]');
     if (startBtn) startBtn.disabled = false;
     if (stopBtn) stopBtn.disabled = true;
     if (!silent) {
       setMode("Camera off");
-      setNote("Preview stopped. Native camera idle-releases ~10s after last frame request.");
+      setNote("Preview stopped.");
     }
+    if (feed) feed.classList.remove("is-live");
+    notifyVision();
     if (lease) {
       try {
         await fetch("/api/td-camera/view/stop", {
@@ -196,7 +224,7 @@
           body: JSON.stringify({ lease_id: lease }),
           cache: "no-store",
         });
-      } catch (_) { /* best effort */ }
+      } catch (_) {}
     }
   }
 
@@ -212,7 +240,6 @@
         setDetails(`health_http=${res.status} error=${data.error || "health_failed"}`);
         return;
       }
-      // tunnel_process_running is diagnostic only — never claim transport down from it.
       const seg = data.segmentation || {};
       setDetails(
         [
@@ -222,12 +249,12 @@
           `source=${data.source || SOURCE_LABEL}`,
           `segmentation_assets=${seg.ready ? "present" : "missing"}`,
           `native_idle_release_sec=${data.native_idle_release_sec || 10}`,
-          `bounds=${shell ? `${Math.round(shell.offsetWidth)}x${Math.round(shell.offsetHeight)}` : "n/a"}`,
+          `feed=${feed ? `${Math.round(feed.offsetWidth)}x${Math.round(feed.offsetHeight)}` : "hidden"}`,
         ].join("\n")
       );
       if (!viewing) {
         setMode("Camera ready");
-        setNote("Backdrop applies to preview only.");
+        setNote("Start shows the feed only in the lower-left. Backdrop is preview-only.");
       }
     } catch (err) {
       setDetails(`health_error=${err && err.message ? err.message : String(err)}`);
@@ -235,7 +262,7 @@
   }
 
   async function pollOnce() {
-    if (!viewing || !leaseId || !shell) return;
+    if (!viewing || !leaseId || !feed) return;
     const myGen = frameGen;
     try {
       const frameRes = await fetch("/api/td-camera/frame.jpg", {
@@ -256,9 +283,9 @@
           try { URL.revokeObjectURL(objectUrl); } catch (_) {}
         }
         objectUrl = URL.createObjectURL(blob);
-        const raw = shell.querySelector("#biggy-td-camera-raw");
-        const canvas = shell.querySelector("#biggy-td-camera-canvas");
-        const backdropEl = shell.querySelector("#biggy-td-camera-backdrop");
+        const raw = feed.querySelector("#biggy-td-camera-raw");
+        const canvas = feed.querySelector("#biggy-td-camera-canvas");
+        const backdropEl = settings && settings.querySelector("#biggy-td-camera-backdrop");
         const backdrop = (backdropEl && backdropEl.value) || "off";
         if (backdrop !== "off") canvas.hidden = true;
         await new Promise((resolve, reject) => {
@@ -268,9 +295,6 @@
         });
         if (myGen !== frameGen || !viewing) return;
         await ensureComposite();
-        if (root.BiggyTdCameraComposite && root.BiggyTdCameraComposite.reopen) {
-          /* reopen after abort within session handled at Start */
-        }
         const compGen = root.BiggyTdCameraComposite.currentGeneration();
         const result = await root.BiggyTdCameraComposite.compositeToCanvas(
           raw,
@@ -302,13 +326,62 @@
     }
   }
 
+  function ensureFeed() {
+    if (feed) return feed;
+    feed = document.createElement("section");
+    feed.id = "biggyTdCameraFeed";
+    feed.className = "biggy-td-camera-feed";
+    feed.setAttribute("aria-label", "ThunderDome camera feed");
+    feed.setAttribute("data-testid", "biggy-td-camera-overlay");
+    feed.innerHTML =
+      '<canvas id="biggy-td-camera-canvas" width="640" height="480" hidden '
+      + 'data-testid="biggy-td-camera-canvas"></canvas>'
+      + '<img id="biggy-td-camera-raw" alt="" hidden width="1" height="1" />'
+      + '<div class="biggy-td-camera-drag" data-testid="biggy-td-camera-header" '
+      + 'aria-label="Move camera feed" title="Drag"></div>'
+      + '<div class="biggy-td-camera-resize" data-testid="biggy-td-camera-resize" '
+      + 'aria-label="Resize camera"></div>';
+    document.body.appendChild(feed);
+    const drag = feed.querySelector('[data-testid="biggy-td-camera-header"]');
+    drag.addEventListener("pointerdown", (ev) => {
+      const r = feed.getBoundingClientRect();
+      dragState = {
+        x: ev.clientX,
+        y: ev.clientY,
+        left: r.left,
+        top: r.top,
+        width: r.width,
+        height: r.height,
+      };
+      try { drag.setPointerCapture(ev.pointerId); } catch (_) {}
+    });
+    const resize = feed.querySelector('[data-testid="biggy-td-camera-resize"]');
+    resize.addEventListener("pointerdown", (ev) => {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const r = feed.getBoundingClientRect();
+      resizeState = {
+        x: ev.clientX,
+        y: ev.clientY,
+        left: r.left,
+        top: r.top,
+        width: r.width,
+        height: r.height,
+      };
+      try { resize.setPointerCapture(ev.pointerId); } catch (_) {}
+    });
+    applyFeedRect(defaultFeedRect());
+    return feed;
+  }
+
   async function startPreview() {
-    const startBtn = shell && shell.querySelector('[data-testid="biggy-td-camera-start"]');
-    const stopBtn = shell && shell.querySelector('[data-testid="biggy-td-camera-stop"]');
+    const startBtn = settings && settings.querySelector('[data-testid="biggy-td-camera-start"]');
+    const stopBtn = settings && settings.querySelector('[data-testid="biggy-td-camera-stop"]');
     if (startBtn) startBtn.disabled = true;
     setMode("Camera ready");
     setNote("Starting preview…");
     try {
+      ensureFeed();
       await ensureComposite();
       if (root.BiggyTdCameraComposite && root.BiggyTdCameraComposite.reopen) {
         root.BiggyTdCameraComposite.reopen();
@@ -325,8 +398,12 @@
       leaseId = data.lease_id;
       frameGen += 1;
       viewing = true;
+      if (feed) feed.classList.add("is-live");
       if (stopBtn) stopBtn.disabled = false;
       setMode("Camera previewing");
+      // Hide settings so the feed (and Presentation capture) is not covered by chrome.
+      closeSettings();
+      notifyVision();
       heartbeatTimer = window.setInterval(() => {
         if (!viewing || !leaseId) return;
         fetch("/api/td-camera/view/heartbeat", {
@@ -342,29 +419,26 @@
       if (startBtn) startBtn.disabled = false;
       setMode("Camera ready");
       setNote(err.message || String(err));
+      notifyVision();
     }
   }
 
   function onPointerMove(ev) {
-    if (dragState) {
-      const dx = ev.clientX - dragState.x;
-      const dy = ev.clientY - dragState.y;
-      applyRect(clampRect(
-        dragState.left + dx,
-        dragState.top + dy,
+    if (dragState && feed) {
+      applyFeedRect(clampRect(
+        dragState.left + (ev.clientX - dragState.x),
+        dragState.top + (ev.clientY - dragState.y),
         dragState.width,
         dragState.height
       ));
       return;
     }
-    if (resizeState) {
-      const dx = ev.clientX - resizeState.x;
-      const dy = ev.clientY - resizeState.y;
-      applyRect(clampRect(
+    if (resizeState && feed) {
+      applyFeedRect(clampRect(
         resizeState.left,
         resizeState.top,
-        resizeState.width + dx,
-        resizeState.height + dy
+        resizeState.width + (ev.clientX - resizeState.x),
+        resizeState.height + (ev.clientY - resizeState.y)
       ));
     }
   }
@@ -381,41 +455,31 @@
     window.addEventListener("pointerup", onPointerUp, { passive: true });
     window.addEventListener("pointercancel", onPointerUp, { passive: true });
     window.addEventListener("resize", () => {
-      if (!shell) return;
-      const r = shell.getBoundingClientRect();
-      applyRect(clampRect(r.left, r.top, r.width, r.height));
+      if (!feed) return;
+      const r = feed.getBoundingClientRect();
+      applyFeedRect(clampRect(r.left, r.top, r.width, r.height));
     });
     window.addEventListener("pagehide", () => {
       close({ restoreFocus: false });
     });
-    document.addEventListener("keydown", (ev) => {
-      if (ev.key !== "Escape" || !shell) return;
-      const vision = document.getElementById("biggyVisionSurface");
-      if (vision) return;
-      const menu = document.getElementById("biggyVisionMenu");
-      if (menu && !menu.hidden) return;
-      ev.preventDefault();
-      close();
-    }, true);
   }
 
-  function buildShell() {
+  function buildSettings() {
     const panel = document.createElement("section");
-    panel.id = "biggyTdCameraOverlay";
-    panel.className = "biggy-td-camera-overlay";
+    panel.id = "biggyTdCameraSettings";
+    panel.className = "biggy-td-camera-settings";
     panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-label", "ThunderDome camera");
-    panel.setAttribute("data-testid", "biggy-td-camera-overlay");
+    panel.setAttribute("aria-label", "Camera settings");
+    panel.setAttribute("data-testid", "biggy-td-camera-settings");
     panel.innerHTML =
-      '<header class="biggy-td-camera-header" data-testid="biggy-td-camera-header">'
-      + '<b>Camera</b>'
-      + '<button type="button" class="biggy-td-camera-close" data-testid="biggy-td-camera-close" '
-      + 'aria-label="Close camera">Close</button>'
+      '<header class="biggy-td-camera-settings-header">'
+      + "<b>Camera settings</b>"
+      + '<button type="button" data-testid="biggy-td-camera-close" aria-label="Close camera settings">Close</button>'
       + "</header>"
-      + '<div class="biggy-td-camera-body">'
+      + '<div class="biggy-td-camera-settings-body">'
       + '<p class="biggy-td-camera-mode" data-testid="biggy-td-camera-mode">Camera ready</p>'
       + `<p class="biggy-td-camera-source" data-testid="biggy-td-camera-source">Source: ${SOURCE_LABEL}</p>`
-      + '<p class="biggy-td-camera-note" data-testid="biggy-td-camera-note">Backdrop applies to preview only.</p>'
+      + '<p class="biggy-td-camera-note" data-testid="biggy-td-camera-note"></p>'
       + '<div class="biggy-td-camera-controls">'
       + '<button type="button" data-testid="biggy-td-camera-start">Start</button>'
       + '<button type="button" class="danger" data-testid="biggy-td-camera-stop" disabled>Stop</button>'
@@ -429,51 +493,16 @@
       + 'data-testid="biggy-td-camera-backdrop-file" />'
       + "</label>"
       + "</div>"
-      + '<canvas id="biggy-td-camera-canvas" width="640" height="480" hidden '
-      + 'data-testid="biggy-td-camera-canvas"></canvas>'
-      + '<img id="biggy-td-camera-raw" alt="" hidden width="1" height="1" />'
+      + '<p class="biggy-td-camera-hint">Start shows only the camera image (lower-left). Closing settings does not stop the feed.</p>'
       + '<details class="biggy-td-camera-details" data-testid="biggy-td-camera-details">'
       + "<summary>Details</summary>"
       + '<pre data-testid="biggy-td-camera-details-body"></pre>'
       + "</details>"
-      + "</div>"
-      + '<div class="biggy-td-camera-resize" data-testid="biggy-td-camera-resize" '
-      + 'aria-label="Resize camera"></div>';
-
-    const header = panel.querySelector('[data-testid="biggy-td-camera-header"]');
-    header.addEventListener("pointerdown", (ev) => {
-      if (ev.target.closest("button")) return;
-      const r = panel.getBoundingClientRect();
-      dragState = {
-        x: ev.clientX,
-        y: ev.clientY,
-        left: r.left,
-        top: r.top,
-        width: r.width,
-        height: r.height,
-      };
-      try { header.setPointerCapture(ev.pointerId); } catch (_) {}
-    });
-
-    const resize = panel.querySelector('[data-testid="biggy-td-camera-resize"]');
-    resize.addEventListener("pointerdown", (ev) => {
-      ev.preventDefault();
-      ev.stopPropagation();
-      const r = panel.getBoundingClientRect();
-      resizeState = {
-        x: ev.clientX,
-        y: ev.clientY,
-        left: r.left,
-        top: r.top,
-        width: r.width,
-        height: r.height,
-      };
-      try { resize.setPointerCapture(ev.pointerId); } catch (_) {}
-    });
+      + "</div>";
 
     panel.querySelector('[data-testid="biggy-td-camera-close"]').addEventListener("click", (ev) => {
       ev.preventDefault();
-      close();
+      closeSettings();
     });
     panel.querySelector('[data-testid="biggy-td-camera-start"]').addEventListener("click", () => {
       startPreview().catch(() => {});
@@ -506,52 +535,63 @@
         setNote(err.message || String(err));
       }
     });
-
     return panel;
   }
 
-  function isOpen() {
-    return !!shell;
+  function closeSettings() {
+    if (settings && settings.parentNode) settings.remove();
+    settings = null;
+    try { document.getElementById("biggyVision")?.focus({ preventScroll: true }); } catch (_) {}
   }
 
-  function open() {
+  function openSettings() {
     installGlobal();
-    if (shell) {
-      applyRect(clampRect(
-        shell.getBoundingClientRect().left,
-        shell.getBoundingClientRect().top,
-        shell.offsetWidth,
-        shell.offsetHeight
-      ));
+    ensureStyle();
+    if (settings) {
       refreshHealthQuiet().catch(() => {});
-      return shell;
+      const stopBtn = settings.querySelector('[data-testid="biggy-td-camera-stop"]');
+      const startBtn = settings.querySelector('[data-testid="biggy-td-camera-start"]');
+      if (stopBtn) stopBtn.disabled = !viewing;
+      if (startBtn) startBtn.disabled = !!viewing;
+      return settings;
     }
-    shell = buildShell();
-    document.body.appendChild(shell);
-    const place = () => applyRect(defaultRect());
-    place();
-    ensureStyle().then(place);
-    const backdrop = shell.querySelector("#biggy-td-camera-backdrop");
-    if (backdrop) backdrop.value = "off";
-    setMode("Camera ready");
-    setNote("Backdrop applies to preview only.");
+    settings = buildSettings();
+    document.body.appendChild(settings);
+    const stopBtn = settings.querySelector('[data-testid="biggy-td-camera-stop"]');
+    const startBtn = settings.querySelector('[data-testid="biggy-td-camera-start"]');
+    if (stopBtn) stopBtn.disabled = !viewing;
+    if (startBtn) startBtn.disabled = !!viewing;
+    setMode(viewing ? "Camera previewing" : "Camera ready");
+    setNote(viewing
+      ? "Feed is live lower-left. Stop ends the feed; Close hides settings only."
+      : "Start shows the feed only in the lower-left. Backdrop is preview-only.");
     refreshHealthQuiet().catch(() => {});
-    try {
-      shell.querySelector('[data-testid="biggy-td-camera-close"]')
-        ?.focus({ preventScroll: true });
-    } catch (_) {}
-    return shell;
+    return settings;
+  }
+
+  function isOpen() {
+    return !!(settings || feed);
+  }
+
+  function isSettingsOpen() {
+    return !!settings;
+  }
+
+  function isViewing() {
+    return !!viewing;
+  }
+
+  /** VISION→Camera: settings surface (feed stays independent). */
+  function open() {
+    return openSettings();
   }
 
   async function close({ restoreFocus = true } = {}) {
     await stopPreview({ silent: true });
-    if (root.BiggyTdCameraComposite) {
-      try { root.BiggyTdCameraComposite.abort(); } catch (_) {}
-    }
-    clearFrames();
-    if (shell && shell.parentNode) shell.remove();
-    shell = null;
-    setMode("Camera off");
+    closeSettings();
+    if (feed && feed.parentNode) feed.remove();
+    feed = null;
+    notifyVision();
     if (restoreFocus) {
       try { document.getElementById("biggyVision")?.focus({ preventScroll: true }); } catch (_) {}
     }
@@ -559,8 +599,19 @@
 
   root.BiggyTdCameraOverlay = {
     open,
+    openSettings,
+    closeSettings,
     close,
     isOpen,
+    isSettingsOpen,
+    isViewing,
     stopPreview,
+    /** Test hooks — not for product UI. */
+    _test: {
+      ensureFeed,
+      defaultFeedRect,
+      clampRect,
+      applyFeedRect,
+    },
   };
 })(typeof window !== "undefined" ? window : globalThis);

@@ -1383,12 +1383,14 @@
   }
 
   function openBiggyTdCameraOverlay() {
-    // Independent of Vision surface / Workspace — stays usable while other modules open.
+    // Independent of Vision surface / Workspace — settings on demand; feed is separate.
     ensureBiggyTdCameraOverlayModule()
       .then((api) => {
-        if (api && typeof api.open === 'function') api.open();
+        if (api && typeof api.openSettings === 'function') api.openSettings();
+        else if (api && typeof api.open === 'function') api.open();
+        syncVisionActivityChrome();
       })
-      .catch(() => { /* fail closed; Start path reports errors inside overlay */ });
+      .catch(() => { /* fail closed; Start path reports errors inside settings */ });
   }
 
   function ensureBiggyPresentationModule() {
@@ -1410,13 +1412,66 @@
   }
 
   function openBiggyPresentationPanel() {
-    // Opening the menu/panel does not capture — On starts recording only.
+    // Opening settings does not capture — On starts recording only.
     ensureBiggyPresentationModule()
       .then((api) => {
         if (api && typeof api.open === 'function') api.open();
+        syncVisionActivityChrome();
       })
       .catch(() => {});
   }
+
+  function syncVisionActivityChrome() {
+    const toggle = document.getElementById('biggyVision');
+    const cam = window.BiggyTdCameraOverlay;
+    const pres = window.BiggyPresentation;
+    const previewing = !!(cam && typeof cam.isViewing === 'function' && cam.isViewing());
+    const recording = !!(pres && typeof pres.isRecording === 'function' && pres.isRecording());
+    const phase = pres && typeof pres.phase === 'function' ? String(pres.phase() || '') : '';
+    const failed = phase === 'failed';
+    const errMsg = (pres && typeof pres.lastStatus === 'function')
+      ? String(pres.lastStatus() || '').trim()
+      : '';
+    const succinctErr = errMsg
+      ? (errMsg.length > 90 ? `${errMsg.slice(0, 87)}…` : errMsg)
+      : 'Presentation error — open VISION→Presentation';
+    if (toggle) {
+      toggle.classList.toggle('is-vision-live', previewing || recording);
+      toggle.classList.toggle('is-presentation-recording', recording);
+      toggle.classList.toggle('is-presentation-error', failed && !recording);
+      if (failed && !recording) {
+        toggle.title = succinctErr;
+      } else if (recording) {
+        toggle.title = 'Presentation recording — open VISION→Presentation for Off / Open saved';
+      } else if (previewing) {
+        toggle.title = 'Camera feed live — open VISION→Camera for settings / Stop';
+      } else {
+        toggle.title = 'Open ARGUS Vision control panels';
+      }
+    }
+    const camItem = document.querySelector('[data-testid="biggy-vision-camera"]');
+    if (camItem) {
+      camItem.textContent = previewing ? 'Camera (live…)' : 'Camera';
+      camItem.classList.toggle('is-live-activity', previewing);
+    }
+    const presItem = document.querySelector('[data-testid="biggy-vision-presentation"]');
+    if (presItem) {
+      if (recording) {
+        presItem.textContent = phase === 'finalizing' ? 'Presentation (saving…)' : 'Presentation (recording…)';
+        presItem.classList.add('is-recording-activity');
+        presItem.classList.remove('is-error-activity');
+      } else if (failed) {
+        presItem.textContent = 'Presentation (error…)';
+        presItem.classList.remove('is-recording-activity');
+        presItem.classList.add('is-error-activity');
+      } else {
+        presItem.textContent = 'Presentation';
+        presItem.classList.remove('is-recording-activity');
+        presItem.classList.remove('is-error-activity');
+      }
+    }
+  }
+  window.__biggySyncVisionActivity = syncVisionActivityChrome;
 
   function visionSenseFor(panelId) {
     const id = String(panelId || '').trim();
@@ -1696,7 +1751,22 @@
     toggle.dataset.bound = '1';
 
     const setOpen = (open) => {
+      if (open) {
+        // Settings are on-demand; hide them so the VISION menu stays clickable
+        // without stopping a live camera feed or Presentation recording.
+        try {
+          if (window.BiggyTdCameraOverlay && typeof window.BiggyTdCameraOverlay.closeSettings === 'function') {
+            window.BiggyTdCameraOverlay.closeSettings();
+          }
+        } catch (_err) { /* ignore */ }
+        try {
+          if (window.BiggyPresentation && typeof window.BiggyPresentation.closeSettings === 'function') {
+            window.BiggyPresentation.closeSettings();
+          }
+        } catch (_err) { /* ignore */ }
+      }
       menu.hidden = !open;
+      wrap.classList.toggle('is-menu-open', !!open);
       syncVisionToggleSelection();
       if (open) {
         positionBiggyVisionMenu(wrap, menu);
@@ -1775,6 +1845,7 @@
       const target = event.target;
       if (target instanceof Node && liveWrap.contains(target)) return;
       liveMenu.hidden = true;
+      liveWrap.classList.remove('is-menu-open');
       syncVisionToggleSelection();
     }, true);
 
@@ -1782,9 +1853,11 @@
       if (event.key !== 'Escape') return;
       const liveMenu = document.getElementById('biggyVisionMenu');
       const liveToggle = document.getElementById('biggyVision');
+      const liveWrap = liveToggle && liveToggle.closest('.biggy-vision-wrap');
       if (!liveMenu || !liveToggle || liveMenu.hidden) return;
       event.preventDefault();
       liveMenu.hidden = true;
+      if (liveWrap) liveWrap.classList.remove('is-menu-open');
       syncVisionToggleSelection();
       liveToggle.focus({ preventScroll: true });
     }, true);

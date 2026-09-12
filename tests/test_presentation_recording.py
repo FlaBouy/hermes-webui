@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import re
 import sys
 import threading
 import time
@@ -334,8 +333,7 @@ body{{margin:0;background:#05070b;color:#d7e4ec}}
 <div id="mainChat" class="biggy-brand-iwo">
   <div id="composerWrap"><div id="composerBox"><textarea id="msg" aria-label="Message Biggy"></textarea></div></div>
 </div>
-<script src="/static/biggy-brand.js"></script>
-<script src="/static/biggy-document-viewer.js"></script>
+<script src="/static/biggy-brand.js?v=presentation-viewer-test"></script>
 </body></html>"""
 
     class Handler(BaseHTTPRequestHandler):
@@ -376,6 +374,7 @@ body{{margin:0;background:#05070b;color:#d7e4ec}}
             if path == "/static/biggy-brand.css":
                 return self._send(200, brand_css, "text/css")
             if path.startswith("/static/"):
+                # Strip query is already done by urlparse.path
                 rel = path[len("/static/") :]
                 fpath = (ROOT / "static" / rel).resolve()
                 if not str(fpath).startswith(str((ROOT / "static").resolve())) or not fpath.is_file():
@@ -465,24 +464,47 @@ def test_presentation_gui_mediarecorder_and_camera_anchor(presentation_gui_serve
         )
         page.goto(info["origin"], wait_until="domcontentloaded")
 
-        # Camera overlay anchors to #composerBox (not tall #composerWrap).
+        # VISION→Camera opens settings (not a chrome-wrapped feed).
         page.get_by_test_id("biggy-vision").click()
         page.get_by_test_id("biggy-vision-camera").click()
+        settings = page.get_by_test_id("biggy-td-camera-settings")
+        expect(settings).to_be_visible(timeout=10000)
+        expect(page.get_by_test_id("biggy-td-camera-overlay")).to_have_count(0)
+
+        # Product default feed geometry vs real #composerBox (not full-width #composerWrap rail).
+        page.evaluate(
+            """() => {
+              const api = window.BiggyTdCameraOverlay;
+              api._test.ensureFeed();
+              api._test.applyFeedRect(api._test.defaultFeedRect());
+            }"""
+        )
         overlay = page.get_by_test_id("biggy-td-camera-overlay")
-        expect(overlay).to_be_visible(timeout=10000)
-        page.wait_for_timeout(300)
+        expect(overlay).to_be_visible()
         box = overlay.bounding_box()
         composer = page.locator("#composerBox").bounding_box()
         wrap = page.locator("#composerWrap").bounding_box()
         assert box and composer and wrap
-        assert box["y"] + box["height"] <= composer["y"] + 2
-        assert composer["y"] - (box["y"] + box["height"]) <= 40
-        if wrap["height"] > composer["height"] * 1.5:
-            gap_composer = abs(composer["y"] - (box["y"] + box["height"]))
-            gap_wrap = abs(wrap["y"] - (box["y"] + box["height"]))
-            assert gap_composer < gap_wrap
-
+        assert box["x"] < 200
+        assert box["y"] > 400
+        # No full-width forbidden strip at wrap.top: feed bottom may extend below wrap.top
+        # when it does not AABB-overlap the real centered composerBox.
+        overlaps_composer = not (
+            box["x"] + box["width"] <= composer["x"]
+            or box["x"] >= composer["x"] + composer["width"]
+            or box["y"] + box["height"] <= composer["y"]
+            or box["y"] >= composer["y"] + composer["height"]
+        )
+        if overlaps_composer:
+            assert box["y"] + box["height"] <= composer["y"] + 2 or box["x"] + box["width"] <= composer["x"] + 2
+        else:
+            assert box["y"] + box["height"] > wrap["y"]
+        # Settings Close must not tear down the feed.
         page.get_by_test_id("biggy-td-camera-close").click()
+        expect(settings).to_have_count(0)
+        expect(overlay).to_be_visible()
+        page.evaluate("() => window.BiggyTdCameraOverlay.close({ restoreFocus: false })")
+        expect(page.get_by_test_id("biggy-td-camera-overlay")).to_have_count(0)
 
         # Presentation panel — opening menu/panel does not capture.
         page.get_by_test_id("biggy-vision").click()
@@ -505,8 +527,19 @@ def test_presentation_gui_mediarecorder_and_camera_anchor(presentation_gui_serve
         assert "max_chunk_bytes=" in details
 
         page.get_by_test_id("biggy-presentation-on").click()
-        expect(panel).to_have_class(re.compile(r"is-recording"), timeout=10000)
+        page.wait_for_function(
+            "() => !!(window.BiggyPresentation && window.BiggyPresentation.isRecording())",
+            timeout=10000,
+        )
+        # Settings must disappear while recording so they are not in the capture.
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_have_count(0)
+        assert page.evaluate("() => window.BiggyPresentation.phase()") == "recording"
         page.wait_for_timeout(2200)
+        # Off via VISION→Presentation (reopen settings); Close must not be required to stop.
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_be_visible()
+        assert page.evaluate("() => window.BiggyPresentation.isRecording()") is True
         page.get_by_test_id("biggy-presentation-off").click()
         page.wait_for_function(
             """() => {
@@ -539,7 +572,53 @@ def test_presentation_gui_mediarecorder_and_camera_anchor(presentation_gui_serve
         )
         assert isinstance(dur, (int, float)) and dur > 0
 
+        # Close playback so Open saved controls stay reachable.
+        page.locator(".biggy-document-close").click()
+        expect(page.get_by_test_id("biggy-document-viewer")).to_have_count(0)
+
+        # Stale viewer (no presentation support) must not silent-no-op Open saved.
+        page.evaluate(
+            """() => {
+              window.BiggyDocumentViewer = {
+                open: () => false
+              };
+            }"""
+        )
+        page.get_by_test_id("biggy-presentation-open").click()
+        page.wait_for_function(
+            """() => {
+              const t = document.querySelector('[data-testid="biggy-presentation-status"]');
+              return !!(t && /stale|rejected|unavailable|failed/i.test(t.textContent || ''));
+            }""",
+            timeout=5000,
+        )
+        # Cache-busted module must replace stale viewer and open video again.
+        page.evaluate(
+            """async () => {
+              await import('/static/biggy-document-viewer.js?v=presentation-viewer-upgrade');
+            }"""
+        )
+        page.wait_for_function(
+            "() => !!(window.BiggyDocumentViewer && window.BiggyDocumentViewer.supportsPresentation)",
+            timeout=5000,
+        )
+        page.get_by_test_id("biggy-presentation-open").click()
+        expect(page.get_by_test_id("biggy-presentation-video").last).to_be_visible(timeout=10000)
+
         browser.close()
+
+
+def test_brand_document_viewer_import_tracks_build_id():
+    brand = (ROOT / "static" / "biggy-brand.js").read_text(encoding="utf-8")
+    assert "biggy-document-viewer.js?v=20260912" not in brand
+    assert "encodeURIComponent(BUILD_ID)" in brand
+    assert "__biggyDocumentViewerReady" in brand
+    viewer = (ROOT / "static" / "biggy-document-viewer.js").read_text(encoding="utf-8")
+    assert "supportsPresentation" in viewer
+    assert "presentationOk" in viewer
+    recorder = (ROOT / "static" / "presentation" / "recorder.js").read_text(encoding="utf-8")
+    assert "Viewer rejected" in recorder
+    assert "supportsPresentation" in recorder
 
 
 def test_embedded_webm_signatures_rejected(presentation_share):
@@ -786,9 +865,16 @@ def test_ordered_upload_small_chunks_delayed_and_duration_limit(presentation_gui
         page.evaluate("() => window.BiggyPresentation._test.setLimits({ max_chunk_bytes: 200, max_duration_ms: 1500 })")
 
         page.get_by_test_id("biggy-presentation-on").click()
-        expect(panel).to_have_class(re.compile(r"is-recording"), timeout=10000)
+        page.wait_for_function(
+            "() => !!(window.BiggyPresentation && window.BiggyPresentation.isRecording())",
+            timeout=10000,
+        )
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_have_count(0)
         # Immediate Off while timeslice events still overlapping with delayed uploads.
         page.wait_for_timeout(600)
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_be_visible()
         page.get_by_test_id("biggy-presentation-off").click()
         page.wait_for_function(
             """() => {
@@ -809,16 +895,29 @@ def test_ordered_upload_small_chunks_delayed_and_duration_limit(presentation_gui
 
         # Duration-limit path: accelerated max_duration must save (not false exceed).
         monkeypatch.setattr(store, "MAX_DURATION_MS", 800)
+        page.evaluate(
+            "() => window.BiggyPresentation._test.setLimits({ max_duration_ms: 800 })"
+        )
         before = set(info["dest"].glob("presentation-*/recording.*"))
         page.get_by_test_id("biggy-presentation-on").click()
-        expect(panel).to_have_class(re.compile(r"is-recording"), timeout=10000)
+        page.wait_for_function(
+            "() => !!(window.BiggyPresentation && window.BiggyPresentation.isRecording())",
+            timeout=10000,
+        )
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_have_count(0)
+        page.wait_for_function(
+            "() => window.BiggyPresentation.phase() === 'saved'",
+            timeout=20000,
+        )
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
         page.wait_for_function(
             """() => {
               const t = document.querySelector('[data-testid="biggy-presentation-status"]');
               const p = document.querySelector('[data-testid="biggy-presentation-panel"]');
               return !!(t && /Saved /i.test(t.textContent || '') && p && p.dataset.phase === 'saved');
             }""",
-            timeout=20000,
+            timeout=10000,
         )
         after = set(info["dest"].glob("presentation-*/recording.*"))
         new_files = after - before
@@ -892,8 +991,15 @@ def test_close_during_finalizing_preserves_generation(presentation_gui_server, m
             timeout=10000,
         )
         page.get_by_test_id("biggy-presentation-on").click()
-        expect(panel).to_have_class(re.compile(r"is-recording"), timeout=10000)
+        page.wait_for_function(
+            "() => !!(window.BiggyPresentation && window.BiggyPresentation.isRecording())",
+            timeout=10000,
+        )
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_have_count(0)
         page.wait_for_timeout(1200)
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_be_visible()
         page.get_by_test_id("biggy-presentation-off").click()
         # Wait until server entered finalize.
         assert started.wait(timeout=15)
@@ -945,4 +1051,210 @@ def test_close_during_finalizing_preserves_generation(presentation_gui_server, m
         )
         assert page.evaluate("() => window.BiggyPresentation.phase()") == "saved"
         assert list(info["dest"].glob("presentation-*/recording.*"))
+        browser.close()
+
+
+def test_clean_ui_actual_layout_screenshots(presentation_gui_server):
+    """Real Biggy composer layout harness — before/after evidence for clean UI."""
+    sp = _require_playwright()
+    info = presentation_gui_server
+    out_dir = Path(
+        "/Users/rick/Documents/Codex/2026-09-11/cursor-spark-handoff/outputs"
+    )
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with sp() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1280, "height": 900})
+        context.add_cookies(
+            [
+                {
+                    "name": info["cookie_name"],
+                    "value": info["cookie"],
+                    "url": info["origin"],
+                    "httpOnly": True,
+                    "sameSite": "Lax",
+                }
+            ]
+        )
+        page = context.new_page()
+        page.add_init_script(
+            """
+            (() => {
+              navigator.mediaDevices.getDisplayMedia = async () => {
+                const c = document.createElement('canvas');
+                c.width = 320; c.height = 180;
+                const ctx = c.getContext('2d');
+                const timer = setInterval(() => {
+                  ctx.fillStyle = '#124'; ctx.fillRect(0,0,320,180);
+                  ctx.fillStyle = '#0c8'; ctx.fillRect(40,40,60,40);
+                }, 50);
+                const stream = c.captureStream(12);
+                const track = stream.getVideoTracks()[0];
+                const stop = track.stop.bind(track);
+                track.stop = () => { clearInterval(timer); stop(); };
+                return stream;
+              };
+            })();
+            """
+        )
+        page.goto(info["origin"], wait_until="domcontentloaded")
+
+        # BEFORE: settings chrome visible (owner complaint state class).
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-camera").click()
+        expect(page.get_by_test_id("biggy-td-camera-settings")).to_be_visible()
+        page.screenshot(
+            path=str(out_dir / "VISION_CLEAN_UI_before_settings_chrome.png"),
+            full_page=False,
+        )
+        # Open Presentation settings (VISION menu dismisses Camera settings first).
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_be_visible()
+        expect(page.get_by_test_id("biggy-td-camera-settings")).to_have_count(0)
+
+        # Feed-only camera (product default geometry) + presentation recording hides settings.
+        page.evaluate(
+            """() => {
+              const api = window.BiggyTdCameraOverlay;
+              api.closeSettings();
+              api._test.ensureFeed();
+              api._test.applyFeedRect(api._test.defaultFeedRect());
+              const c = document.querySelector('#biggy-td-camera-canvas');
+              if (c) {
+                c.hidden = false;
+                const ctx = c.getContext('2d');
+                ctx.fillStyle = '#062';
+                ctx.fillRect(0,0,c.width,c.height);
+                ctx.fillStyle = '#3d8';
+                ctx.fillRect(40,40,120,80);
+              }
+            }"""
+        )
+        page.get_by_test_id("biggy-presentation-on").click()
+        page.wait_for_function(
+            "() => !!(window.BiggyPresentation && window.BiggyPresentation.isRecording())",
+            timeout=10000,
+        )
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_have_count(0)
+        expect(page.get_by_test_id("biggy-td-camera-settings")).to_have_count(0)
+        expect(page.get_by_test_id("biggy-td-camera-overlay")).to_be_visible()
+        assert page.evaluate(
+            "() => !!(document.getElementById('biggyVision') && "
+            "document.getElementById('biggyVision').classList.contains('is-presentation-recording'))"
+        )
+        page.screenshot(
+            path=str(out_dir / "VISION_CLEAN_UI_after_feed_only_recording.png"),
+            full_page=False,
+        )
+
+        # Settings Close does not stop recording; Off does.
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_be_visible()
+        page.get_by_test_id("biggy-presentation-close").click()
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_have_count(0)
+        assert page.evaluate("() => window.BiggyPresentation.isRecording()") is True
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
+        page.get_by_test_id("biggy-presentation-off").click()
+        page.wait_for_function(
+            "() => window.BiggyPresentation.phase() === 'saved'",
+            timeout=20000,
+        )
+        browser.close()
+
+
+def test_settings_hidden_before_mediarecorder_start_and_vision_error(presentation_gui_server):
+    """First recorded frame must not include settings; hidden failures surface on Vision."""
+    sp = _require_playwright()
+    info = presentation_gui_server
+    with sp() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1280, "height": 900})
+        context.add_cookies(
+            [
+                {
+                    "name": info["cookie_name"],
+                    "value": info["cookie"],
+                    "url": info["origin"],
+                    "httpOnly": True,
+                    "sameSite": "Lax",
+                }
+            ]
+        )
+        page = context.new_page()
+        page.add_init_script(
+            """
+            (() => {
+              navigator.mediaDevices.getDisplayMedia = async () => {
+                const c = document.createElement('canvas');
+                c.width = 160; c.height = 90;
+                const ctx = c.getContext('2d');
+                const timer = setInterval(() => {
+                  ctx.fillStyle = '#210'; ctx.fillRect(0,0,160,90);
+                }, 40);
+                const stream = c.captureStream(12);
+                const track = stream.getVideoTracks()[0];
+                const stop = track.stop.bind(track);
+                track.stop = () => { clearInterval(timer); stop(); };
+                return stream;
+              };
+              const origStart = MediaRecorder.prototype.start;
+              MediaRecorder.prototype.start = function (...args) {
+                const panel = document.querySelector('[data-testid="biggy-presentation-panel"]');
+                window.__presAtRecorderStart = {
+                  settingsPresent: !!panel,
+                  settingsConnected: !!(panel && panel.isConnected),
+                  phase: window.BiggyPresentation ? window.BiggyPresentation.phase() : null,
+                };
+                return origStart.apply(this, args);
+              };
+            })();
+            """
+        )
+        page.goto(info["origin"], wait_until="domcontentloaded")
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_be_visible()
+        page.wait_for_function(
+            """() => {
+              const d = document.querySelector('[data-testid="biggy-presentation-details-body"]');
+              return !!(d && /max_duration_ms=/.test(d.textContent || ''));
+            }""",
+            timeout=10000,
+        )
+        page.get_by_test_id("biggy-presentation-on").click()
+        page.wait_for_function(
+            "() => !!(window.__presAtRecorderStart && window.BiggyPresentation.isRecording())",
+            timeout=10000,
+        )
+        at_start = page.evaluate("() => window.__presAtRecorderStart")
+        assert at_start["settingsPresent"] is False
+        assert at_start["settingsConnected"] is False
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_have_count(0)
+
+        # Hidden-settings upload failure must light Vision error chrome and retain status.
+        page.evaluate(
+            """() => {
+              const gen = window.BiggyPresentation._test.getGeneration();
+              window.BiggyPresentation._test.failUpload(new Error('chunk_upload_failed'), gen);
+            }"""
+        )
+        page.wait_for_function(
+            """() => {
+              const v = document.getElementById('biggyVision');
+              return !!(v && v.classList.contains('is-presentation-error')
+                && window.BiggyPresentation.phase() === 'failed');
+            }""",
+            timeout=5000,
+        )
+        title = page.evaluate("() => document.getElementById('biggyVision').title || ''")
+        assert "chunk_upload_failed" in title or "Upload failed" in title
+        page.get_by_test_id("biggy-vision").click()
+        page.get_by_test_id("biggy-vision-presentation").click()
+        expect(page.get_by_test_id("biggy-presentation-panel")).to_be_visible()
+        status = page.get_by_test_id("biggy-presentation-status").inner_text()
+        assert "chunk_upload_failed" in status or "Upload failed" in status
+        assert page.evaluate("() => window.BiggyPresentation.phase()") == "failed"
         browser.close()

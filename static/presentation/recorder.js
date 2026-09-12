@@ -41,6 +41,7 @@
   let consumerChain = Promise.resolve();
   let drainWaiters = [];
   let stopping = false;
+  let lastStatusMsg = "";
 
   function csrfHeaders(extra) {
     const h = Object.assign({}, extra || {});
@@ -95,6 +96,11 @@
   function setPhase(next) {
     phase = next;
     if (shell) shell.dataset.phase = next;
+    try {
+      if (typeof root.__biggySyncVisionActivity === "function") {
+        root.__biggySyncVisionActivity();
+      }
+    } catch (_) {}
   }
 
   function ensureStyle() {
@@ -112,8 +118,14 @@
   }
 
   function setStatus(msg) {
+    lastStatusMsg = msg || "";
     const el = shell && shell.querySelector('[data-testid="biggy-presentation-status"]');
-    if (el) el.textContent = msg || "";
+    if (el) el.textContent = lastStatusMsg;
+    try {
+      if (typeof root.__biggySyncVisionActivity === "function") {
+        root.__biggySyncVisionActivity();
+      }
+    } catch (_) {}
   }
 
   function setDetails(text) {
@@ -427,7 +439,6 @@
     }
     if (phase !== "idle" && phase !== "failed" && phase !== "saved") return;
     const onBtn = shell && shell.querySelector('[data-testid="biggy-presentation-on"]');
-    const offBtn = shell && shell.querySelector('[data-testid="biggy-presentation-off"]');
     if (isTabletish() || !displayCaptureSupported()) {
       setStatus(TABLET_HINT);
       return;
@@ -492,6 +503,20 @@
       recorder.onerror = () => {
         failUpload(new Error("recorder_error"), gen);
       };
+      // Hide settings before the first recorded frame — consent already granted.
+      setStatus(`Recording… format=${formatLabel(mime)} · audio=off · session=${sid.slice(0, 12)}…`);
+      hideSettingsKeepRecording();
+      // Two rAFs: let the browser paint without the settings panel before start.
+      const paintOk = await new Promise((resolve) => {
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => resolve(gen === generation));
+        });
+      });
+      if (!paintOk || gen !== generation) {
+        releaseTracks();
+        await abortSession(sid, "superseded", gen);
+        return;
+      }
       recorder.start(500);
       setPhase("recording");
       startedAt = Date.now();
@@ -503,9 +528,6 @@
         }
       }, 250);
       setTimer();
-      if (offBtn) offBtn.disabled = false;
-      shell?.classList.add("is-recording");
-      setStatus(`Recording… format=${formatLabel(mime)} · audio=off · session=${sid.slice(0, 12)}…`);
     } catch (err) {
       releaseTracks();
       const sid = sessionId;
@@ -731,9 +753,14 @@
     window.addEventListener("beforeunload", onPageHide);
   }
 
+  function hideSettingsKeepRecording() {
+    if (shell && shell.parentNode) shell.remove();
+    shell = null;
+  }
+
   function wireShell(panel) {
     panel.querySelector('[data-testid="biggy-presentation-close"]').addEventListener("click", () => {
-      close();
+      closeSettings();
     });
     panel.querySelector('[data-testid="biggy-presentation-on"]').addEventListener("click", () => {
       startRecording().catch(() => {});
@@ -751,12 +778,12 @@
     panel.id = "biggyPresentationPanel";
     panel.className = "biggy-presentation-panel";
     panel.setAttribute("role", "dialog");
-    panel.setAttribute("aria-label", "Presentation recording");
+    panel.setAttribute("aria-label", "Presentation settings");
     panel.setAttribute("data-testid", "biggy-presentation-panel");
     panel.dataset.phase = phase;
     panel.innerHTML =
       '<header class="biggy-presentation-header">'
-      + "<b>Presentation</b>"
+      + "<b>Presentation settings</b>"
       + '<span class="biggy-presentation-indicator" aria-hidden="true"></span>'
       + '<span class="biggy-presentation-timer" data-testid="biggy-presentation-timer">00:00</span>'
       + '<button type="button" data-testid="biggy-presentation-close">Close</button>'
@@ -768,7 +795,7 @@
       + '<button type="button" class="danger" data-testid="biggy-presentation-off" disabled>Off</button>'
       + '<button type="button" data-testid="biggy-presentation-open" disabled>Open saved</button>'
       + "</div>"
-      + '<p class="biggy-presentation-note">Records the Biggy GUI you select (includes Camera overlay/backdrop). Audio off. Desktop only.</p>'
+      + '<p class="biggy-presentation-note">On records the Biggy GUI you select (includes Camera feed). Settings hide while recording — reopen via VISION→Presentation for Off / Open saved. Audio off. Desktop only.</p>'
       + '<details data-testid="biggy-presentation-details"><summary>Details</summary>'
       + '<pre data-testid="biggy-presentation-details-body"></pre></details>'
       + "</div>";
@@ -782,15 +809,29 @@
     const onBtn = shell.querySelector('[data-testid="biggy-presentation-on"]');
     const offBtn = shell.querySelector('[data-testid="biggy-presentation-off"]');
     const openBtn = shell.querySelector('[data-testid="biggy-presentation-open"]');
-    if (onBtn) onBtn.disabled = phase === "finalizing" || phase === "recording" || phase === "choosing" || phase === "uploading";
-    if (offBtn) offBtn.disabled = phase !== "recording";
+    if (onBtn) {
+      onBtn.disabled = phase === "finalizing" || phase === "recording" || phase === "choosing" || phase === "uploading";
+    }
+    if (offBtn) {
+      offBtn.disabled = !(phase === "recording" || phase === "uploading" || phase === "finalizing");
+    }
     if (openBtn) openBtn.disabled = !lastSaved;
     if (phase === "finalizing") setStatus("Finalizing…");
-    else if (phase === "saved" && lastSaved) {
+    else if (phase === "recording" || phase === "uploading") {
+      setStatus(
+        lastStatusMsg
+        || "Recording in progress — Off stops and saves. Close hides settings only."
+      );
+    } else if (phase === "saved" && lastSaved) {
       setStatus(
         `Saved ${lastSaved.filename} · ${Math.round((lastSaved.duration_ms || 0) / 1000)}s · ${formatLabel(lastSaved.mime)}`
       );
+    } else if (phase === "failed") {
+      if (lastStatusMsg) setStatus(lastStatusMsg);
+    } else if (lastStatusMsg && (phase === "idle" || phase === "choosing")) {
+      setStatus(lastStatusMsg);
     }
+    setTimer();
   }
 
   function open() {
@@ -804,40 +845,38 @@
     shell = buildShell();
     document.body.appendChild(shell);
     syncShellControls();
-    if (phase !== "finalizing" && phase !== "saved" && phase !== "failed") {
-      setPhase(phase === "idle" ? "idle" : phase);
-    }
     if (isTabletish() || !displayCaptureSupported()) {
       setStatus(TABLET_HINT);
       const onBtn = shell.querySelector('[data-testid="biggy-presentation-on"]');
       if (onBtn) onBtn.disabled = true;
-    } else if (phase === "idle") {
+    } else if (phase === "idle" || phase === "saved" || phase === "failed") {
       refreshStatus().catch(() => {});
     }
     return shell;
   }
 
-  async function close() {
-    if (phase === "recording" || phase === "choosing" || phase === "uploading") {
-      await stopRecording({ reason: "panel_close" }).catch(() => {});
-    }
-    // During finalizing: hide panel but keep generation/session/phase so reopen
-    // cannot start a racing new recording over the pending save.
+  function closeSettings() {
+    // Closing settings must not stop an active recording/finalize.
     if (shell && shell.parentNode) shell.remove();
     shell = null;
-    if (phase !== "finalizing") {
-      if (phase !== "saved" && phase !== "failed") {
-        setPhase("idle");
-      }
-    }
+    try { document.getElementById("biggyVision")?.focus({ preventScroll: true }); } catch (_) {}
+  }
+
+  async function close() {
+    // Alias for settings close — never stops capture.
+    closeSettings();
   }
 
   root.BiggyPresentation = {
     open,
+    openSettings: open,
     close,
+    closeSettings,
+    stopRecording,
     isOpen: () => !!shell,
-    isRecording: () => phase === "recording",
+    isRecording: () => phase === "recording" || phase === "uploading" || phase === "finalizing",
     phase: () => phase,
+    lastStatus: () => lastStatusMsg,
     /** Test hooks — not for product UI. */
     _test: {
       getLimits: () => Object.assign({}, limits),
@@ -846,6 +885,8 @@
       getAcceptedEvents: () => acceptedEvents,
       getSeq: () => seq,
       DURATION_TOLERANCE_MS,
+      failUpload,
+      getGeneration: () => generation,
     },
   };
 })(typeof window !== "undefined" ? window : globalThis);
