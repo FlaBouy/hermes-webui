@@ -700,6 +700,9 @@ def _embed_security_headers(handler) -> None:
 
 
 def _send_bytes(handler, status: int, body: bytes, *, content_type: str) -> bool:
+    if content_type.lower().startswith("text/html") and b"</body>" in body:
+        script = b'<script src="/static/biggy-document-viewer.js?v=20260912"></script>'
+        body = body.replace(b"</body>", script + b"</body>", 1)
     handler.send_response(status)
     handler.send_header("Content-Type", content_type)
     handler.send_header("Content-Length", str(len(body)))

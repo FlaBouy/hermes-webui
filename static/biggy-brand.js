@@ -3,6 +3,7 @@
   if (window.__biggyBrandLoaded) return;
   window.__biggyBrandLoaded = true;
 
+  const documentViewerReady = import('/static/biggy-document-viewer.js?v=20260912');
   const DOC_TITLE = 'Biggy — Local Fleet Coordinator';
   const ROLE = 'Local Fleet Coordinator';
   const BRAND = 'Biggy';
@@ -5718,7 +5719,7 @@
   function openGalaxyFilterDocument(path) {
     const rel = String(path || '').trim();
     if (!rel) return;
-    window.open(`/api/biggy/rag-file?path=${encodeURIComponent(rel)}`, '_blank', 'noopener');
+    documentViewerReady.then(() => window.BiggyDocumentViewer.open(`/api/biggy/rag-file?path=${encodeURIComponent(rel)}`, rel.split('/').pop()));
   }
 
   function markGalaxyFilterSelection(path, nodeCount) {

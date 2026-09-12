@@ -5619,7 +5619,7 @@ def _send_extension_sidecar_proxy_response(handler, status: int, body: bytes, he
     return True
 
 
-def _send_extension_sidecar_proxy_stream(handler, status: int, stream, headers) -> bool:
+def _send_extension_sidecar_proxy_stream(handler, status: int, stream, headers, *, document_viewer: bool = False) -> bool:
     """Forward an upstream sidecar body in chunks without full buffering."""
     handler.send_response(status)
     sent_content_type = False
@@ -5651,7 +5651,11 @@ def _send_extension_sidecar_proxy_stream(handler, status: int, stream, headers) 
             raise ValueError("Extension sidecar response too large")
         handler.send_header("Content-Length", str(content_length))
     handler.send_header("Cache-Control", "no-store")
-    _security_headers(handler)
+    if document_viewer:
+        from api.biggy_workspace_embed import _embed_security_headers
+        _embed_security_headers(handler)
+    else:
+        _security_headers(handler)
     handler.end_headers()
 
     total = 0
@@ -6365,7 +6369,7 @@ def _handle_biggy_rag_sidecar_proxy(
         with opener.open(request, timeout=proxy_timeout) as response:
             if is_document:
                 return _send_extension_sidecar_proxy_stream(
-                    handler, getattr(response, "status", 200), response, response.headers,
+                    handler, getattr(response, "status", 200), response, response.headers, document_viewer=True,
                 )
             body = _read_extension_sidecar_proxy_body(response)
             return _send_extension_sidecar_proxy_response(
@@ -10872,7 +10876,7 @@ def _handle_biggy_rag_navigation(handler, parsed) -> bool:
                     anchor_root=root,
                     base_href=_BIGGY_RAG_FILE_PREFIX + quote(base_path, safe="/"),
                 )
-            return _serve_file_bytes(handler, target, mime, disposition, "no-store", anchor_root=root)
+            return _serve_file_bytes(handler, target, mime, disposition, "no-store", csp="frame-ancestors 'self'", anchor_root=root)
         entries = rag_folder_entries(requested)
         if entries is None:
             return bad(handler, "folder not available", 404)
@@ -10928,7 +10932,7 @@ def _handle_jarvis_rag_document(handler, parsed) -> bool:
         except ValueError:
             return bad(handler, "document not available", 404)
         return _serve_file_bytes(
-            handler, target, "application/pdf", "inline", "no-store", anchor_root=root
+            handler, target, "application/pdf", "inline", "no-store", csp="frame-ancestors 'self'", anchor_root=root
         )
     except Exception:
         logger.exception("Jarvis RAG document delivery failed")
