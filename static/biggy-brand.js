@@ -86,7 +86,7 @@
   // Capture-only Workspace embed — same-origin authenticated proxy; never secrets in URL.
   const BIGGY_VISION_CAPTURE_URL = '/biggy-workspace/?panel=vision&surface=capture';
   // Owner-facing defaults. Vision capability is refreshed from live Workspace/Hermes.
-  // Gestures / machine control stay disabled in this increment.
+  // Gestures: observational hand recognition opt-in; machine control stays disarmed.
   const ARGUS_VISION_SENSE_STATES = Object.freeze({
     overview: Object.freeze({
       state: 'available',
@@ -102,7 +102,7 @@
     }),
     gestures: Object.freeze({
       state: 'off',
-      detail: 'Gestures stay off in this release. Pointer and keyboard remain the controls.',
+      detail: 'Hand observation is off until you press Enable. Uses the Camera feed when it is already running.',
     }),
     guidance: Object.freeze({
       state: 'off',
@@ -1421,6 +1421,32 @@
       .catch(() => {});
   }
 
+  function ensureBiggyGesturesModule() {
+    if (window.BiggyGestures) return Promise.resolve(window.BiggyGestures);
+    return import('/static/td-camera/gestures/gestures-panel.js')
+      .then((mod) => {
+        const api = window.BiggyGestures || (mod && (mod.default || mod));
+        if (!api) throw new Error('gestures_module_missing');
+        window.BiggyGestures = api;
+        return api;
+      });
+  }
+
+  function mountBiggyGesturesPanel(host) {
+    if (!host) return;
+    ensureBiggyGesturesModule()
+      .then((api) => {
+        if (!biggyVisionSurfacePanel || biggyVisionSurfaceActive !== 'gestures') return;
+        if (api && typeof api.mount === 'function') api.mount(host);
+      })
+      .catch((err) => {
+        host.innerHTML =
+          '<p class="biggy-vision-idle-note" data-testid="biggy-vision-idle-note">'
+          + 'Gestures module failed to load. Pointer and keyboard remain the controls.</p>'
+          + `<pre data-testid="biggy-gestures-load-error">${String(err && err.message ? err.message : err)}</pre>`;
+      });
+  }
+
   function syncVisionActivityChrome() {
     const toggle = document.getElementById('biggyVision');
     const cam = window.BiggyTdCameraOverlay;
@@ -1475,6 +1501,21 @@
 
   function visionSenseFor(panelId) {
     const id = String(panelId || '').trim();
+    if (id === 'gestures' && window.BiggyGestures && typeof window.BiggyGestures.readiness === 'function') {
+      try {
+        const g = window.BiggyGestures.readiness();
+        if (g && g.gesturesEnabled) {
+          return Object.freeze({
+            state: 'on',
+            detail: g.realHandDetected
+              ? `Hand seen (${g.lastObservation && g.lastObservation.primaryPose
+                ? g.lastObservation.primaryPose
+                : 'hand'}). Observation only — nothing is clicked or typed.`
+              : 'Gestures on. Show your hand in the Camera feed. Observation only.',
+          });
+        }
+      } catch (_err) { /* fall through */ }
+    }
     if (id === 'vision' || id === 'overview') {
       const live = ownerVisionCapabilityCopy(biggyVisionLiveCapability);
       if (id === 'vision') return live;
@@ -1529,7 +1570,12 @@
         + `allow="display-capture" `
         + `src="${BIGGY_VISION_CAPTURE_URL}"></iframe>`
         + `</div>`;
-    } else if (active === 'gestures' || active === 'control') {
+    } else if (active === 'gestures') {
+      mainHtml =
+        `<div class="biggy-gestures-host" data-testid="biggy-gestures-host">`
+        + `<p class="biggy-vision-idle-note">Loading gestures…</p>`
+        + `</div>`;
+    } else if (active === 'control') {
       mainHtml =
         `<p class="biggy-vision-idle-note" data-testid="biggy-vision-idle-note">`
         + `${entry.label} stays disabled in this release. No automatic action runs from here.</p>`;
@@ -1537,6 +1583,14 @@
       mainHtml =
         `<p class="biggy-vision-idle-note" data-testid="biggy-vision-idle-note">`
         + `${entry.label} is idle. It never opens Planner or a new tab, and it performs no automatic action.</p>`;
+    }
+
+    if (previous === 'gestures' && active !== 'gestures') {
+      try {
+        if (window.BiggyGestures && typeof window.BiggyGestures.unmount === 'function') {
+          window.BiggyGestures.unmount();
+        }
+      } catch (_err) { /* ignore */ }
     }
 
     body.innerHTML =
@@ -1552,6 +1606,9 @@
     panel.dataset.activePanel = active;
     if (active === 'vision') {
       biggyVisionCaptureFrame = body.querySelector('[data-testid="biggy-vision-capture-frame"]');
+    }
+    if (active === 'gestures') {
+      mountBiggyGesturesPanel(body.querySelector('[data-testid="biggy-gestures-host"]'));
     }
     // Refresh live capability into overview/vision copy without blocking first paint.
     refreshBiggyVisionCapability(false).then((cap) => {
@@ -1577,6 +1634,13 @@
 
   function closeBiggyVisionSurface({ restoreFocus = true } = {}) {
     const panel = biggyVisionSurfacePanel;
+    if (biggyVisionSurfaceActive === 'gestures') {
+      try {
+        if (window.BiggyGestures && typeof window.BiggyGestures.unmount === 'function') {
+          window.BiggyGestures.unmount();
+        }
+      } catch (_err) { /* ignore */ }
+    }
     releaseBiggyVisionCaptureMedia();
     document.body.classList.remove(VISION_SURFACE_BODY_CLASS);
     if (panel && panel.parentNode) panel.remove();

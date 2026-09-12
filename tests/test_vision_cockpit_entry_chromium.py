@@ -552,6 +552,8 @@ body{{margin:0;background:#05070b;color:#d7e4ec}}
                     ctype = "text/css"
                 if fpath.suffix == ".wasm":
                     ctype = "application/wasm"
+                if fpath.suffix == ".json":
+                    ctype = "application/json"
                 return self._send(
                     200,
                     data,

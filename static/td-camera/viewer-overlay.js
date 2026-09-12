@@ -23,6 +23,11 @@
   let bound = false;
   let styleReady = false;
   let compositeReady = false;
+  /** Observational subscribers (e.g. Gestures) — share this lease; never open another. */
+  const rawFrameSubscribers = new Set();
+  let pollCount = 0;
+  let deliveredFrameCount = 0;
+  let frameSeq = 0;
 
   function csrfHeaders(extra) {
     const h = Object.assign({}, extra || {});
@@ -168,6 +173,37 @@
     if (el) el.textContent = text || "";
   }
 
+  function notifyRawFrameSubscribers(evt) {
+    if (!rawFrameSubscribers.size) return;
+    for (const cb of Array.from(rawFrameSubscribers)) {
+      try { cb(evt); } catch (_) { /* subscriber faults stay isolated */ }
+    }
+  }
+
+  /**
+   * Subscribe to raw frames already fetched by this overlay's lease poll.
+   * Does not open a lease, does not add polls, does not raise traffic.
+   * Returns an unsubscribe function.
+   */
+  function subscribeRawFrames(cb) {
+    if (typeof cb !== "function") return () => {};
+    rawFrameSubscribers.add(cb);
+    return () => { rawFrameSubscribers.delete(cb); };
+  }
+
+  function frameStats() {
+    return {
+      viewing: !!viewing,
+      leaseActive: !!leaseId,
+      pollCount,
+      deliveredFrameCount,
+      frameSeq,
+      subscriberCount: rawFrameSubscribers.size,
+      openIndependentLease: false,
+      increaseRelayTraffic: false,
+    };
+  }
+
   function clearFrames() {
     if (objectUrl) {
       try { URL.revokeObjectURL(objectUrl); } catch (_) {}
@@ -202,6 +238,11 @@
     const lease = leaseId;
     leaseId = null;
     clearFrames();
+    notifyRawFrameSubscribers({
+      kind: "source_lost",
+      reason: "camera_stop",
+      at: Date.now(),
+    });
     if (root.BiggyTdCameraComposite) {
       try { root.BiggyTdCameraComposite.abort(); } catch (_) {}
     }
@@ -264,6 +305,7 @@
   async function pollOnce() {
     if (!viewing || !leaseId || !feed) return;
     const myGen = frameGen;
+    pollCount += 1;
     try {
       const frameRes = await fetch("/api/td-camera/frame.jpg", {
         credentials: "same-origin",
@@ -294,6 +336,18 @@
           raw.src = objectUrl;
         });
         if (myGen !== frameGen || !viewing) return;
+        deliveredFrameCount += 1;
+        frameSeq += 1;
+        // Share the decoded raw <img> with observational subscribers (Gestures).
+        // No second fetch / lease — same authorized frame already retrieved.
+        notifyRawFrameSubscribers({
+          kind: "frame",
+          seq: frameSeq,
+          at: Date.now(),
+          image: raw,
+          width: raw.naturalWidth || 0,
+          height: raw.naturalHeight || 0,
+        });
         await ensureComposite();
         const compGen = root.BiggyTdCameraComposite.currentGeneration();
         const result = await root.BiggyTdCameraComposite.compositeToCanvas(
@@ -319,6 +373,11 @@
     } catch (err) {
       if (myGen === frameGen && viewing) {
         setNote(err.message || String(err));
+        notifyRawFrameSubscribers({
+          kind: "source_lost",
+          reason: err && err.message ? err.message : "frame_error",
+          at: Date.now(),
+        });
       }
     }
     if (viewing && myGen === frameGen) {
@@ -606,12 +665,16 @@
     isSettingsOpen,
     isViewing,
     stopPreview,
+    subscribeRawFrames,
+    frameStats,
     /** Test hooks — not for product UI. */
     _test: {
       ensureFeed,
       defaultFeedRect,
       clampRect,
       applyFeedRect,
+      frameStats,
+      subscriberCount: () => rawFrameSubscribers.size,
     },
   };
 })(typeof window !== "undefined" ? window : globalThis);
