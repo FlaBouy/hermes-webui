@@ -5890,10 +5890,20 @@ _BIGGY_RAG_ALLOWED_METHODS = {
     "library-folders": {"GET", "POST"},
     "ingest-upload": {"POST"},
     "ingest-retry": {"POST"},
+    # Library retrieve is fulfilled only via authenticated Workspace embed
+    # (_fulfill_rag_search_on_smedley) with concurrency=1 — do not expose a
+    # second /api/biggy/rag/retrieve proxy that could bypass that gate.
 }
 _BIGGY_RAG_ALLOWED_QUERY = {
     "library-folders": {"parent"},
     "ingest-upload": {"folder"},
+}
+_BIGGY_RAG_SIDECAR_PATH = {
+    "health": "health",
+    "ingest-status": "ingest-status",
+    "library-folders": "library-folders",
+    "ingest-upload": "ingest-upload",
+    "ingest-retry": "ingest-retry",
 }
 
 
@@ -6268,8 +6278,10 @@ def _biggy_rag_proxy_target(parsed, method: str) -> str | None:
     """Resolve one exact Biggy RAG operation to the fixed local sidecar.
 
     This deliberately is not a general-purpose loopback proxy. Biggy only needs
-    the five ingestion-control operations exposed in its Ingest Radar pane, so
-    every path, method, and query key is allowlisted here.
+    the allowlisted ingest-control and health operations. Library retrieve for
+    Workspace owner search is fulfilled by the authenticated embed path
+    (``api.biggy_workspace_embed._fulfill_rag_search_on_smedley``) with a
+    concurrency gate — not via this proxy.
     """
     path = str(getattr(parsed, "path", "") or "")
     if not path.startswith(_BIGGY_RAG_PROXY_PREFIX):
@@ -6302,7 +6314,10 @@ def _biggy_rag_proxy_target(parsed, method: str) -> str | None:
             raise ValueError("invalid Biggy RAG folder")
         normalized[key] = value
     query = f"?{urlencode(normalized)}" if normalized else ""
-    return f"{_BIGGY_RAG_SIDECAR_ORIGIN}/{endpoint}{query}"
+    sidecar_path = _BIGGY_RAG_SIDECAR_PATH.get(endpoint)
+    if not sidecar_path:
+        raise ValueError("unsupported Biggy RAG operation")
+    return f"{_BIGGY_RAG_SIDECAR_ORIGIN}/{sidecar_path}{query}"
 
 
 def _handle_biggy_rag_sidecar_proxy(
@@ -6329,8 +6344,9 @@ def _handle_biggy_rag_sidecar_proxy(
     proxied_headers = _extension_sidecar_proxy_request_headers(handler)
     request = Request(target, data=request_body, headers=proxied_headers, method=method)
     opener = _extension_sidecar_proxy_same_origin_opener(_BIGGY_RAG_SIDECAR_ORIGIN)
+    proxy_timeout = 10
     try:
-        with opener.open(request, timeout=10) as response:
+        with opener.open(request, timeout=proxy_timeout) as response:
             body = _read_extension_sidecar_proxy_body(response)
             return _send_extension_sidecar_proxy_response(
                 handler,

@@ -630,3 +630,163 @@ def test_ai_assist_proxy_open_uses_extended_timeout(upstream, monkeypatch):
     # Cache may already hold a session from the first call; either way mint ≠ 60.
     for row in mint_opens:
         assert row["timeout"] == embed._MINT_TIMEOUT_SECONDS
+
+
+def test_rag_search_fulfilled_on_smedley_not_forwarded_to_plato(upstream, monkeypatch):
+    """Owner library search uses localhost:5004 via Hermes; PLATO never sees rag_search."""
+    from io import BytesIO
+    from urllib.response import addinfourl
+    from email.message import EmailMessage
+
+    real_opener = embed._upstream_opener()
+
+    class _RoutingOpener:
+        def open(self, request, timeout=None):  # noqa: ANN001
+            if request.full_url == embed._RAG_SIDECAR_RETRIEVE:
+                assert request.get_method() == "POST"
+                req_body = json.loads((request.data or b"{}").decode("utf-8"))
+                assert req_body.get("filter") == {"library_only": True}
+                assert isinstance(req_body.get("query"), str) and req_body["query"]
+                sidecar_payload = {
+                    "matches": [
+                        {
+                            "source": "library/demo.pdf",
+                            "snippet": "Verified excerpt for owner Library search.",
+                            "score": 0.9,
+                            "pdf_page": 2,
+                            "source_hash": "abc",
+                        }
+                    ],
+                    "coverage": "Indexed excerpts only.",
+                    "collection": "library",
+                }
+                raw = json.dumps(sidecar_payload).encode("utf-8")
+                headers = EmailMessage()
+                headers["Content-Type"] = "application/json"
+                return addinfourl(BytesIO(raw), headers, request.full_url, code=200)
+            return real_opener.open(request, timeout=timeout)
+
+    monkeypatch.setattr(embed, "_upstream_opener", lambda: _RoutingOpener())
+    before = list(_UpstreamRecorder.seen)
+    body = json.dumps(
+        {"command": "rag_search", "params": {"query": "FTA wiring diagram"}}
+    ).encode("utf-8")
+    handler, handled = _call(
+        "POST",
+        "/biggy-workspace/api/v1/commands",
+        body=body,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Origin": GUI_ORIGIN,
+        },
+    )
+    assert handled is True
+    assert handler.status == 200
+    payload = json.loads(handler.wfile.written.decode("utf-8"))
+    assert payload.get("command") == "rag_search"
+    assert payload.get("available") is True
+    assert payload.get("state") == "ok"
+    assert payload["result"]["endpoint_kind"] == "hermes_localhost_retrieve"
+    assert payload["result"]["citations"][0]["source"] == "library/demo.pdf"
+    assert payload["result"]["freshness"]["state"] == "unknown"
+    assert payload["result"]["freshness"]["observed_at"] is None
+    assert payload["result"]["retrieved_at"]
+    assert payload["result"]["collection"] == "library"
+    new_cmds = [
+        row
+        for row in _UpstreamRecorder.seen[len(before) :]
+        if row.get("path") == "/api/v1/commands"
+    ]
+    assert new_cmds == []
+
+
+def test_rag_search_busy_when_semaphore_held(upstream, monkeypatch):
+    """Nonblocking concurrency=1 — second live retrieve returns busy, no sidecar call."""
+    embed._reset_retrieve_semaphore_for_tests()
+    assert embed._retrieve_semaphore.acquire(blocking=False) is True
+    retrieve_opens: list[str] = []
+    real_opener = embed._upstream_opener()
+
+    class _CountingOpener:
+        def open(self, request, timeout=None):  # noqa: ANN001
+            if request.full_url == embed._RAG_SIDECAR_RETRIEVE:
+                retrieve_opens.append(request.full_url)
+                raise AssertionError("sidecar must not be called when busy")
+            return real_opener.open(request, timeout=timeout)
+
+    monkeypatch.setattr(embed, "_upstream_opener", lambda: _CountingOpener())
+    try:
+        body = json.dumps(
+            {"command": "rag_search", "params": {"query": "busy check"}}
+        ).encode("utf-8")
+        handler, handled = _call(
+            "POST",
+            "/biggy-workspace/api/v1/commands",
+            body=body,
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Origin": GUI_ORIGIN,
+            },
+        )
+        assert handled is True
+        assert handler.status == 200
+        payload = json.loads(handler.wfile.written.decode("utf-8"))
+        assert payload.get("state") == "busy"
+        assert payload["result"]["state"] == "busy"
+        assert retrieve_opens == []
+    finally:
+        embed._retrieve_semaphore.release()
+        embed._reset_retrieve_semaphore_for_tests()
+
+
+def test_rag_search_index_freshness_from_indexed_at_only(upstream, monkeypatch):
+    """Citations alone never mark source freshness fresh."""
+    from io import BytesIO
+    from urllib.response import addinfourl
+    from email.message import EmailMessage
+
+    real_opener = embed._upstream_opener()
+
+    class _RoutingOpener:
+        def open(self, request, timeout=None):  # noqa: ANN001
+            if request.full_url == embed._RAG_SIDECAR_RETRIEVE:
+                assert timeout == embed._RAG_CONNECT_TIMEOUT_SEC
+                sidecar_payload = {
+                    "matches": [
+                        {
+                            "source": "library/demo.pdf",
+                            "snippet": "Excerpt",
+                            "score": 0.9,
+                            "pdf_page": 1,
+                        }
+                    ],
+                    "collection": "library",
+                    "indexed_at": "2099-01-01T00:00:00Z",
+                }
+                raw = json.dumps(sidecar_payload).encode("utf-8")
+                headers = EmailMessage()
+                headers["Content-Type"] = "application/json"
+                return addinfourl(BytesIO(raw), headers, request.full_url, code=200)
+            return real_opener.open(request, timeout=timeout)
+
+    monkeypatch.setattr(embed, "_upstream_opener", lambda: _RoutingOpener())
+    body = json.dumps(
+        {"command": "rag_search", "params": {"query": "freshness check"}}
+    ).encode("utf-8")
+    handler, handled = _call(
+        "POST",
+        "/biggy-workspace/api/v1/commands",
+        body=body,
+        headers={
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "Origin": GUI_ORIGIN,
+        },
+    )
+    assert handled is True
+    payload = json.loads(handler.wfile.written.decode("utf-8"))
+    assert payload["result"]["freshness"]["state"] == "fresh"
+    assert payload["result"]["freshness"]["observed_at"] == "2099-01-01T00:00:00Z"
+    assert payload["result"]["retrieved_at"] != "2099-01-01T00:00:00Z"

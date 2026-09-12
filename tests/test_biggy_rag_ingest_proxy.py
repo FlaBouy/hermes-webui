@@ -54,6 +54,8 @@ def test_biggy_rag_proxy_does_not_claim_unrelated_routes():
     [
         ("/api/biggy/rag/rag", "POST", "", ValueError),
         ("/api/biggy/rag/health", "POST", "", PermissionError),
+        ("/api/biggy/rag/retrieve", "POST", "", ValueError),
+        ("/api/biggy/rag/retrieve", "GET", "", ValueError),
         ("/api/biggy/rag/library-folders", "GET", "url=http://example.com", ValueError),
         ("/api/biggy/rag/library-folders", "GET", "parent=../Secrets", ValueError),
         ("/api/biggy/rag/ingest-upload", "POST", "folder=/tmp", ValueError),
