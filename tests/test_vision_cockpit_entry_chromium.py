@@ -297,13 +297,25 @@ def _tiny_jpeg(w: int = 320, h: int = 240) -> bytes:
     return buf.getvalue()
 
 
+def _fixture_person_jpeg() -> bytes:
+    """Reuse proven synthetic-person fixture for MediaPipe Blur proof."""
+    import io
+
+    from PIL import Image
+
+    src = ROOT / "tests" / "fixtures" / "td_camera_synthetic_person.png"
+    img = Image.open(src).convert("RGB").resize((640, 480))
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=90)
+    return buf.getvalue()
+
+
 @pytest.fixture
 def cockpit_td_embed_server(monkeypatch, tmp_path):
-    """Same-origin Hermes-like parent: real brand + proxied /biggy-workspace + TD API.
+    """Same-origin Hermes-like parent: real brand + TD API + proxied Workspace.
 
-    Keeps iframe on parent origin so EMBED_ROOT=/biggy-workspace and parent CSRF works.
     Auth enabled with a real signed Hermes session cookie; CSRF not weakened.
-    Workspace owner session is mintable via hermes-bridge (real embed path).
+    Camera overlay runs on the parent (root GUI), not inside Visual Capture.
     """
     import hmac
     import time
@@ -354,7 +366,7 @@ def cockpit_td_embed_server(monkeypatch, tmp_path):
     cookie_val = f"{raw_token}.{sig}"
     csrf = auth.csrf_token_for_session(cookie_val)
 
-    jpeg = _tiny_jpeg(320, 240)
+    jpeg = _fixture_person_jpeg()
     state = {"snaps": 0, "health": 0}
 
     class Upstream(BaseHTTPRequestHandler):
@@ -375,7 +387,8 @@ def cockpit_td_embed_server(monkeypatch, tmp_path):
                         "status": "ok",
                         "source": "HD Pro Webcam C920",
                         "camera_active": False,
-                        "tunnel_process_running": True,
+                        # Realistic post-supervision flag: must not be treated as transport down.
+                        "tunnel_process_running": False,
                     }
                 ).encode()
                 self.send_response(200)
@@ -414,14 +427,14 @@ def cockpit_td_embed_server(monkeypatch, tmp_path):
 <style>
 body{{margin:0;background:#05070b;color:#d7e4ec}}
 #mainChat{{min-height:100vh;position:relative}}
-#composerWrap{{position:fixed;left:0;right:0;bottom:12px}}
+#composerWrap{{position:fixed;left:0;right:0;bottom:12px;height:120px;background:#0a1218}}
 #composerBox{{width:min(680px,90vw);margin:0 auto}}
 </style>
 <script>window.__HERMES_CONFIG__={{csrfToken:{json.dumps(csrf)},maxUploadBytes:10485760}};</script>
 </head>
 <body>
 <div id="mainChat" class="biggy-brand-iwo">
-  <div id="composerWrap"><div id="composerBox"><textarea id="msg" aria-label="Message"></textarea></div></div>
+  <div id="composerWrap"><div id="composerBox"><textarea id="msg" aria-label="Message Biggy"></textarea></div></div>
 </div>
 <script src="/static/biggy-brand.js"></script>
 </body></html>
@@ -487,7 +500,6 @@ body{{margin:0;background:#05070b;color:#d7e4ec}}
                     if "text/html" in rctype:
                         extra["Content-Security-Policy"] = embed_csp
                         extra["X-Frame-Options"] = "SAMEORIGIN"
-                        # Real Hermes injects minted owner session on embed HTML.
                         if method == "GET" and suffix.rstrip("/") in {"", "/"}:
                             extra["Set-Cookie"] = _mint_workspace_owner_cookie()
                     sc = resp.headers.get("Set-Cookie")
@@ -536,6 +548,8 @@ body{{margin:0;background:#05070b;color:#d7e4ec}}
                     return self._send(404, b"missing", "text/plain")
                 data = fpath.read_bytes()
                 ctype = "application/javascript" if fpath.suffix == ".js" else "application/octet-stream"
+                if fpath.suffix == ".css":
+                    ctype = "text/css"
                 if fpath.suffix == ".wasm":
                     ctype = "application/wasm"
                 return self._send(
@@ -593,8 +607,8 @@ body{{margin:0;background:#05070b;color:#d7e4ec}}
         relay.reset_for_tests()
 
 
-def test_cockpit_td_camera_real_workspace_iframe(cockpit_td_embed_server):
-    """ONE real cockpit→Workspace capture iframe path for TD preview (no handcrafted UI)."""
+def test_cockpit_td_camera_overlay_root_gui(cockpit_td_embed_server):
+    """VISION→Camera opens lower-left root overlay (real brand + auth headers)."""
     sp = _require_playwright()
     info = cockpit_td_embed_server
     origin = info["origin"]
@@ -624,47 +638,114 @@ def test_cockpit_td_camera_real_workspace_iframe(cockpit_td_embed_server):
         vision = page.get_by_test_id("biggy-vision")
         expect(vision).to_be_visible(timeout=15000)
         vision.click()
-        page.get_by_test_id("biggy-vision-vision").click()
-        expect(page.get_by_test_id("biggy-vision-surface")).to_be_visible()
-        iframe_el = page.locator('[data-testid="biggy-vision-capture-frame"]')
-        expect(iframe_el).to_be_visible()
-        src = iframe_el.get_attribute("src") or ""
-        assert src.startswith("/biggy-workspace/")
-        assert "panel=vision" in src and "surface=capture" in src
-
-        frame = page.frame_locator('[data-testid="biggy-vision-capture-frame"]')
-        # Minted owner session → capture surface without password panel.
-        expect(frame.locator("body.capture-surface")).to_be_attached(timeout=20000)
-        expect(frame.locator("#td-camera-viewer")).to_be_visible()
-        expect(frame.locator("#td-camera-start-view")).to_be_visible()
-
-        frame.locator("#td-camera-status").wait_for(state="visible", timeout=10000)
-        page.wait_for_timeout(500)
+        page.get_by_test_id("biggy-vision-camera").click()
+        overlay = page.get_by_test_id("biggy-td-camera-overlay")
+        expect(overlay).to_be_visible(timeout=15000)
+        box = overlay.bounding_box()
+        assert box is not None
+        assert box["x"] < 200
+        assert box["y"] > 400  # lower half / above composer band
+        # Must not claim transport down from tunnel_process_running=false.
+        page.wait_for_timeout(400)
+        mode = page.get_by_test_id("biggy-td-camera-mode").inner_text()
+        assert "ready" in mode.lower() or "off" in mode.lower()
+        page.get_by_test_id("biggy-td-camera-details").locator("summary").click()
+        page.wait_for_function(
+            """() => {
+              const t = document.querySelector('[data-testid="biggy-td-camera-details-body"]');
+              return !!(t && t.textContent && t.textContent.includes('tunnel_process_running='));
+            }""",
+            timeout=10000,
+        )
+        details = page.get_by_test_id("biggy-td-camera-details-body").evaluate(
+            "el => el.textContent || ''"
+        )
+        assert "tunnel_process_running=false" in details
+        assert "flag only" in details.lower()
+        note = page.get_by_test_id("biggy-td-camera-note").inner_text().lower()
+        assert "down" not in note and "unreachable" not in note
         assert info["state"]["health"] >= 1
         assert info["state"]["snaps"] == 0
 
-        frame.locator("#td-camera-backdrop").select_option("blur")
-        frame.locator("#td-camera-start-view").click()
-        expect(frame.locator("#td-camera-canvas")).to_be_visible(timeout=45000)
+        page.get_by_test_id("biggy-td-camera-backdrop").select_option("blur")
+        page.get_by_test_id("biggy-td-camera-start").click()
+        expect(page.get_by_test_id("biggy-td-camera-canvas")).to_be_visible(timeout=45000)
         page.wait_for_function(
             """() => {
-              const f = document.querySelector('[data-testid="biggy-vision-capture-frame"]');
-              if (!f || !f.contentDocument) return false;
-              const t = f.contentDocument.getElementById('td-camera-status');
-              return !!(t && /seg=ok|Viewing TD/i.test(t.textContent || ''));
+              const t = document.querySelector('[data-testid="biggy-td-camera-note"]');
+              return !!(t && /seg=ok|Preview/i.test(t.textContent || ''));
             }""",
             timeout=45000,
         )
         assert info["state"]["snaps"] >= 1
 
-        frame.locator("#td-camera-stop-view").click()
-        expect(frame.locator("#td-camera-canvas")).to_be_hidden(timeout=10000)
-        expect(frame.locator("#td-camera-status")).to_contain_text("stopped", timeout=10000)
-        stop_txt = frame.locator("#td-camera-status").inner_text()
-        assert "10s" in stop_txt.lower() or "idle-release" in stop_txt.lower()
+        # Drag header + resize + viewport clamp; stay above composer.
+        header = page.get_by_test_id("biggy-td-camera-header")
+        hb = header.bounding_box()
+        assert hb
+        page.mouse.move(hb["x"] + 40, hb["y"] + 10)
+        page.mouse.down()
+        page.mouse.move(hb["x"] + 140, hb["y"] - 80)
+        page.mouse.up()
+        after_drag = overlay.bounding_box()
+        assert after_drag is not None
+        composer = page.locator("#composerWrap").bounding_box()
+        assert composer is not None
+        assert after_drag["y"] + after_drag["height"] <= composer["y"] + 2
 
-        page.get_by_test_id("biggy-vision-close-surface").click()
-        expect(page.get_by_test_id("biggy-vision-surface")).to_have_count(0)
-        assert page.locator('[data-testid="biggy-vision-capture-frame"]').count() == 0
+        handle = page.get_by_test_id("biggy-td-camera-resize")
+        rb = handle.bounding_box()
+        assert rb
+        page.mouse.move(rb["x"] + 4, rb["y"] + 4)
+        page.mouse.down()
+        page.mouse.move(rb["x"] + 80, rb["y"] + 60)
+        page.mouse.up()
+        resized = overlay.bounding_box()
+        assert resized is not None
+        assert resized["width"] >= after_drag["width"] - 1
+
+        # Mobile / portrait clamp
+        page.set_viewport_size({"width": 390, "height": 844})
+        page.wait_for_timeout(200)
+        mobile = overlay.bounding_box()
+        assert mobile is not None
+        assert mobile["x"] >= 0
+        assert mobile["x"] + mobile["width"] <= 390 + 1
+        assert mobile["y"] + mobile["height"] <= 844
+
+        # Fullscreen-ish landscape clamp without exiting anything
+        page.set_viewport_size({"width": 1280, "height": 720})
+        page.wait_for_timeout(200)
+        land = overlay.bounding_box()
+        assert land is not None
+        assert land["x"] >= 0 and land["y"] >= 0
+
+        page.get_by_test_id("biggy-td-camera-close").click()
+        expect(overlay).to_have_count(0)
+        assert page.evaluate("() => !!(window.BiggyTdCameraOverlay && !window.BiggyTdCameraOverlay.isOpen())")
+
+        # Reopen starts Off; no auto preview
+        snaps_before = info["state"]["snaps"]
+        vision.click()
+        page.get_by_test_id("biggy-vision-camera").click()
+        expect(page.get_by_test_id("biggy-td-camera-overlay")).to_be_visible()
+        assert page.get_by_test_id("biggy-td-camera-backdrop").input_value() == "off"
+        expect(page.get_by_test_id("biggy-td-camera-canvas")).to_be_hidden()
+        page.wait_for_timeout(400)
+        assert info["state"]["snaps"] == snaps_before
+
+        # Visual Capture must not embed camera
+        vision.click()
+        page.get_by_test_id("biggy-vision-vision").click()
+        expect(page.get_by_test_id("biggy-vision-surface")).to_be_visible()
+        # Camera overlay remains usable while Visual Capture is open
+        expect(page.get_by_test_id("biggy-td-camera-overlay")).to_be_visible()
+        frame = page.frame_locator('[data-testid="biggy-vision-capture-frame"]')
+        expect(frame.locator("body.capture-surface")).to_be_attached(timeout=20000)
+        assert frame.locator("#td-camera-viewer").count() == 0
+        assert frame.locator("#td-camera-start-view").count() == 0
+
+        page.get_by_test_id("biggy-td-camera-close").click()
+        expect(page.get_by_test_id("biggy-td-camera-overlay")).to_have_count(0)
         assert not errors, errors
         browser.close()

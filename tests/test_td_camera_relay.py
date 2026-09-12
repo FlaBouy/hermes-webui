@@ -269,18 +269,23 @@ def test_router_csrf_and_auth_gate_frame_start(monkeypatch):
 
 
 def test_workspace_viewer_never_opens_camera_for_td():
+    """TD camera lives on Hermes root overlay; Workspace Visual Capture must not embed it."""
     app_js = WORKSPACE / "biggy_workspace" / "static" / "app.js"
+    index_html = WORKSPACE / "biggy_workspace" / "static" / "index.html"
     if not app_js.is_file():
         pytest.skip("workspace repo not available")
     src = app_js.read_text(encoding="utf-8")
-    assert "startTdCameraViewer" in src
-    assert "viewer never calls getUserMedia" in src
-    start = src.find("async function startTdCameraViewer")
-    end = src.find("function setVisionViewerError", start)
-    body = src[start:end]
-    assert "navigator.mediaDevices" not in body
-    assert "getUserMedia(" not in body
-    assert "view/start" in src
+    html = index_html.read_text(encoding="utf-8") if index_html.is_file() else ""
+    assert "startTdCameraViewer" not in src
+    assert "td-camera-viewer" not in html
+    assert "navigator.mediaDevices.getUserMedia" not in src
+
+    overlay = ROOT / "static" / "td-camera" / "viewer-overlay.js"
+    o_src = overlay.read_text(encoding="utf-8")
+    assert "BiggyTdCameraOverlay" in o_src
+    assert "getUserMedia" not in o_src
+    assert "getDisplayMedia" not in o_src
+    assert "view/start" in o_src
 
 
 def _require_playwright():

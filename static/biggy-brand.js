@@ -62,6 +62,13 @@
     Object.freeze({ label: 'Screen Guidance', panel: 'guidance' }),
     Object.freeze({ label: 'Machine Control', panel: 'control' }),
   ]);
+  // Camera opens an independent lower-left overlay (not the centered Vision surface).
+  const BIGGY_VISION_CAMERA_ENTRY = Object.freeze({ label: 'Camera', panel: 'camera' });
+  const BIGGY_VISION_MENU_ENTRIES = Object.freeze([
+    ...BIGGY_VISION_PANELS.slice(0, 2),
+    BIGGY_VISION_CAMERA_ENTRY,
+    ...BIGGY_VISION_PANELS.slice(2),
+  ]);
   const BIGGY_VISION_PANEL_IDS = Object.freeze(
     BIGGY_VISION_PANELS.map((entry) => entry.panel),
   );
@@ -72,7 +79,7 @@
   const ARGUS_VISION_SENSE_STATES = Object.freeze({
     overview: Object.freeze({
       state: 'available',
-      detail: 'Vision controls are ready. Select Visual Capture to intake or analyze a frame.',
+      detail: 'Vision controls are ready. Select Visual Capture for intake/analyze, or Camera for ThunderDome preview.',
     }),
     vision: Object.freeze({
       state: 'available',
@@ -1346,6 +1353,33 @@
     try { frame.remove(); } catch (_err) { /* ignore */ }
   }
 
+  function ensureBiggyTdCameraOverlayModule() {
+    if (window.BiggyTdCameraOverlay) return Promise.resolve(window.BiggyTdCameraOverlay);
+    return new Promise((resolve, reject) => {
+      const existing = document.querySelector('script[data-biggy-td-camera-overlay]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(window.BiggyTdCameraOverlay));
+        existing.addEventListener('error', () => reject(new Error('td_camera_overlay_failed')));
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = '/static/td-camera/viewer-overlay.js';
+      s.dataset.biggyTdCameraOverlay = '1';
+      s.onload = () => resolve(window.BiggyTdCameraOverlay);
+      s.onerror = () => reject(new Error('td_camera_overlay_failed'));
+      document.head.appendChild(s);
+    });
+  }
+
+  function openBiggyTdCameraOverlay() {
+    // Independent of Vision surface / Workspace — stays usable while other modules open.
+    ensureBiggyTdCameraOverlayModule()
+      .then((api) => {
+        if (api && typeof api.open === 'function') api.open();
+      })
+      .catch(() => { /* fail closed; Start path reports errors inside overlay */ });
+  }
+
   function visionSenseFor(panelId) {
     const id = String(panelId || '').trim();
     if (id === 'vision' || id === 'overview') {
@@ -1463,6 +1497,10 @@
 
   function openBiggyVisionSurface(panelId) {
     const id = String(panelId || '').trim();
+    if (id === 'camera') {
+      openBiggyTdCameraOverlay();
+      return;
+    }
     if (!BIGGY_VISION_PANEL_IDS.includes(id)) return;
     // Hard guarantee: Vision choices never open Planner Workspace or external windows.
     if (biggyPlannerWorkspacePanel) {
@@ -1589,7 +1627,7 @@
   function makeVisionControl() {
     const wrap = el('span', 'biggy-vision-wrap');
     wrap.setAttribute('data-testid', 'biggy-vision-wrap');
-    const items = BIGGY_VISION_PANELS.map((entry) => (
+    const items = BIGGY_VISION_MENU_ENTRIES.map((entry) => (
       `<button type="button" role="menuitem" class="biggy-vision-menu-item" `
       + `data-panel="${entry.panel}" data-testid="biggy-vision-${entry.panel}">`
       + `${entry.label}</button>`

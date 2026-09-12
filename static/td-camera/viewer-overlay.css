@@ -1,0 +1,68 @@
+/* ThunderDome camera — independent lower-left overlay over main Biggy GUI. */
+.biggy-td-camera-overlay{
+  position:fixed;z-index:118;display:flex;flex-direction:column;
+  box-sizing:border-box;min-width:280px;min-height:240px;
+  background:rgba(4,8,12,.96);border:1px solid rgba(78,204,163,.42);
+  border-radius:8px;box-shadow:0 14px 40px rgba(0,0,0,.55);
+  color:#d7e4ec;font:12px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+  touch-action:none;overflow:hidden;pointer-events:auto;
+}
+.biggy-td-camera-header{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  padding:7px 10px;cursor:grab;user-select:none;
+  border-bottom:1px solid rgba(78,204,163,.28);
+  letter-spacing:.1em;text-transform:uppercase;font-size:11px;
+}
+.biggy-td-camera-header:active{cursor:grabbing}
+.biggy-td-camera-header b{font-weight:800;color:#75e5b8}
+.biggy-td-camera-close{
+  appearance:none;min-height:32px;min-width:64px;padding:4px 10px;cursor:pointer;
+  border:1px solid rgba(78,204,163,.36);border-radius:5px;
+  background:#09161f;color:#d7e4ec;font:11px inherit;letter-spacing:.06em;
+}
+.biggy-td-camera-body{
+  flex:1;min-height:0;overflow:auto;padding:10px 12px 18px;display:grid;gap:8px;align-content:start;
+}
+.biggy-td-camera-mode{margin:0;color:#75e5b8;font-weight:800;letter-spacing:.08em;text-transform:uppercase}
+.biggy-td-camera-source,.biggy-td-camera-note{margin:0;color:#8eb4c8}
+.biggy-td-camera-controls{
+  display:flex;flex-wrap:wrap;gap:8px;align-items:center;
+}
+.biggy-td-camera-controls button{
+  appearance:none;min-height:34px;padding:6px 12px;cursor:pointer;
+  border:1px solid rgba(148,163,184,.34);border-radius:5px;
+  background:rgba(13,17,23,.9);color:#d7e4ec;font:11px inherit;
+}
+.biggy-td-camera-controls button.danger{border-color:rgba(240,100,100,.5);color:#ffb4ae}
+.biggy-td-camera-controls button:disabled{opacity:.45;cursor:not-allowed}
+.biggy-td-camera-controls label{display:inline-flex;align-items:center;gap:6px;color:#8eb4c8}
+.biggy-td-camera-controls select{
+  min-height:34px;border:1px solid rgba(148,163,184,.34);border-radius:5px;
+  background:#09161f;color:#d7e4ec;padding:4px 6px;
+}
+.biggy-td-camera-file{cursor:pointer;text-decoration:underline}
+#biggy-td-camera-canvas:not([hidden]){
+  display:block;width:100%;max-width:640px;height:auto;background:#000;
+  border:1px solid #2a3c4f;
+}
+#biggy-td-camera-canvas[hidden]{display:none!important}
+#biggy-td-camera-raw{
+  position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;
+}
+.biggy-td-camera-details{
+  margin-top:4px;color:#7896a6;border-top:1px solid rgba(78,204,163,.16);padding-top:6px;
+}
+.biggy-td-camera-details summary{cursor:pointer;user-select:none}
+.biggy-td-camera-details pre{
+  margin:6px 0 0;white-space:pre-wrap;word-break:break-word;
+  font:10px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;color:#6f8796;
+}
+.biggy-td-camera-resize{
+  position:absolute;right:0;bottom:0;width:22px;height:22px;cursor:nwse-resize;
+  background:linear-gradient(135deg,transparent 55%,rgba(117,229,184,.55) 55%);
+  touch-action:none;
+}
+@media(max-width:760px){
+  .biggy-td-camera-overlay{min-width:260px}
+  .biggy-td-camera-controls button,.biggy-td-camera-close{min-height:40px}
+}
