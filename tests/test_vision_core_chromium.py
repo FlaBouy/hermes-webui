@@ -12,6 +12,7 @@ import base64
 import io
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -93,7 +94,16 @@ def _login(page, workspace_url: str) -> None:
     page.goto(workspace_url)
     page.get_by_label("Owner password", exact=True).fill("synthetic-test-owner-password")
     page.get_by_role("button", name="Sign in", exact=True).click()
-    expect(page.locator("#app")).to_be_visible()
+    # #app uses .planner-shell { display:flex }, which overrides the HTML hidden
+    # attribute for Playwright visibility — wait on the IDL .hidden flag instead.
+    page.wait_for_function(
+        "() => {"
+        "  const app = document.getElementById('app');"
+        "  const auth = document.getElementById('auth-panel');"
+        "  return !!(app && !app.hidden && auth && auth.hidden);"
+        "}",
+        timeout=15000,
+    )
 
 
 def _create_synthetic_task_via_capture(page, title: str) -> str:
@@ -120,7 +130,13 @@ def _create_synthetic_task_via_capture(page, title: str) -> str:
 
 def _open_vision(page, workspace_url: str) -> None:
     page.goto(f"{workspace_url}/?panel=vision")
-    expect(page.locator("#app")).to_be_visible()
+    page.wait_for_function(
+        "() => {"
+        "  const app = document.getElementById('app');"
+        "  return !!(app && !app.hidden);"
+        "}",
+        timeout=15000,
+    )
     if not page.locator("#vision-panel").is_visible():
         page.locator("#open-senses-drawer").click(force=True)
         page.locator("#vision-panel").scroll_into_view_if_needed()
@@ -298,5 +314,177 @@ def test_vision_intake_analyze_save_reload_reopen_fullscreen(workspace, tmp_path
         expect(frame.get_by_text("synthetic-vision-analysis-ok")).to_be_visible()
         page.get_by_role("button", name="Close document", exact=True).click(force=True)
         assert len(page.context.pages) == 1
+        assert not errors, errors
+        browser.close()
+
+
+def test_tablet_intake_survives_session_failure_and_analyzes(workspace, tmp_path):
+    """Android-like tablet: no getDisplayMedia; intake works when mint/session fails."""
+    sp = _require_playwright()
+    workspace_url = workspace
+    png = _tiny_png_bytes(label="T")
+    file_path = tmp_path / "tablet-intake.png"
+    file_path.write_bytes(png)
+
+    with sp() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(
+            viewport={"width": 900, "height": 1400},
+            user_agent=(
+                "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+            ),
+        )
+        # Display capture absent (tablet / Chromium without getDisplayMedia).
+        context.add_init_script(
+            """
+            Object.defineProperty(Navigator.prototype, 'mediaDevices', {
+              configurable: true,
+              get() {
+                return { getUserMedia: undefined };
+              },
+            });
+            """
+        )
+        page = context.new_page()
+        errors: list[str] = []
+        page.on("pageerror", lambda e: errors.append(str(e)))
+
+        _login(page, workspace_url)
+        _open_vision(page, workspace_url)
+        # Wait until affordance sync runs (showApp → syncVisionCaptureAffordances).
+        try:
+            page.wait_for_function(
+                """() => {
+                  const btn = document.getElementById('vision-capture');
+                  const label = document.querySelector('label.vision-file-label');
+                  return !!(
+                    btn && btn.disabled === true &&
+                    label && label.classList.contains('is-enabled')
+                  );
+                }""",
+                timeout=10000,
+            )
+        except Exception:
+            diag = page.evaluate(
+                """() => ({
+                  gdmType: typeof (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia),
+                  disabled: document.getElementById('vision-capture') &&
+                    document.getElementById('vision-capture').disabled,
+                  title: document.getElementById('vision-capture') &&
+                    document.getElementById('vision-capture').title,
+                  label: document.querySelector('label.vision-file-label') &&
+                    document.querySelector('label.vision-file-label').className,
+                  appHidden: document.getElementById('app') && document.getElementById('app').hidden,
+                  errors: window.__unused,
+                })"""
+            )
+            raise AssertionError(f"capture affordance sync failed: {diag}; pageerrors={errors}")
+
+        expect(page.locator("#vision-capture")).to_be_disabled()
+        expect(page.locator("label.vision-file-label")).to_have_class(
+            re.compile(r"\bis-enabled\b")
+        )
+        assert page.locator("#vision-file").is_enabled()
+        intake_bg = page.locator("label.vision-file-label").evaluate(
+            "el => getComputedStyle(el).backgroundColor"
+        )
+        # Accent green path — not the muted disabled gray (#2a4258 ≈ rgb(42,66,88)).
+        assert intake_bg not in {"rgba(0, 0, 0, 0)", "transparent", "rgb(42, 66, 88)"}, intake_bg
+
+        mint_body = json.dumps({"error": "bridge_mint_failed"})
+
+        def fail_ack(route):
+            try:
+                payload = route.request.post_data_json or {}
+            except Exception:
+                payload = {}
+            if payload.get("command") == "capture_preview_ack":
+                route.fulfill(
+                    status=503,
+                    content_type="application/json",
+                    body=mint_body,
+                )
+            else:
+                route.continue_()
+
+        def fail_planner(route):
+            route.fulfill(
+                status=503,
+                content_type="application/json",
+                body=mint_body,
+            )
+
+        page.route("**/api/v1/commands", fail_ack)
+        page.route("**/api/v1/planner*", fail_planner)
+
+        analyze_payload = {
+            "available": True,
+            "state": "ok",
+            "text": "tablet-analyze-ok-independent",
+            "message": None,
+            "provenance": {
+                "source": "image_intake",
+                "host": "test",
+                "captured_at": "2026-09-12T17:00:00Z",
+                "model": "fixture-vlm",
+                "endpoint_kind": "local",
+                "endpoint_host": "127.0.0.1",
+                "route": "v1/chat/completions",
+            },
+        }
+        page.route(
+            "**/api/v1/vision/analyze",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(analyze_payload),
+            ),
+        )
+        page.route(
+            "**/api/v1/vision/capability",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps(
+                    {
+                        "capability": {
+                            "image_support": "configured_unverified",
+                            "verified": False,
+                            "detail": "fixture",
+                            "owner_summary": "Local analysis fixture",
+                            "endpoint_kind": "local_chat_completions",
+                            "model": "fixture-vlm",
+                            "original_max_bytes": 1_500_000,
+                            "inference_max_bytes": 400_000,
+                        }
+                    }
+                ),
+            ),
+        )
+
+        page.set_input_files("#vision-file", str(file_path))
+        expect(page.locator("#vision-preview")).to_be_visible(timeout=10000)
+        expect(page.locator("#vision-analyze")).to_be_enabled()
+        expect(page.locator("#vision-save")).to_be_enabled()
+        err = page.locator("#error")
+        expect(err).to_be_visible()
+        err_text = err.inner_text()
+        assert "bridge_mint_failed" not in err_text, err_text
+        assert "Workspace session could not be established" in err_text
+        assert "Your image is still loaded" in err_text
+        assert "reopen" not in err_text.lower()
+
+        meta_before = page.locator("#vision-meta").inner_text()
+        assert "not retained until save" in meta_before or "image_intake" in meta_before.lower() or "B raw" in meta_before
+
+        page.locator("#vision-analyze").click(force=True)
+        expect(page.locator("#vision-text")).to_contain_text(
+            "tablet-analyze-ok-independent", timeout=15000
+        )
+        expect(page.locator("#vision-preview")).to_be_visible()
+        expect(page.locator("#vision-analyze")).to_be_enabled()
+        # Results preserved after independent analyze despite session mint failure.
+        assert "tablet-analyze-ok-independent" in page.locator("#vision-text").inner_text()
         assert not errors, errors
         browser.close()

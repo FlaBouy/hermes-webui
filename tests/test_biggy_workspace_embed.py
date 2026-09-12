@@ -931,3 +931,155 @@ def test_vision_analyze_fulfill_uses_chat_completions_not_plato_loopback(monkeyp
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_vision_capability_skips_workspace_mint(upstream):
+    """Tablet local vision must not depend on hermes-bridge mint."""
+    before = [
+        r for r in _UpstreamRecorder.seen if r["path"] == "/api/v1/session/hermes-bridge"
+    ]
+    handler, handled = _call(
+        "GET",
+        "/biggy-workspace/api/v1/vision/capability",
+        headers={"Accept": "application/json"},
+    )
+    assert handled is True
+    assert handler.status == 200
+    payload = json.loads(handler.wfile.written.decode("utf-8"))
+    assert "capability" in payload
+    after = [
+        r for r in _UpstreamRecorder.seen if r["path"] == "/api/v1/session/hermes-bridge"
+    ]
+    assert after == before
+
+
+def test_vision_capability_works_when_mint_would_fail(monkeypatch, upstream):
+    """Mint outage must not block Smedley vision capability fulfill."""
+
+    def boom(*_a, **_k):
+        raise embed.EmbedConfigError("bridge_mint_failed")
+
+    monkeypatch.setattr(embed, "_mint_session", boom)
+    handler, handled = _call(
+        "GET",
+        "/biggy-workspace/api/v1/vision/capability",
+        headers={"Accept": "application/json"},
+    )
+    assert handled is True
+    assert handler.status == 200
+    assert b"capability" in handler.wfile.written
+
+
+def test_vision_paths_require_hermes_auth_via_check_auth(monkeypatch):
+    """Real router auth gate: vision embed paths still require Hermes GUI session."""
+    monkeypatch.setattr(auth, "is_auth_enabled", lambda: True)
+    monkeypatch.setattr(auth, "ensure_trusted_auth_session", lambda handler: None)
+    monkeypatch.setattr(auth, "parse_cookie", lambda handler: None)
+
+    paths = (
+        "/biggy-workspace/api/v1/vision/capability",
+        "/biggy-workspace/api/v1/vision/analyze",
+    )
+    for path in paths:
+        handler = _ProxyHandler(path=path, headers={"Accept": "application/json"})
+        assert auth.check_auth(handler, SimpleNamespace(path=path, query="")) is False
+        assert handler.status in {401, 302}, path
+
+    monkeypatch.setattr(
+        auth,
+        "ensure_trusted_auth_session",
+        lambda handler: {"auth_type": "password", "username": "rick"},
+    )
+    for path in paths:
+        handler = _ProxyHandler(path=path)
+        assert auth.check_auth(handler, SimpleNamespace(path=path, query="")) is True
+
+
+def test_vision_capability_router_hook_after_auth_skips_mint(monkeypatch, upstream):
+    """Router embed hook (post check_auth) serves capability with zero mint traffic."""
+    monkeypatch.setattr(auth, "is_auth_enabled", lambda: True)
+    monkeypatch.setattr(
+        auth,
+        "ensure_trusted_auth_session",
+        lambda handler: {"auth_type": "password", "username": "rick"},
+    )
+    path = "/biggy-workspace/api/v1/vision/capability"
+    assert auth.check_auth(
+        _ProxyHandler(path=path), SimpleNamespace(path=path, query="")
+    ) is True
+
+    def boom(*_a, **_k):
+        raise embed.EmbedConfigError("bridge_mint_failed")
+
+    monkeypatch.setattr(embed, "_mint_session", boom)
+    before = len(
+        [r for r in _UpstreamRecorder.seen if r["path"] == "/api/v1/session/hermes-bridge"]
+    )
+    handler = _ProxyHandler(path=path, headers={"Accept": "application/json"})
+    assert (
+        _handle_biggy_workspace_embed(
+            handler, SimpleNamespace(path=path, query=""), "GET"
+        )
+        is True
+    )
+    assert handler.status == 200
+    after = len(
+        [r for r in _UpstreamRecorder.seen if r["path"] == "/api/v1/session/hermes-bridge"]
+    )
+    assert after == before
+
+
+def test_owner_session_single_flight_shares_failure(monkeypatch, upstream):
+    """Waiters share one failed mint — no remint stampede, no automatic retry."""
+    import time
+
+    embed._reset_session_cache_for_tests()
+    calls = {"n": 0}
+    ready = threading.Barrier(6)
+
+    def slow_fail(_upstream, _secret):
+        calls["n"] += 1
+        time.sleep(0.15)
+        raise embed.EmbedConfigError("bridge_mint_failed")
+
+    monkeypatch.setattr(embed, "_mint_session", slow_fail)
+    results: list[str | None] = []
+    lock = threading.Lock()
+
+    def worker():
+        ready.wait(timeout=5)
+        try:
+            embed._owner_session_token()
+            with lock:
+                results.append(None)
+        except embed.EmbedConfigError as exc:
+            with lock:
+                results.append(str(exc))
+
+    threads = [threading.Thread(target=worker) for _ in range(6)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=8)
+    assert len(results) == 6
+    assert calls["n"] == 1
+    assert results == ["bridge_mint_failed"] * 6
+
+
+def test_proxy_session_still_requires_mint(upstream):
+    """Non-vision proxy routes still mint (RAG/session semantics unchanged)."""
+    embed._reset_session_cache_for_tests()
+    before = len(
+        [r for r in _UpstreamRecorder.seen if r["path"] == "/api/v1/session/hermes-bridge"]
+    )
+    handler, handled = _call(
+        "GET",
+        "/biggy-workspace/api/v1/session",
+        headers={"Accept": "application/json"},
+    )
+    assert handled is True
+    assert handler.status == 200
+    after = len(
+        [r for r in _UpstreamRecorder.seen if r["path"] == "/api/v1/session/hermes-bridge"]
+    )
+    assert after == before + 1

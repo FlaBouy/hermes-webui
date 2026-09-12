@@ -49,8 +49,12 @@ _VISION_LMSTUDIO_MODEL = "qwen/qwen3.5-35b-a3b"
 _MAX_BODY_BYTES = 8 * 1024 * 1024
 
 _lock = threading.RLock()
+_mint_cv = threading.Condition(_lock)
 _cached_token: str | None = None
 _cached_expires_at: float = 0.0
+_mint_in_flight = False
+_mint_generation = 0
+_last_mint_error: EmbedConfigError | None = None
 _retrieve_semaphore = threading.Semaphore(_RAG_MAX_CONCURRENT)
 
 
@@ -823,20 +827,74 @@ def _mint_session(upstream: str, bridge_secret: str) -> tuple[str, int]:
 
 
 def _owner_session_token() -> str:
-    global _cached_token, _cached_expires_at
+    """Return a cached Workspace owner session, minting under single-flight.
+
+    Concurrent embed requests share one in-flight mint. Waiters use a bounded
+    wait; after a failed mint they share that failure instead of reminting in
+    stampede. No automatic retry — bridge_mint_failed also covers auth-shaped
+    rejects. Does not weaken Bearer/secret checks on hermes-bridge.
+    """
+    global _cached_token, _cached_expires_at, _mint_in_flight
+    global _mint_generation, _last_mint_error
     upstream = load_upstream_origin()
     secret = load_bridge_secret()
     if not upstream or not secret:
         raise EmbedConfigError("bridge_not_configured")
-    now = time.time()
-    with _lock:
-        if _cached_token and now < (_cached_expires_at - _REFRESH_SKEW_SECONDS):
-            return _cached_token
-    token, ttl = _mint_session(upstream, secret)
-    with _lock:
-        _cached_token = token
-        _cached_expires_at = time.time() + ttl
-        return _cached_token
+
+    with _mint_cv:
+        while True:
+            now = time.time()
+            if _cached_token and now < (_cached_expires_at - _REFRESH_SKEW_SECONDS):
+                return _cached_token
+            if _mint_in_flight:
+                gen = _mint_generation
+                _mint_cv.wait(timeout=_MINT_TIMEOUT_SECONDS + 1.0)
+                now = time.time()
+                if _cached_token and now < (_cached_expires_at - _REFRESH_SKEW_SECONDS):
+                    return _cached_token
+                if _mint_generation != gen and _last_mint_error is not None:
+                    raise EmbedConfigError(str(_last_mint_error))
+                if _mint_in_flight:
+                    # Still in flight after bounded wait — fail closed, no stampede.
+                    raise EmbedConfigError("bridge_mint_failed")
+                continue
+            _mint_in_flight = True
+            _last_mint_error = None
+            break
+
+    mint_error: EmbedConfigError | None = None
+    token: str | None = None
+    ttl = 0
+    try:
+        token, ttl = _mint_session(upstream, secret)
+    except EmbedConfigError as exc:
+        mint_error = exc
+    except Exception:
+        with _mint_cv:
+            _last_mint_error = EmbedConfigError("bridge_mint_failed")
+            _mint_generation += 1
+            _mint_in_flight = False
+            _mint_cv.notify_all()
+        raise
+
+    with _mint_cv:
+        if mint_error is None and token and ttl >= 1:
+            _cached_token = token
+            _cached_expires_at = time.time() + float(ttl)
+            _last_mint_error = None
+            result = token
+        else:
+            if mint_error is None:
+                mint_error = EmbedConfigError("bridge_mint_invalid")
+            _last_mint_error = mint_error
+            result = None
+        _mint_generation += 1
+        _mint_in_flight = False
+        _mint_cv.notify_all()
+
+    if result is None:
+        raise mint_error
+    return result
 
 
 def _proxy_request_headers(handler, *, session_token: str) -> dict[str, str]:
@@ -955,6 +1013,11 @@ def handle_biggy_workspace_embed(handler, parsed, method: str) -> bool | None:
     """Proxy /biggy-workspace/* when path matches; False if not this route.
 
     Returns True when handled. Caller must already have passed Hermes check_auth.
+
+    Vision capability/analyze are fulfilled on Smedley after Hermes GUI auth and
+    do not mint a Workspace owner session (they never talk to PLATO). Library
+    search and all other proxy routes keep prior mint-before-fulfill semantics.
+    Auth is not weakened.
     """
     path = str(getattr(parsed, "path", "") or "")
     upstream_path = _map_upstream_path(path)
@@ -962,6 +1025,28 @@ def handle_biggy_workspace_embed(handler, parsed, method: str) -> bool | None:
         if is_embed_path(path):
             return _unavailable(handler, parsed, "invalid_embed_path")
         return False
+
+    method_u = method.upper()
+    try:
+        body = _read_body(handler) if method_u in {"POST", "PUT", "PATCH", "DELETE"} else b""
+    except ValueError as exc:
+        status = 413 if "too large" in str(exc).lower() else 400
+        return _send_bytes(
+            handler,
+            status,
+            json.dumps({"error": str(exc)}).encode("utf-8"),
+            content_type="application/json",
+        )
+
+    # Vision analyze/capability: fulfill on Smedley LM Studio so PLATO loopback
+    # is never mistaken for the local multimodal route — and so a mint outage
+    # cannot block tablet image intake → local analyze.
+    if method_u == "GET" and upstream_path == "/api/v1/vision/capability":
+        status, resp_body, content_type = _fulfill_vision_capability_on_smedley()
+        return _send_bytes(handler, status, resp_body, content_type=content_type)
+    if method_u == "POST" and upstream_path == "/api/v1/vision/analyze":
+        status, resp_body, content_type = _fulfill_vision_analyze_on_smedley(body)
+        return _send_bytes(handler, status, resp_body, content_type=content_type)
 
     try:
         upstream = load_upstream_origin()
@@ -983,31 +1068,12 @@ def handle_biggy_workspace_embed(handler, parsed, method: str) -> bool | None:
     target = urlunsplit(("", "", upstream_path, query, ""))
     url = upstream + target
 
-    try:
-        body = _read_body(handler) if method.upper() in {"POST", "PUT", "PATCH", "DELETE"} else b""
-    except ValueError as exc:
-        status = 413 if "too large" in str(exc).lower() else 400
-        return _send_bytes(
-            handler,
-            status,
-            json.dumps({"error": str(exc)}).encode("utf-8"),
-            content_type="application/json",
-        )
-
     headers = _proxy_request_headers(handler, session_token=session_token)
     # Library search: fulfill on Smedley against localhost:5004 so PLATO never
     # needs outbound sidecar credentials and :5004 stays off the browser.
-    if _is_rag_search_commands_request(upstream_path, method, body):
+    # Mint remains required first (prior semantics; unchanged by vision tablet fix).
+    if _is_rag_search_commands_request(upstream_path, method_u, body):
         status, resp_body, content_type = _fulfill_rag_search_on_smedley(body)
-        return _send_bytes(handler, status, resp_body, content_type=content_type)
-
-    # Vision analyze/capability: fulfill on Smedley LM Studio so PLATO loopback
-    # is never mistaken for the local multimodal route.
-    if method.upper() == "GET" and upstream_path == "/api/v1/vision/capability":
-        status, resp_body, content_type = _fulfill_vision_capability_on_smedley()
-        return _send_bytes(handler, status, resp_body, content_type=content_type)
-    if method.upper() == "POST" and upstream_path == "/api/v1/vision/analyze":
-        status, resp_body, content_type = _fulfill_vision_analyze_on_smedley(body)
         return _send_bytes(handler, status, resp_body, content_type=content_type)
 
     request = _proxy_upstream_request(
@@ -1050,4 +1116,10 @@ def handle_biggy_workspace_embed(handler, parsed, method: str) -> bool | None:
 
 # Test helpers
 def _reset_session_cache_for_tests() -> None:
+    global _mint_in_flight, _mint_generation, _last_mint_error
     _clear_cached_session()
+    with _mint_cv:
+        _mint_in_flight = False
+        _mint_generation = 0
+        _last_mint_error = None
+        _mint_cv.notify_all()
