@@ -1,6 +1,6 @@
 # Biggy camera background
 
-Live Biggy is launchd `ai.biggy.webui` on `http://127.0.0.1:8790`. After the 2026-09-21 correction the listener was pid 39779, parent 39777, grandparent 1.
+Live Biggy is launchd `ai.biggy.webui` on `http://127.0.0.1:8790`. After a later KeepAlive restart the listener was pid 42226, parent 42223, grandparent 1, started 13:33:38 with the 1080p modules already on disk.
 
 Deployed:
 
