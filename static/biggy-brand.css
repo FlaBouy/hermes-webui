@@ -1176,6 +1176,28 @@ body.argus-planner-workspace-active #j-orb{
   #biggyPlannerWorkspace.biggy-planner-workspace{left:6px!important;right:6px!important}
 }
 
+#biggyFleetDesktop.biggy-fleet-desktop{
+  position:fixed;z-index:117;display:flex;flex-direction:column;
+  background:#04050a;border:1px solid rgba(98,219,255,.34);border-radius:8px;
+  overflow:hidden;box-shadow:0 15px 80px rgba(0,0,0,.55);
+}
+#biggyFleetDesktop .biggy-fleet-desktop-bar{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:6px 12px;border-bottom:1px solid rgba(98,219,255,.28);flex:none;
+  color:#d7e4ec;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em;
+}
+#biggyFleetDesktop .biggy-fleet-desktop-close{
+  min-height:36px;background:#09161f;color:#d7e4ec;border:1px solid rgba(98,219,255,.34);
+  border-radius:5px;padding:6px 12px;font:11px inherit;cursor:pointer;letter-spacing:.08em;
+}
+#biggyFleetDesktop iframe{
+  flex:1;min-height:0;width:100%;border:0;background:#04050a;
+}
+body.argus-fleet-desktop-active #biggyArgusReactor,
+body.argus-fleet-desktop-active #j-orb{
+  visibility:hidden!important;pointer-events:none!important;
+}
+
 /* Native ARGUS Vision control surface — centered tool panel between top rail and Orb. */
 #biggyVisionSurface.biggy-vision-surface{
   position:fixed;z-index:117;left:50%;right:auto;width:min(920px,calc(100vw - 96px));

@@ -916,7 +916,127 @@
   }
 
   const FLEET_STATUS_PATH = '/api/biggy/fleet/status';
+  const PRISM_OFFICE_ORIGIN = 'https://smedley.tail061f03.ts.net:5280';
+  const PRISM_OFFICE_PATH = '/office.html';
+  const PRISM_DESKTOP_HOSTS = Object.freeze(['machine-td', 'machine-hal', 'machine-prometheus']);
   let fleetStatusTimer = 0;
+  let biggyFleetDesktopPanel = null;
+  let biggyFleetDesktopFrame = null;
+  let biggyFleetDesktopBound = false;
+
+  function prismDesktopSessionUrl(hostId) {
+    if (!PRISM_DESKTOP_HOSTS.includes(hostId)) return '';
+    return `${PRISM_OFFICE_ORIGIN}${PRISM_OFFICE_PATH}?session=desktop&host=${hostId}`;
+  }
+
+  function acceptedPrismDesktopUrl(raw, expectedHost) {
+    let url;
+    try { url = new URL(String(raw || '')); } catch (_) { return ''; }
+    if (url.protocol !== 'https:') return '';
+    if (url.origin !== PRISM_OFFICE_ORIGIN) return '';
+    if (url.pathname !== PRISM_OFFICE_PATH) return '';
+    if (url.username || url.password) return '';
+    if (url.hash) return '';
+    if (url.searchParams.get('session') !== 'desktop') return '';
+    const host = url.searchParams.get('host');
+    if (!PRISM_DESKTOP_HOSTS.includes(host)) return '';
+    if (expectedHost && host !== expectedHost) return '';
+    const keys = [...url.searchParams.keys()];
+    if (keys.some((key) => key !== 'session' && key !== 'host')) return '';
+    if (keys.some((key) => /pass|token|secret|auth|cookie/i.test(key))) return '';
+    return prismDesktopSessionUrl(host);
+  }
+
+  function positionBiggyFleetDesktop() {
+    const panel = biggyFleetDesktopPanel;
+    if (!panel) return;
+    const rail = document.querySelector('.biggy-top-rail-group');
+    const composer = document.querySelector('#mainChat .composer-wrap')
+      || document.getElementById('composerBox')
+      || document.querySelector('.composer-wrap');
+    const top = Math.max(76, Math.round((rail?.getBoundingClientRect().bottom || 64) + 8));
+    let bottom = 132;
+    if (composer) {
+      const gap = Math.round(window.innerHeight - composer.getBoundingClientRect().top + 8);
+      bottom = Math.max(72, gap);
+    }
+    panel.style.top = `${top}px`;
+    panel.style.bottom = `${bottom}px`;
+    panel.style.left = '14px';
+    panel.style.right = '62px';
+  }
+
+  function closeBiggyFleetDesktop() {
+    if (biggyFleetDesktopFrame) {
+      try { biggyFleetDesktopFrame.src = 'about:blank'; } catch (_err) { /* ignore */ }
+      biggyFleetDesktopFrame.remove();
+      biggyFleetDesktopFrame = null;
+    }
+    document.querySelectorAll('iframe[data-fleet-desktop-frame]').forEach((node) => node.remove());
+    if (biggyFleetDesktopPanel && biggyFleetDesktopPanel.parentNode) {
+      biggyFleetDesktopPanel.remove();
+    }
+    biggyFleetDesktopPanel = null;
+    document.body.classList.remove('argus-fleet-desktop-active');
+  }
+
+  function installBiggyFleetDesktopLifecycle() {
+    if (biggyFleetDesktopBound) return;
+    biggyFleetDesktopBound = true;
+    window.addEventListener('resize', () => {
+      if (biggyFleetDesktopPanel) positionBiggyFleetDesktop();
+    });
+    document.addEventListener('keydown', (event) => {
+      if (event.key !== 'Escape' || !biggyFleetDesktopPanel) return;
+      event.preventDefault();
+      closeBiggyFleetDesktop();
+    });
+    window.addEventListener('pagehide', () => {
+      closeBiggyFleetDesktop();
+    }, { once: true });
+  }
+
+  function openPrismDesktopSession(machine) {
+    const hostId = String(machine?.prism_host || '');
+    const src = acceptedPrismDesktopUrl(machine?.launch_url, hostId);
+    if (!src) return;
+    closeBiggyFleetDesktop();
+    const panel = document.createElement('section');
+    panel.id = 'biggyFleetDesktop';
+    panel.className = 'biggy-fleet-desktop';
+    panel.setAttribute('role', 'dialog');
+    panel.setAttribute('aria-modal', 'true');
+    panel.setAttribute('aria-label', `${machine.label || 'Fleet'} desktop`);
+    panel.setAttribute('data-testid', 'biggy-fleet-desktop');
+    const bar = document.createElement('div');
+    bar.className = 'biggy-fleet-desktop-bar';
+    const title = document.createElement('b');
+    title.textContent = `${machine.label || 'Fleet'} desktop`;
+    const exit = document.createElement('button');
+    exit.type = 'button';
+    exit.className = 'biggy-fleet-desktop-close';
+    exit.setAttribute('aria-label', 'Close desktop');
+    exit.textContent = 'Close';
+    exit.addEventListener('click', (event) => {
+      event.preventDefault();
+      closeBiggyFleetDesktop();
+    });
+    bar.append(title, exit);
+    const frame = document.createElement('iframe');
+    frame.title = `${machine.label || 'Fleet'} desktop`;
+    frame.setAttribute('data-fleet-desktop-frame', '1');
+    frame.setAttribute('referrerpolicy', 'no-referrer');
+    frame.src = src;
+    panel.append(bar, frame);
+    document.body.append(panel);
+    document.body.classList.add('argus-fleet-desktop-active');
+    biggyFleetDesktopPanel = panel;
+    biggyFleetDesktopFrame = frame;
+    positionBiggyFleetDesktop();
+    installBiggyFleetDesktopLifecycle();
+    try { exit.focus(); } catch (_err) { /* ignore */ }
+  }
+
 
   function fleetButtonTitle(machine) {
     const state = String(machine.state || 'offline').toUpperCase();
@@ -939,10 +1059,12 @@
       window.open(target, 'biggy-plato-truenas', 'noopener,noreferrer');
       return;
     }
-    // Windows App registers the rdp: protocol on Smedley. Assigning the URL
-    // from a direct user click preserves browser gesture authority.
-    window.location.href = target;
+    if (machine.kind === 'rdp') {
+      openPrismDesktopSession(machine);
+      return;
+    }
   }
+
 
   function positionBiggyPlannerWorkspace() {
     const panel = biggyPlannerWorkspacePanel;
@@ -1107,6 +1229,7 @@
     markGalaxyFilterSelection('', 0);
     closeBiggyPlannerWorkspace({ restorePlanner: false, restoreFocus: false });
     closeBiggyVisionSurface({ restoreFocus: false });
+    closeBiggyFleetDesktop();
 
     // HOME is a presentation reset, not a transcript mutation. Hide the
     // conversation stack at its current signature while leaving every turn

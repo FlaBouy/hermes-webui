@@ -17,6 +17,35 @@ _REGISTRY_ROOT = Path(
     )
 )
 
+PRISM_OFFICE_ORIGIN = "https://smedley.tail061f03.ts.net:5280"
+PRISM_OFFICE_PATH = "/office.html"
+PRISM_DESKTOP_HOSTS = {
+    "THUNDERDOME": ("machine-td", "ThunderDome\\Smedley"),
+    "HAL9000": ("machine-hal", "Hal9000\\Smedley"),
+    "PROMETHEUS": ("machine-prometheus", "Prometheus\\Smedley"),
+}
+
+
+def prism_desktop_session_url(prism_host: str) -> str:
+    if prism_host not in {item[0] for item in PRISM_DESKTOP_HOSTS.values()}:
+        return ""
+    return (
+        f"{PRISM_OFFICE_ORIGIN}{PRISM_OFFICE_PATH}"
+        f"?session=desktop&host={prism_host}"
+    )
+
+
+def _desktop_fields(machine_id: str) -> dict:
+    mapping = PRISM_DESKTOP_HOSTS.get(machine_id)
+    if not mapping:
+        return {}
+    prism_host, username = mapping
+    return {
+        "prism_host": prism_host,
+        "desktop_username": username,
+        "launch_url": prism_desktop_session_url(prism_host),
+    }
+
 _MACHINES = (
     {
         "id": "SMEDLEY",
@@ -30,21 +59,18 @@ _MACHINES = (
         "label": "TD",
         "kind": "rdp",
         "host": "192.168.0.20",
-        "launch_url": "rdp://full%20address=s:192.168.0.20",
     },
     {
         "id": "HAL9000",
         "label": "HAL",
         "kind": "rdp",
         "host": "192.168.0.13",
-        "launch_url": "rdp://full%20address=s:192.168.0.13",
     },
     {
         "id": "PROMETHEUS",
         "label": "PROMETHEUS",
         "kind": "rdp",
         "host": "192.168.0.16",
-        "launch_url": "rdp://full%20address=s:192.168.0.16",
     },
     {
         "id": "PLATO",
@@ -119,8 +145,9 @@ def fleet_status() -> dict:
             "kind": machine["kind"],
             "state": state,
             "worker_state": worker_state,
-            "launch_url": machine["launch_url"],
+            "launch_url": machine.get("launch_url", ""),
         }
+        item.update(_desktop_fields(machine["id"]))
         if detail:
             item["detail"] = detail
         machines.append(item)

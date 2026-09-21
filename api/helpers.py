@@ -122,7 +122,7 @@ _CSP_SHARED_POLICY_TEMPLATE = (
 # via HERMES_WEBUI_CSP_FRAME_EXTRA — e.g. to embed a self-hosted dashboard in an
 # extension tab. This governs what THIS page may embed; it does NOT affect
 # frame-ancestors (who may embed the WebUI), which stays 'none'.
-_CSP_FRAME_BASE = "'self'"
+_CSP_FRAME_BASE = "'self' https://smedley.tail061f03.ts.net:5280"
 
 
 def _valid_csp_extra_connect_source(source: str) -> bool:
