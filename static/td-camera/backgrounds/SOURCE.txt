@@ -1,0 +1,12 @@
+# Local EGS camera background
+
+Byte-identical application-owned copy of the owner image
+`/Users/rick/Mounts/Z/DATA/EGS.jpg`.
+
+- Copied 2026-09-21 for isolated Biggy camera-background work
+- SHA-256 prefix: f99013661922b5bb
+- Dimensions: 3607 × 2029 JPEG
+- Original file on the SMB share was not modified
+- Runtime uses this local copy only; camera start does not read the share
+
+Do not stretch or pre-flip this image. Cover-fit onto the 4:3 camera canvas.

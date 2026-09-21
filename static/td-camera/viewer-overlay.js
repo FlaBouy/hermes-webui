@@ -2,12 +2,26 @@
 (function (root) {
   "use strict";
 
-  const SOURCE_LABEL = "ThunderDome · Logitech C920";
+  const SOURCE_LABEL = "Smedley · OBSBOT Meet Flip";
   const DEFAULT_W = 320;
   const ASPECT = 4 / 3;
   const MIN_W = 200;
   const MIN_H = 150;
   const MARGIN = 12;
+  const BG_STORAGE_KEY = "biggy:td-camera-bg:v1";
+  const BG_DB_NAME = "biggy-td-camera-bg-v1";
+  const BG_STORE = "images";
+  const CAMERA_BG_ASSET = "egs-bg-20260921b";
+  const EGS_SRC = "/static/td-camera/backgrounds/egs.jpg?v=" + CAMERA_BG_ASSET;
+  const MAX_CUSTOM_BYTES = 8 * 1024 * 1024;
+  const ALLOWED_TYPES = Object.freeze(["image/jpeg", "image/png", "image/webp"]);
+  const CONSUMERS = Object.freeze({
+    preview: "processed",
+    freeze_snapshot: "processed_when_backdrop_on_else_raw",
+    gestures_vision: "raw",
+    presentation_recording: "not_a_camera_consumer",
+    outgoing_virtual_camera: "not_provided",
+  });
 
   let feed = null;
   let settings = null;
@@ -30,6 +44,13 @@
   let pollCount = 0;
   let deliveredFrameCount = 0;
   let frameSeq = 0;
+  let backdropMode = "off";
+  let egsImage = null;
+  let customImage = null;
+  let customName = "";
+  let lastCompositeMs = 0;
+  let egsLoadPromise = null;
+  let starting = false;
 
   function csrfHeaders(extra) {
     const h = Object.assign({}, extra || {});
@@ -58,7 +79,7 @@
       const link = document.createElement("link");
       link.id = "biggy-td-camera-overlay-css";
       link.rel = "stylesheet";
-      link.href = "/static/td-camera/viewer-overlay.css";
+      link.href = "/static/td-camera/viewer-overlay.css?v=" + CAMERA_BG_ASSET;
       link.onload = () => { styleReady = true; resolve(); };
       link.onerror = () => { styleReady = true; resolve(); };
       document.head.appendChild(link);
@@ -72,7 +93,7 @@
     }
     await new Promise((resolve, reject) => {
       const s = document.createElement("script");
-      s.src = "/static/td-camera/viewer-composite.js";
+      s.src = "/static/td-camera/viewer-composite.js?v=" + CAMERA_BG_ASSET;
       s.onload = resolve;
       s.onerror = () => reject(new Error("td_composite_script_failed"));
       document.head.appendChild(s);
@@ -203,7 +224,256 @@
       subscriberCount: rawFrameSubscribers.size,
       openIndependentLease: false,
       increaseRelayTraffic: false,
+      backdropMode,
+      lastCompositeMs,
+      consumers: CONSUMERS,
     };
+  }
+
+  function persistMode() {
+    try {
+      root.localStorage.setItem(BG_STORAGE_KEY, JSON.stringify({
+        mode: backdropMode === "custom" ? "custom" : (backdropMode === "egs" ? "egs" : "off"),
+        customName: customName || "",
+      }));
+    } catch (_) { /* storage may be blocked */ }
+  }
+
+  function readPersistedMode() {
+    try {
+      const raw = root.localStorage.getItem(BG_STORAGE_KEY);
+      if (!raw) return { mode: "off", customName: "" };
+      const parsed = JSON.parse(raw);
+      const mode = parsed && parsed.mode;
+      if (mode === "egs" || mode === "custom" || mode === "off") {
+        return { mode, customName: (parsed.customName || "").slice(0, 180) };
+      }
+    } catch (_) { /* ignore */ }
+    return { mode: "off", customName: "" };
+  }
+
+  function idbRequest(req) {
+    return new Promise((resolve, reject) => {
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error("idb_failed"));
+    });
+  }
+
+  function openBgDb() {
+    if (!root.indexedDB) return Promise.reject(new Error("IndexedDB unavailable"));
+    return new Promise((resolve, reject) => {
+      const req = root.indexedDB.open(BG_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(BG_STORE)) db.createObjectStore(BG_STORE);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error("idb_open_failed"));
+    });
+  }
+
+  async function saveCustomBlob(blob, name) {
+    const db = await openBgDb();
+    try {
+      const tx = db.transaction(BG_STORE, "readwrite");
+      tx.objectStore(BG_STORE).put({ blob, name: name || "", type: blob.type || "image/jpeg" }, "custom");
+      await new Promise((resolve, reject) => {
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error || new Error("idb_put_failed"));
+        tx.onabort = () => reject(tx.error || new Error("idb_put_aborted"));
+      });
+    } finally {
+      try { db.close(); } catch (_) {}
+    }
+  }
+
+  async function loadCustomBlob() {
+    const db = await openBgDb();
+    try {
+      const tx = db.transaction(BG_STORE, "readonly");
+      const rec = await idbRequest(tx.objectStore(BG_STORE).get("custom"));
+      return rec && rec.blob ? rec : null;
+    } finally {
+      try { db.close(); } catch (_) {}
+    }
+  }
+
+  async function clearCustomBlob() {
+    try {
+      const db = await openBgDb();
+      try {
+        const tx = db.transaction(BG_STORE, "readwrite");
+        tx.objectStore(BG_STORE).delete("custom");
+        await new Promise((resolve, reject) => {
+          tx.oncomplete = resolve;
+          tx.onerror = () => reject(tx.error || new Error("idb_delete_failed"));
+        });
+      } finally {
+        try { db.close(); } catch (_) {}
+      }
+    } catch (_) { /* ignore */ }
+  }
+
+  function classifyCustomFile(file) {
+    if (!file) throw new Error("No image selected.");
+    const alias = {
+      "image/jpg": "image/jpeg",
+      "image/pjpeg": "image/jpeg",
+      "image/x-png": "image/png",
+    };
+    let type = String(file.type || "").toLowerCase();
+    if (alias[type]) type = alias[type];
+    const name = String(file.name || "").toLowerCase();
+    if (!type) {
+      if (/\.jpe?g$/.test(name)) type = "image/jpeg";
+      else if (/\.png$/.test(name)) type = "image/png";
+      else if (/\.webp$/.test(name)) type = "image/webp";
+    }
+    if (type === "image/heic" || type === "image/heif" || /\.hei[cf]$/.test(name)) {
+      throw new Error("HEIC/HEIF is not decoded here. Export a JPEG, PNG, or WebP.");
+    }
+    if (ALLOWED_TYPES.indexOf(type) < 0) {
+      throw new Error("Use a JPEG, PNG, or WebP image.");
+    }
+    if (!(file.size > 0) || file.size > MAX_CUSTOM_BYTES) {
+      throw new Error("Image must be between 1 byte and 8 MB.");
+    }
+    return type;
+  }
+
+  function validateCustomFile(file) {
+    return classifyCustomFile(file);
+  }
+
+  function decodeImageFromUrl(url) {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const done = () => {
+          if (!(img.naturalWidth > 0) || !(img.naturalHeight > 0)) {
+            reject(new Error("Image could not be decoded."));
+            return;
+          }
+          resolve(img);
+        };
+        if (typeof img.decode === "function") img.decode().then(done).catch(done);
+        else done();
+      };
+      img.onerror = () => reject(new Error("Image could not be decoded."));
+      img.src = url;
+    });
+  }
+
+  async function decodeCustomBlob(blob) {
+    if (typeof createImageBitmap === "function") {
+      try {
+        const bitmap = await createImageBitmap(blob, { imageOrientation: "from-image" });
+        if (bitmap && bitmap.width > 0 && bitmap.height > 0) return bitmap;
+      } catch (_) { /* fall through to Image decode */ }
+    }
+    const url = URL.createObjectURL(blob);
+    try {
+      return await decodeImageFromUrl(url);
+    } catch (err) {
+      try { URL.revokeObjectURL(url); } catch (_) {}
+      throw err;
+    }
+  }
+
+  async function ensureEgsImage() {
+    if (egsImage && egsImage.naturalWidth) return egsImage;
+    if (egsLoadPromise) return egsLoadPromise;
+    egsLoadPromise = decodeImageFromUrl(EGS_SRC).then((img) => {
+      egsImage = img;
+      return img;
+    }).catch((err) => {
+      egsLoadPromise = null;
+      throw err;
+    });
+    return egsLoadPromise;
+  }
+
+  async function adoptCustomFile(file) {
+    classifyCustomFile(file);
+    await ensureComposite();
+    if (customFileUrl) {
+      try { URL.revokeObjectURL(customFileUrl); } catch (_) {}
+      customFileUrl = null;
+    }
+    const img = await decodeCustomBlob(file);
+    customImage = img;
+    customName = String(file.name || "custom").slice(0, 180);
+    await saveCustomBlob(file, customName);
+    backdropMode = "custom";
+    persistMode();
+    if (root.BiggyTdCameraComposite) {
+      root.BiggyTdCameraComposite.setCustomBackdrop(customImage);
+    }
+    return img;
+  }
+
+  async function restorePersistedBackdrop() {
+    const saved = readPersistedMode();
+    customName = saved.customName || "";
+    if (saved.mode === "egs") {
+      try {
+        await ensureEgsImage();
+        backdropMode = "egs";
+      } catch (_) {
+        backdropMode = "off";
+      }
+    } else if (saved.mode === "custom") {
+      try {
+        const rec = await loadCustomBlob();
+        if (rec && rec.blob) {
+          if (customFileUrl) {
+            try { URL.revokeObjectURL(customFileUrl); } catch (_) {}
+          }
+          customImage = await decodeCustomBlob(rec.blob);
+          customName = rec.name || customName;
+          backdropMode = "custom";
+        } else {
+          backdropMode = "off";
+        }
+      } catch (_) {
+        backdropMode = "off";
+      }
+    } else {
+      backdropMode = "off";
+    }
+    persistMode();
+    return backdropMode;
+  }
+
+  async function applyBackdropImage() {
+    await ensureComposite();
+    if (!root.BiggyTdCameraComposite) return;
+    if (backdropMode === "egs") {
+      await ensureEgsImage();
+      root.BiggyTdCameraComposite.setCustomBackdrop(egsImage);
+    } else if (backdropMode === "custom" && customImage) {
+      root.BiggyTdCameraComposite.setCustomBackdrop(customImage);
+    } else {
+      root.BiggyTdCameraComposite.setCustomBackdrop(null);
+    }
+  }
+
+  function syncBackdropSelect() {
+    const sel = settings && settings.querySelector("#biggy-td-camera-backdrop");
+    if (sel) sel.value = backdropMode === "custom" ? "custom" : (backdropMode === "egs" ? "egs" : "off");
+  }
+
+  function backdropLabel() {
+    if (backdropMode === "egs") return "EGS";
+    if (backdropMode === "custom") return customName ? ("custom:" + customName) : "custom";
+    return "off";
+  }
+
+  let restoreStarted = false;
+  function startRestore() {
+    if (restoreStarted) return;
+    restoreStarted = true;
+    restorePersistedBackdrop().then(() => applyBackdropImage().catch(() => {})).catch(() => {});
   }
 
   function clearFrames() {
@@ -213,10 +483,6 @@
     }
     lastRawBlob = null;
     lastRawAt = 0;
-    if (customFileUrl) {
-      try { URL.revokeObjectURL(customFileUrl); } catch (_) {}
-      customFileUrl = null;
-    }
     const canvas = feed && feed.querySelector("#biggy-td-camera-canvas");
     if (canvas) {
       const ctx = canvas.getContext("2d");
@@ -229,7 +495,6 @@
       raw.hidden = true;
     }
     if (root.BiggyTdCameraComposite) {
-      try { root.BiggyTdCameraComposite.setCustomBackdrop(null); } catch (_) {}
       try { root.BiggyTdCameraComposite.reset(); } catch (_) {}
     }
   }
@@ -252,13 +517,16 @@
     }
     const startBtn = settings && settings.querySelector('[data-testid="biggy-td-camera-start"]');
     const stopBtn = settings && settings.querySelector('[data-testid="biggy-td-camera-stop"]');
+    const freezeBtn = settings && settings.querySelector('[data-testid="biggy-td-camera-freeze"]');
     if (startBtn) startBtn.disabled = false;
     if (stopBtn) stopBtn.disabled = true;
+    if (freezeBtn) freezeBtn.disabled = true;
     if (!silent) {
       setMode("Camera off");
-      setNote("Preview stopped.");
+      setNote("Preview stopped. Overlay closed. Background selection is remembered.");
     }
-    if (feed) feed.classList.remove("is-live");
+    if (feed && feed.parentNode) feed.remove();
+    feed = null;
     notifyVision();
     if (lease) {
       try {
@@ -278,17 +546,16 @@
     if (!lastRawBlob || (Date.now() - lastRawAt) > 5000) {
       throw new Error("No recent camera frame — wait for the feed, then Freeze again.");
     }
-    const backdropEl = settings && settings.querySelector("#biggy-td-camera-backdrop");
-    const backdrop = (backdropEl && backdropEl.value) || "off";
+    const backdrop = backdropMode || "off";
     let blob = lastRawBlob;
-    let source = "td_camera_raw";
+    let source = "obsbot_local_raw";
     if (backdrop !== "off" && feed) {
       const canvas = feed.querySelector("#biggy-td-camera-canvas");
       if (canvas && !canvas.hidden) {
         blob = await new Promise((resolve, reject) => {
           canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("preview_freeze_failed"))), "image/jpeg", 0.92);
         });
-        source = "td_camera_preview";
+        source = "obsbot_local_preview";
       }
     }
     // Open Focus panel and ingest without a second camera lease/poll.
@@ -346,7 +613,7 @@
       );
       if (!viewing) {
         setMode("Camera ready");
-        setNote("Start shows the feed only in the lower-left. Backdrop is preview-only.");
+        setNote("Start shows the feed only in the lower-left. Background applies to the processed preview and Freeze; Gestures still receive the raw frame.");
       }
     } catch (err) {
       setDetails(`health_error=${err && err.message ? err.message : String(err)}`);
@@ -380,8 +647,7 @@
         objectUrl = URL.createObjectURL(blob);
         const raw = feed.querySelector("#biggy-td-camera-raw");
         const canvas = feed.querySelector("#biggy-td-camera-canvas");
-        const backdropEl = settings && settings.querySelector("#biggy-td-camera-backdrop");
-        const backdrop = (backdropEl && backdropEl.value) || "off";
+        const backdrop = backdropMode || "off";
         if (backdrop !== "off") canvas.hidden = true;
         await new Promise((resolve, reject) => {
           raw.onload = resolve;
@@ -400,8 +666,10 @@
           image: raw,
           width: raw.naturalWidth || 0,
           height: raw.naturalHeight || 0,
+          processed: false,
         });
         await ensureComposite();
+        await applyBackdropImage();
         const compGen = root.BiggyTdCameraComposite.currentGeneration();
         const result = await root.BiggyTdCameraComposite.compositeToCanvas(
           raw,
@@ -410,16 +678,18 @@
           { generation: compGen }
         );
         if (myGen !== frameGen || !viewing) return;
+        lastCompositeMs = result.ms || 0;
         if (!result.ok) {
           canvas.hidden = true;
           setMode("Camera previewing");
-          setNote(result.error || "Backdrop compositing failed — raw not shown.");
+          setNote(result.error || "Background compositing failed — raw not shown as background-enabled.");
         } else {
           canvas.hidden = false;
           setMode("Camera previewing");
           setNote(
-            `Preview ${canvas.width}×${canvas.height} · backdrop=${backdrop}`
+            `Preview ${canvas.width}×${canvas.height} · background=${backdropLabel()}`
               + (result.seg ? ` · seg=${result.seg}` : "")
+              + (result.ms != null ? ` · ${result.ms}ms` : "")
           );
         }
       }
@@ -443,7 +713,7 @@
     feed = document.createElement("section");
     feed.id = "biggyTdCameraFeed";
     feed.className = "biggy-td-camera-feed";
-    feed.setAttribute("aria-label", "ThunderDome camera feed");
+    feed.setAttribute("aria-label", "Smedley OBSBOT camera feed");
     feed.setAttribute("data-testid", "biggy-td-camera-overlay");
     feed.innerHTML =
       '<canvas id="biggy-td-camera-canvas" width="640" height="480" hidden '
@@ -487,6 +757,8 @@
   }
 
   async function startPreview() {
+    if (viewing || starting) return;
+    starting = true;
     const startBtn = settings && settings.querySelector('[data-testid="biggy-td-camera-start"]');
     const stopBtn = settings && settings.querySelector('[data-testid="biggy-td-camera-stop"]');
     if (startBtn) startBtn.disabled = true;
@@ -498,6 +770,7 @@
       if (root.BiggyTdCameraComposite && root.BiggyTdCameraComposite.reopen) {
         root.BiggyTdCameraComposite.reopen();
       }
+      await applyBackdropImage();
       const res = await fetch("/api/td-camera/view/start", {
         method: "POST",
         credentials: "same-origin",
@@ -534,6 +807,8 @@
       setMode("Camera ready");
       setNote(err.message || String(err));
       notifyVision();
+    } finally {
+      starting = false;
     }
   }
 
@@ -598,17 +873,16 @@
       + '<button type="button" data-testid="biggy-td-camera-start">Start</button>'
       + '<button type="button" class="danger" data-testid="biggy-td-camera-stop" disabled>Stop</button>'
       + '<button type="button" data-testid="biggy-td-camera-freeze" disabled>Freeze frame</button>'
-      + '<label>Backdrop <select id="biggy-td-camera-backdrop" data-testid="biggy-td-camera-backdrop">'
-      + '<option value="off" selected>Off</option>'
-      + '<option value="blur">Blur</option>'
-      + '<option value="custom">Custom</option>'
+      + '<label class="biggy-td-camera-bg-label">Background '
+      + '<select id="biggy-td-camera-backdrop" data-testid="biggy-td-camera-backdrop" aria-label="Camera background">'
+      + '<option value="off">Off</option>'
+      + '<option value="egs">EGS</option>'
+      + '<option value="custom">Choose image…</option>'
       + "</select></label>"
-      + '<label class="biggy-td-camera-file">Custom image'
       + '<input type="file" id="biggy-td-camera-backdrop-file" accept="image/png,image/jpeg,image/webp" hidden '
       + 'data-testid="biggy-td-camera-backdrop-file" />'
-      + "</label>"
       + "</div>"
-      + '<p class="biggy-td-camera-hint">Start shows only the camera image (lower-left). Freeze saves the current authorized frame into Focus for evidence. Closing settings does not stop the feed.</p>'
+      + '<p class="biggy-td-camera-hint">Start shows the camera image lower-left. Background composites the person over EGS or a chosen image in the preview and Freeze. Gestures keep the raw frame. Stop releases capture. Closing settings does not stop the feed.</p>'
       + '<details class="biggy-td-camera-details" data-testid="biggy-td-camera-details">'
       + "<summary>Details</summary>"
       + '<pre data-testid="biggy-td-camera-details-body"></pre>'
@@ -631,27 +905,51 @@
       });
     });
     const fileInput = panel.querySelector("#biggy-td-camera-backdrop-file");
+    const sel = panel.querySelector("#biggy-td-camera-backdrop");
+    sel.value = backdropMode === "custom" ? "custom" : (backdropMode === "egs" ? "egs" : "off");
+    sel.addEventListener("change", async () => {
+      const prev = backdropMode;
+      const next = sel.value;
+      try {
+        if (next === "off") {
+          backdropMode = "off";
+          persistMode();
+          if (root.BiggyTdCameraComposite) root.BiggyTdCameraComposite.setCustomBackdrop(null);
+          setNote("Background off — original camera image restored.");
+          return;
+        }
+        if (next === "egs") {
+          await ensureEgsImage();
+          backdropMode = "egs";
+          persistMode();
+          await applyBackdropImage();
+          setNote("EGS background selected. Person is composited over the local EGS image.");
+          return;
+        }
+        if (next === "custom") {
+          fileInput.click();
+          sel.value = prev === "custom" ? "custom" : (prev === "egs" ? "egs" : "off");
+        }
+      } catch (err) {
+        backdropMode = prev;
+        sel.value = prev === "custom" ? "custom" : (prev === "egs" ? "egs" : "off");
+        persistMode();
+        setNote(err.message || String(err));
+      }
+    });
     fileInput.addEventListener("change", async () => {
       const file = fileInput.files && fileInput.files[0];
       fileInput.value = "";
-      if (!file) return;
+      if (!file) {
+        syncBackdropSelect();
+        return;
+      }
       try {
-        await ensureComposite();
-        if (customFileUrl) {
-          try { URL.revokeObjectURL(customFileUrl); } catch (_) {}
-        }
-        customFileUrl = URL.createObjectURL(file);
-        const img = new Image();
-        await new Promise((res, rej) => {
-          img.onload = res;
-          img.onerror = rej;
-          img.src = customFileUrl;
-        });
-        root.BiggyTdCameraComposite.setCustomBackdrop(img);
-        const sel = panel.querySelector("#biggy-td-camera-backdrop");
-        if (sel) sel.value = "custom";
-        setNote("Custom backdrop loaded for preview.");
+        await adoptCustomFile(file);
+        syncBackdropSelect();
+        setNote("Custom background saved. Replaces the previous custom image.");
       } catch (err) {
+        syncBackdropSelect();
         setNote(err.message || String(err));
       }
     });
@@ -675,6 +973,7 @@
       if (stopBtn) stopBtn.disabled = !viewing;
       if (startBtn) startBtn.disabled = !!viewing;
       if (freezeBtn) freezeBtn.disabled = !viewing;
+      syncBackdropSelect();
       return settings;
     }
     settings = buildSettings();
@@ -685,11 +984,13 @@
     if (stopBtn) stopBtn.disabled = !viewing;
     if (startBtn) startBtn.disabled = !!viewing;
     if (freezeBtn) freezeBtn.disabled = !viewing;
+    syncBackdropSelect();
     setMode(viewing ? "Camera previewing" : "Camera ready");
     setNote(viewing
       ? "Feed is live lower-left. Stop ends the feed; Close hides settings only."
-      : "Start shows the feed only in the lower-left. Backdrop is preview-only.");
+      : "Start shows the feed only in the lower-left. Background applies to processed preview/Freeze, not Gestures.");
     refreshHealthQuiet().catch(() => {});
+    startRestore();
     return settings;
   }
 
@@ -707,6 +1008,7 @@
 
   /** VISION→Camera: settings surface (feed stays independent). */
   function open() {
+    startRestore();
     return openSettings();
   }
 
@@ -733,6 +1035,7 @@
     freezeFrame,
     subscribeRawFrames,
     frameStats,
+    consumers: CONSUMERS,
     /** Test hooks — not for product UI. */
     _test: {
       ensureFeed,
@@ -742,6 +1045,18 @@
       frameStats,
       subscriberCount: () => rawFrameSubscribers.size,
       setLastRawBlob: (blob) => { lastRawBlob = blob; lastRawAt = Date.now(); },
+      validateCustomFile,
+      persistMode,
+      readPersistedMode,
+      setBackdropMode: (mode) => { backdropMode = mode; persistMode(); },
+      getBackdropMode: () => backdropMode,
+      adoptCustomFile,
+      restorePersistedBackdrop,
+      applyBackdropImage,
+      EGS_SRC,
+      MAX_CUSTOM_BYTES,
+      ALLOWED_TYPES,
+      CONSUMERS,
     },
   };
 })(typeof window !== "undefined" ? window : globalThis);

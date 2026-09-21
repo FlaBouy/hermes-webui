@@ -68,9 +68,10 @@
 .biggy-td-camera-controls button:disabled{opacity:.45;cursor:not-allowed}
 .biggy-td-camera-controls label{display:inline-flex;align-items:center;gap:6px;color:#8eb4c8}
 .biggy-td-camera-controls select{
-  min-height:34px;border:1px solid rgba(148,163,184,.34);border-radius:5px;
+  min-height:34px;min-width:11.5em;border:1px solid rgba(148,163,184,.34);border-radius:5px;
   background:#09161f;color:#d7e4ec;padding:4px 6px;
 }
+.biggy-td-camera-bg-label{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}
 .biggy-td-camera-file{cursor:pointer;text-decoration:underline}
 .biggy-td-camera-details{
   margin-top:4px;color:#7896a6;border-top:1px solid rgba(78,204,163,.16);padding-top:6px;
@@ -83,5 +84,8 @@
 
 @media(max-width:760px){
   .biggy-td-camera-settings{top:8%;left:8px;right:8px;width:auto;transform:none}
-  .biggy-td-camera-controls button,.biggy-td-camera-settings-header button{min-height:40px}
+  .biggy-td-camera-controls button,.biggy-td-camera-settings-header button,
+  .biggy-td-camera-controls select{min-height:40px}
+  .biggy-td-camera-controls select{width:100%;max-width:100%}
+  .biggy-td-camera-bg-label{width:100%}
 }

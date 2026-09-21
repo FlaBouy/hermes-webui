@@ -359,6 +359,8 @@ def mock_upstream_and_proxy(monkeypatch):
                     ctype = "application/wasm"
                 if path.suffix == ".png":
                     ctype = "image/png"
+                if path.suffix in {".jpg", ".jpeg"}:
+                    ctype = "image/jpeg"
                 self.send_response(200)
                 self.send_header("Content-Type", ctype)
                 self.send_header("Content-Length", str(len(data)))
@@ -414,7 +416,7 @@ HARNESS = """<!doctype html>
 <html><body>
 <button id="start">Start</button>
 <button id="stop" disabled>Stop</button>
-<select id="backdrop"><option value="off">Off</option><option value="blur">Blur</option></select>
+<select id="backdrop"><option value="off">Off</option><option value="egs">EGS</option><option value="custom">Choose image…</option><option value="blur">Blur</option></select>
 <canvas id="out" width="320" height="240" hidden></canvas>
 <img id="raw" hidden />
 <p id="status">idle</p>
@@ -524,4 +526,232 @@ def test_actual_segmentation_compositor_under_csp(mock_upstream_and_proxy):
         assert result.get("ok") is True, result
         assert result.get("composited") is True
         assert result.get("seg") == "ok"
+        browser.close()
+
+
+EGS_ASSET = ROOT / "static" / "td-camera" / "backgrounds" / "egs.jpg"
+OWNER_EGS = Path("/Users/rick/Mounts/Z/DATA/EGS.jpg")
+
+
+def test_egs_background_is_local_byte_identical_copy():
+    assert EGS_ASSET.is_file()
+    data = EGS_ASSET.read_bytes()
+    assert data[:2] == b"\xff\xd8"
+    assert len(data) == 1857571
+    from PIL import Image
+
+    with Image.open(EGS_ASSET) as im:
+        assert im.size == (3607, 2029)
+    overlay = (ROOT / "static" / "td-camera" / "viewer-overlay.js").read_text(encoding="utf-8")
+    http_src = (ROOT / "api" / "td_camera_http.py").read_text(encoding="utf-8")
+    assert "Off</option>" in overlay
+    assert ">EGS</option>" in overlay
+    assert "Choose image…" in overlay
+    assert "/static/td-camera/backgrounds/egs.jpg" in overlay
+    assert "Mounts/Z/DATA/EGS.jpg" not in overlay
+    assert "filesystem" not in overlay.lower() or "No arbitrary filesystem-path endpoint" in overlay
+    assert "/api/td-camera/background" not in http_src
+    assert "path=" not in overlay
+    if OWNER_EGS.is_file():
+        assert OWNER_EGS.read_bytes() == data
+
+
+def test_overlay_keeps_raw_vision_path_and_obsbot_labels():
+    overlay = (ROOT / "static" / "td-camera" / "viewer-overlay.js").read_text(encoding="utf-8")
+    assert "OBSBOT Meet Flip" in overlay
+    assert "Logitech C920" not in overlay
+    assert "ThunderDome" not in overlay
+    assert "subscribeRawFrames" in overlay
+    assert "processed: false" in overlay
+    assert 'gestures_vision: "raw"' in overlay
+    assert "outgoing_virtual_camera" in overlay
+    assert "scaleX" not in overlay
+    assert "setCustomBackdrop(null)" in overlay
+    composite = (ROOT / "static" / "td-camera" / "viewer-composite.js").read_text(encoding="utf-8")
+    assert "Math.min(640" not in composite
+    assert "naturalWidth || sourceImage.width" in composite
+    http_src = (ROOT / "api" / "td_camera_http.py").read_text(encoding="utf-8")
+    assert 'qs.get("path")' not in http_src
+
+
+def test_validate_custom_file_and_persist_mode(mock_upstream_and_proxy):
+    base, _state = mock_upstream_and_proxy
+    pw = _require_playwright()
+    with pw() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(f"{base}/harness", wait_until="domcontentloaded")
+        page.add_script_tag(url="/static/td-camera/viewer-overlay.js")
+        page.wait_for_function("() => !!window.BiggyTdCameraOverlay", timeout=10000)
+        bad = page.evaluate(
+            """() => {
+              const api = window.BiggyTdCameraOverlay._test;
+              const errors = [];
+              try { api.validateCustomFile({type:'text/plain', size:12, name:'x.txt'}); }
+              catch (e) { errors.push(String(e.message||e)); }
+              try { api.validateCustomFile({type:'image/jpg', size:1200, name:'mirror.jpg'}); }
+              catch (e) { errors.push('alias:' + String(e.message||e)); }
+              try { api.validateCustomFile({type:'image/jpeg', size:9*1024*1024, name:'big.jpg'}); }
+              catch (e) { errors.push(String(e.message||e)); }
+              api.setBackdropMode('egs');
+              return { errors, stored: api.readPersistedMode() };
+            }"""
+        )
+        assert any("JPEG, PNG, or WebP" in e for e in bad["errors"]), bad
+        assert any("8 MB" in e for e in bad["errors"]), bad
+        assert not any(e.startswith("alias:") for e in bad["errors"]), bad
+        assert bad["stored"]["mode"] == "egs"
+        page.evaluate("() => window.BiggyTdCameraOverlay._test.setBackdropMode('off')")
+        stored_off = page.evaluate("() => window.BiggyTdCameraOverlay._test.readPersistedMode()")
+        assert stored_off["mode"] == "off"
+        browser.close()
+
+
+def test_background_selector_desktop_and_tablet(mock_upstream_and_proxy):
+    base, _state = mock_upstream_and_proxy
+    pw = _require_playwright()
+    with pw() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.set_viewport_size({"width": 1280, "height": 800})
+        page.goto(f"{base}/harness", wait_until="domcontentloaded")
+        page.add_script_tag(url="/static/td-camera/viewer-overlay.js")
+        page.wait_for_function("() => !!window.BiggyTdCameraOverlay", timeout=10000)
+        page.evaluate("() => window.BiggyTdCameraOverlay.open()")
+        sel = page.locator('[data-testid="biggy-td-camera-backdrop"]')
+        expect(sel).to_be_visible()
+        labels = sel.locator("option").all_text_contents()
+        assert labels == ["Off", "EGS", "Choose image…"], labels
+        desktop = sel.bounding_box()
+        assert desktop and desktop["width"] >= 100
+        page.set_viewport_size({"width": 768, "height": 1024})
+        page.wait_for_timeout(50)
+        tablet = sel.bounding_box()
+        assert tablet and tablet["width"] >= 100
+        assert page.locator('[data-testid="biggy-td-camera-settings"]').bounding_box()["width"] <= 768
+        browser.close()
+
+
+def test_cover_fit_preserves_egs_logo_side_without_preflip(mock_upstream_and_proxy):
+    base, _state = mock_upstream_and_proxy
+    pw = _require_playwright()
+    with pw() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(f"{base}/harness", wait_until="domcontentloaded")
+        page.wait_for_function("() => !!window.BiggyTdCameraComposite", timeout=10000)
+        result = page.evaluate(
+            """async () => {
+              const img = new Image();
+              await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src='/static/td-camera/backgrounds/egs.jpg';});
+              const canvas = document.createElement('canvas');
+              canvas.width = 640; canvas.height = 480;
+              const ctx = canvas.getContext('2d');
+              const cover = BiggyTdCameraComposite.drawCover(ctx, img, 640, 480);
+              const left = ctx.getImageData(40, 120, 80, 80).data;
+              const right = ctx.getImageData(520, 120, 80, 80).data;
+              function mean(data, ch) {
+                let s=0, n=0;
+                for (let i=ch; i<data.length; i+=4) { s+=data[i]; n++; }
+                return s/n;
+              }
+              return {
+                w: img.naturalWidth, h: img.naturalHeight,
+                dx: cover.dx, dy: cover.dy, dw: cover.dw, dh: cover.dh,
+                leftR: mean(left,0), leftG: mean(left,1), leftB: mean(left,2),
+                rightR: mean(right,0), rightG: mean(right,1), rightB: mean(right,2),
+              };
+            }"""
+        )
+        assert result["w"] == 3607 and result["h"] == 2029, result
+        assert result["dx"] < 0, result  # landscape cover crops sides, not a horizontal flip
+        # Logo/wall stay on the left of the unflipped cover-fit; a pre-flip would put them right.
+        assert result["leftR"] > result["rightR"], result
+        browser.close()
+
+
+def test_segmentation_failure_does_not_label_raw_as_background(mock_upstream_and_proxy):
+    base, _state = mock_upstream_and_proxy
+    pw = _require_playwright()
+    with pw() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(f"{base}/harness", wait_until="domcontentloaded")
+        page.wait_for_function("() => !!window.BiggyTdCameraComposite", timeout=10000)
+        result = page.evaluate(
+            """async () => {
+              BiggyTdCameraComposite.abort();
+              const img = new Image();
+              img.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==';
+              await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;});
+              const canvas = document.createElement('canvas');
+              const r = await BiggyTdCameraComposite.compositeToCanvas(
+                img, canvas, 'egs', {generation: BiggyTdCameraComposite.currentGeneration()}
+              );
+              return { ok:r.ok, composited:r.composited, seg:r.seg, error:r.error||'', hidden: canvas.hidden };
+            }"""
+        )
+        assert result["ok"] is False, result
+        assert result["composited"] is False, result
+        assert result["seg"] in {"failed", "unavailable", "aborted"}, result
+        assert "raw feed not shown" in result["error"].lower() or "aborted" in result["error"].lower(), result
+        browser.close()
+
+
+def test_egs_composite_and_off_restore_and_lifecycle(mock_upstream_and_proxy):
+    if not FIXTURE_PERSON.is_file():
+        pytest.skip("synthetic person fixture missing")
+    base, _state = mock_upstream_and_proxy
+    import base64
+
+    person = base64.b64encode(FIXTURE_PERSON.read_bytes()).decode("ascii")
+    pw = _require_playwright()
+    with pw() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(f"{base}/harness", wait_until="domcontentloaded")
+        page.wait_for_function("() => !!window.BiggyTdCameraComposite", timeout=10000)
+        result = page.evaluate(
+            """async (personUrl) => {
+              const egs = new Image();
+              await new Promise((res,rej)=>{egs.onload=res;egs.onerror=rej;egs.src='/static/td-camera/backgrounds/egs.jpg';});
+              const person = new Image();
+              await new Promise((res,rej)=>{person.onload=res;person.onerror=rej;person.src=personUrl;});
+              BiggyTdCameraComposite.reopen();
+              const loaded = await BiggyTdCameraComposite.loadSegmenter();
+              if (!loaded) return { ok:false, reason:'load' };
+              BiggyTdCameraComposite.setCustomBackdrop(egs);
+              const canvas = document.createElement('canvas');
+              const egsR = await BiggyTdCameraComposite.compositeToCanvas(
+                person, canvas, 'egs', {generation: BiggyTdCameraComposite.currentGeneration()}
+              );
+              const egsSample = canvas.getContext('2d').getImageData(8, 8, 1, 1).data.join(',');
+              const offR = await BiggyTdCameraComposite.compositeToCanvas(
+                person, canvas, 'off', {generation: BiggyTdCameraComposite.currentGeneration()}
+              );
+              const offSample = canvas.getContext('2d').getImageData(8, 8, 1, 1).data.join(',');
+              BiggyTdCameraComposite.abort();
+              const afterAbort = await BiggyTdCameraComposite.compositeToCanvas(
+                person, canvas, 'egs', {generation: BiggyTdCameraComposite.currentGeneration()}
+              );
+              BiggyTdCameraComposite.reopen();
+              BiggyTdCameraComposite.setCustomBackdrop(egs);
+              const afterReopen = await BiggyTdCameraComposite.compositeToCanvas(
+                person, canvas, 'egs', {generation: BiggyTdCameraComposite.currentGeneration()}
+              );
+              return {
+                loaded, egs: egsR, off: offR, afterAbort, afterReopen,
+                egsSample, offSample, egsMs: egsR.ms, reopenMs: afterReopen.ms
+              };
+            }""",
+            f"data:image/png;base64,{person}",
+        )
+        assert result.get("loaded") is True, result
+        assert result["egs"]["ok"] is True and result["egs"]["composited"] is True, result
+        assert result["off"]["ok"] is True and result["off"]["composited"] is False, result
+        assert result["off"]["seg"] == "off", result
+        assert result["egsSample"] != result["offSample"], result
+        assert result["afterAbort"]["ok"] is False, result
+        assert result["afterReopen"]["ok"] is True, result
+        assert result["egsMs"] is not None
         browser.close()
