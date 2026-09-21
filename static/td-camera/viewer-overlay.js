@@ -11,7 +11,7 @@
   const BG_STORAGE_KEY = "biggy:td-camera-bg:v1";
   const BG_DB_NAME = "biggy-td-camera-bg-v1";
   const BG_STORE = "images";
-  const CAMERA_BG_ASSET = "egs-bg-20260921b";
+  const CAMERA_BG_ASSET = "egs-bg-20260921c";
   const EGS_SRC = "/static/td-camera/backgrounds/egs.jpg?v=" + CAMERA_BG_ASSET;
   const MAX_CUSTOM_BYTES = 8 * 1024 * 1024;
   const ALLOWED_TYPES = Object.freeze(["image/jpeg", "image/png", "image/webp"]);
@@ -45,6 +45,7 @@
   let deliveredFrameCount = 0;
   let frameSeq = 0;
   let backdropMode = "off";
+  let backdropError = "";
   let egsImage = null;
   let customImage = null;
   let customName = "";
@@ -330,10 +331,10 @@
       else if (/\.webp$/.test(name)) type = "image/webp";
     }
     if (type === "image/heic" || type === "image/heif" || /\.hei[cf]$/.test(name)) {
-      throw new Error("HEIC/HEIF is not decoded here. Export a JPEG, PNG, or WebP.");
+      throw new Error("HEIC/HEIF is not decoded here (" + (name || "unnamed") + "). Export a JPEG, PNG, or WebP.");
     }
     if (ALLOWED_TYPES.indexOf(type) < 0) {
-      throw new Error("Use a JPEG, PNG, or WebP image.");
+      throw new Error("Use a JPEG, PNG, or WebP image. Got " + (type || "unknown") + (name ? " (" + name + ")" : "") + ".");
     }
     if (!(file.size > 0) || file.size > MAX_CUSTOM_BYTES) {
       throw new Error("Image must be between 1 byte and 8 MB.");
@@ -434,9 +435,11 @@
           backdropMode = "custom";
         } else {
           backdropMode = "off";
+          backdropError = "Custom background was selected but no saved image was found.";
         }
-      } catch (_) {
+      } catch (err) {
         backdropMode = "off";
+        backdropError = (err && err.message) ? err.message : "Saved custom background could not be decoded.";
       }
     } else {
       backdropMode = "off";
@@ -473,7 +476,15 @@
   function startRestore() {
     if (restoreStarted) return;
     restoreStarted = true;
-    restorePersistedBackdrop().then(() => applyBackdropImage().catch(() => {})).catch(() => {});
+    restorePersistedBackdrop().then(() => applyBackdropImage().catch((err) => {
+      backdropError = (err && err.message) ? err.message : "Background image failed to load.";
+      setNote(backdropError);
+    })).then(() => {
+      if (backdropError) setNote(backdropError);
+    }).catch((err) => {
+      backdropError = (err && err.message) ? err.message : "Background image failed to load.";
+      setNote(backdropError);
+    });
   }
 
   function clearFrames() {
@@ -671,11 +682,17 @@
         await ensureComposite();
         await applyBackdropImage();
         const compGen = root.BiggyTdCameraComposite.currentGeneration();
+        const box = feed.getBoundingClientRect();
         const result = await root.BiggyTdCameraComposite.compositeToCanvas(
           raw,
           canvas,
           backdrop,
-          { generation: compGen }
+          {
+            generation: compGen,
+            displayWidth: box.width,
+            displayHeight: box.height,
+            devicePixelRatio: root.devicePixelRatio || 1,
+          }
         );
         if (myGen !== frameGen || !viewing) return;
         lastCompositeMs = result.ms || 0;
@@ -686,8 +703,15 @@
         } else {
           canvas.hidden = false;
           setMode("Camera previewing");
+          const sourceBit = (result.sourceWidth && result.sourceHeight)
+            ? ` · source ${result.sourceWidth}×${result.sourceHeight}`
+            : "";
+          const limitBit = result.sourceLimited
+            ? " · person limited to source JPEG; backdrop is preview resolution"
+            : "";
           setNote(
-            `Preview ${canvas.width}×${canvas.height} · background=${backdropLabel()}`
+            `Preview ${canvas.width}×${canvas.height}${sourceBit} · background=${backdropLabel()}`
+              + limitBit
               + (result.seg ? ` · seg=${result.seg}` : "")
               + (result.ms != null ? ` · ${result.ms}ms` : "")
           );
@@ -879,7 +903,7 @@
       + '<option value="egs">EGS</option>'
       + '<option value="custom">Choose image…</option>'
       + "</select></label>"
-      + '<input type="file" id="biggy-td-camera-backdrop-file" accept="image/png,image/jpeg,image/webp" hidden '
+      + '<input type="file" id="biggy-td-camera-backdrop-file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" hidden '
       + 'data-testid="biggy-td-camera-backdrop-file" />'
       + "</div>"
       + '<p class="biggy-td-camera-hint">Start shows the camera image lower-left. Background composites the person over EGS or a chosen image in the preview and Freeze. Gestures keep the raw frame. Stop releases capture. Closing settings does not stop the feed.</p>'
@@ -974,6 +998,7 @@
       if (startBtn) startBtn.disabled = !!viewing;
       if (freezeBtn) freezeBtn.disabled = !viewing;
       syncBackdropSelect();
+      if (backdropError) setNote(backdropError);
       return settings;
     }
     settings = buildSettings();

@@ -1497,7 +1497,7 @@
         return;
       }
       const s = document.createElement('script');
-      s.src = '/static/td-camera/viewer-overlay.js';
+      s.src = '/static/td-camera/viewer-overlay.js?v=egs-bg-20260921c';
       s.dataset.biggyTdCameraOverlay = '1';
       s.onload = () => resolve(window.BiggyTdCameraOverlay);
       s.onerror = () => reject(new Error('td_camera_overlay_failed'));

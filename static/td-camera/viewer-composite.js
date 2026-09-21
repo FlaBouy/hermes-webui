@@ -117,6 +117,38 @@
   }
 
   /**
+   * Backdrop output is the preview's device pixels, not the camera JPEG.
+   * The JPEG is often 640×480; painting a large still into that bitmap and
+   * letting CSS enlarge it is what pixelates the background.
+   * Off stays on the source pixels so the original frame is not resampled.
+   */
+  function outputPixelSize(sw, sh, mode, opts) {
+    if (mode === "off") {
+      return { w: sw, h: sh, sourceLimited: false };
+    }
+    const dpr = Math.min(Math.max((opts && opts.devicePixelRatio) || 1, 1), 3);
+    const cssW = (opts && opts.displayWidth) || 0;
+    const cssH = (opts && opts.displayHeight) || 0;
+    let w = sw;
+    let h = sh;
+    if (cssW >= 2 && cssH >= 2) {
+      w = Math.max(sw, Math.round(cssW * dpr));
+      h = Math.max(sh, Math.round(cssH * dpr));
+      const aspect = sw / sh;
+      if (w / h > aspect) h = Math.round(w / aspect);
+      else w = Math.round(h * aspect);
+    }
+    const cap = 1600;
+    const longSide = Math.max(w, h);
+    if (longSide > cap) {
+      const scale = cap / longSide;
+      w = Math.max(1, Math.round(w * scale));
+      h = Math.max(1, Math.round(h * scale));
+    }
+    return { w, h, sourceLimited: sw < w || sh < h };
+  }
+
+  /**
    * Draw sourceImage onto outCanvas with optional backdrop.
    * Fail closed: backdrop != off without successful mask → ok:false (do not show raw).
    * Never paints an intermediate raw frame when backdrop requires segmentation.
@@ -133,18 +165,29 @@
     if (closed || gen !== generation) {
       return fail("aborted", "compositor aborted", elapsed());
     }
-    const w = sourceImage.naturalWidth || sourceImage.width || 0;
-    const h = sourceImage.naturalHeight || sourceImage.height || 0;
-    if (!(w > 0) || !(h > 0)) {
+    const sw = sourceImage.naturalWidth || sourceImage.width || 0;
+    const sh = sourceImage.naturalHeight || sourceImage.height || 0;
+    if (!(sw > 0) || !(sh > 0)) {
       return fail("unavailable", "Camera frame has no pixel size.", elapsed());
     }
+    const sized = outputPixelSize(sw, sh, mode, opts);
+    const w = sized.w;
+    const h = sized.h;
     const ctx = outCanvas.getContext("2d");
+    const meta = {
+      sourceWidth: sw,
+      sourceHeight: sh,
+      outputWidth: w,
+      outputHeight: h,
+      sourceLimited: sized.sourceLimited,
+    };
 
     if (mode === "off") {
       outCanvas.width = w;
       outCanvas.height = h;
+      ctx.imageSmoothingEnabled = true;
       ctx.drawImage(sourceImage, 0, 0, w, h);
-      return { ok: true, composited: false, seg: "off", ms: elapsed() };
+      return { ok: true, composited: false, seg: "off", ms: elapsed(), ...meta };
     }
 
     if (!segReady || !segmenter) {
@@ -171,12 +214,16 @@
     }
 
     ensureMask(w, h);
+    maskCtx.imageSmoothingEnabled = true;
+    maskCtx.imageSmoothingQuality = "high";
     maskCtx.clearRect(0, 0, w, h);
     maskCtx.drawImage(latestMask, 0, 0, w, h);
 
     ensureBg(w, h);
     bgCtx.setTransform(1, 0, 0, 1, 0, 0);
     bgCtx.filter = "none";
+    bgCtx.imageSmoothingEnabled = true;
+    bgCtx.imageSmoothingQuality = "high";
     bgCtx.clearRect(0, 0, w, h);
     if (mode === "blur") {
       bgCtx.filter = "blur(12px)";
@@ -210,6 +257,8 @@
 
     outCanvas.width = w;
     outCanvas.height = h;
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
     ctx.drawImage(sourceImage, 0, 0, w, h);
     const frame = ctx.getImageData(0, 0, w, h);
     const mask = maskCtx.getImageData(0, 0, w, h);
@@ -224,7 +273,7 @@
       d[i + 2] = d[i + 2] * a + b[i + 2] * (1 - a);
     }
     ctx.putImageData(frame, 0, 0);
-    return { ok: true, composited: true, seg: "ok", ms: elapsed() };
+    return { ok: true, composited: true, seg: "ok", ms: elapsed(), ...meta };
   }
 
   function reset() {
@@ -262,6 +311,7 @@
     setCustomBackdrop,
     compositeToCanvas,
     drawCover,
+    outputPixelSize,
     reset,
     abort,
     reopen,

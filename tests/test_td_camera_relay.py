@@ -755,3 +755,76 @@ def test_egs_composite_and_off_restore_and_lifecycle(mock_upstream_and_proxy):
         assert result["afterReopen"]["ok"] is True, result
         assert result["egsMs"] is not None
         browser.close()
+
+
+OWNER_COPY = Path("/Users/rick/Mounts/Z/DATA/EGS copy.jpeg")
+
+
+def test_owner_egs_copy_jpeg_loads_at_preview_resolution(mock_upstream_and_proxy):
+    """Owner file EGS copy.jpeg, not a substitute image."""
+    if not FIXTURE_PERSON.is_file():
+        pytest.skip("synthetic person fixture missing")
+    assert OWNER_COPY.is_file(), "owner mirrored copy missing"
+    base, _state = mock_upstream_and_proxy
+    import base64
+
+    person = base64.b64encode(FIXTURE_PERSON.read_bytes()).decode("ascii")
+    custom = base64.b64encode(OWNER_COPY.read_bytes()).decode("ascii")
+    pw = _require_playwright()
+    with pw() as p:
+        browser = p.chromium.launch()
+        page = browser.new_page()
+        page.goto(f"{base}/harness", wait_until="domcontentloaded")
+        page.add_script_tag(url="/static/td-camera/viewer-overlay.js")
+        page.wait_for_function(
+            "() => !!window.BiggyTdCameraComposite && !!window.BiggyTdCameraOverlay",
+            timeout=10000,
+        )
+        result = page.evaluate(
+            """async ({personUrl, customB64, fileName}) => {
+              const bin = atob(customB64);
+              const bytes = new Uint8Array(bin.length);
+              for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+              const file = new File([bytes], fileName, {type: 'image/jpeg'});
+              const img = await window.BiggyTdCameraOverlay._test.adoptCustomFile(file);
+              const person = new Image();
+              await new Promise((res, rej) => { person.onload = res; person.onerror = rej; person.src = personUrl; });
+              const canvas = document.createElement('canvas');
+              const gen = BiggyTdCameraComposite.currentGeneration();
+              const customR = await BiggyTdCameraComposite.compositeToCanvas(
+                person, canvas, 'custom', {
+                  generation: gen,
+                  displayWidth: 960,
+                  displayHeight: 720,
+                  devicePixelRatio: 2,
+                }
+              );
+              const corner = canvas.getContext('2d').getImageData(0, 0, 1, 1).data;
+              const off = document.createElement('canvas');
+              const offR = await BiggyTdCameraComposite.compositeToCanvas(
+                person, off, 'off', {generation: gen}
+              );
+              return {
+                fileName,
+                decoded: [img.width || img.naturalWidth, img.height || img.naturalHeight],
+                custom: customR,
+                canvas: [canvas.width, canvas.height],
+                corner: [corner[0], corner[1], corner[2]],
+                off: [off.width, off.height, offR.seg],
+                person: [person.naturalWidth, person.naturalHeight],
+              };
+            }""",
+            {
+                "personUrl": f"data:image/png;base64,{person}",
+                "customB64": custom,
+                "fileName": OWNER_COPY.name,
+            },
+        )
+        browser.close()
+    assert result["decoded"][0] == 3607 and result["decoded"][1] == 2029, result
+    assert result["custom"]["ok"] is True and result["custom"]["composited"] is True, result
+    assert result["canvas"][0] > 640 and result["canvas"][0] > result["person"][0], result
+    assert result["custom"]["sourceLimited"] is True, result
+    assert result["off"][0] == result["person"][0], result
+    assert result["off"][2] == "off", result
+    assert any(channel > 8 for channel in result["corner"]), result
