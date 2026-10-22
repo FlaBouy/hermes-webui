@@ -921,6 +921,19 @@ def test_real_repo_snapshot_staged_and_dirty_names(tmp_path):
         _recovery_has_bytes(agent, {'recovery_ref': snapshot['branch']}, name, _DIRTY_BYTES)
 
 
+def test_real_repo_snapshot_preserves_bytes_despite_text_attributes(tmp_path):
+    _origin, agent = _make_agent_pair(tmp_path)
+    (agent / '.gitattributes').write_bytes(b'tracked.txt text eol=lf\n')
+    _git(agent, 'add', '.gitattributes')
+    _git(agent, 'commit', '-q', '-m', 'normalize text')
+    dirty = b'exact CRLF bytes\r\nsecond line\r\n'
+    (agent / 'tracked.txt').write_bytes(dirty)
+    sync = updates._describe_checkout_sync(agent, 'HEAD')
+    snapshot = updates._create_update_recovery_snapshot(agent, sync)
+    assert snapshot['ok'], snapshot
+    _recovery_has_bytes(agent, {'recovery_ref': snapshot['branch']}, 'tracked.txt', dirty)
+
+
 @pytest.mark.parametrize('force', [False, True])
 def test_real_repo_noncolliding_ignored_file_survives(tmp_path, monkeypatch, force):
     _origin, agent = _prepare_history(tmp_path, 'diverged')
@@ -984,6 +997,31 @@ def test_diagnose_route_omits_secrets(tmp_path, monkeypatch):
     monkeypatch.setattr(updates.subprocess, 'run', fake_ps)
     payload = routes.handle_get(SimpleNamespace(headers={}),
                                 urlparse('/api/updates/diagnose?target=agent'))
+    encoded = json.dumps(payload)
+    assert payload['ok'] is True
+    assert payload['processes'] == [{'pid': 123}]
+    for secret in ('USERINFO_SECRET', 'QUERY_SECRET', 'ARGV_SECRET'):
+        assert secret not in encoded
+
+
+def test_standalone_diagnose_omits_secrets(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from scripts import diagnose_agent_checkout as diagnostic
+
+    _origin, agent = _make_agent_pair(tmp_path)
+    _git(agent, 'remote', 'set-url', 'origin',
+         'https://user:USERINFO_SECRET@example.test/repo.git?token=QUERY_SECRET')
+    real_run = diagnostic.subprocess.run
+
+    def fake_ps(args, **kwargs):
+        if args[0] == 'ps':
+            return SimpleNamespace(returncode=0, stdout=
+                f'123 python {agent}/server.py --api-key ARGV_SECRET\n')
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(diagnostic.subprocess, 'run', fake_ps)
+    payload = diagnostic._standalone_diagnose(agent)
     encoded = json.dumps(payload)
     assert payload['ok'] is True
     assert payload['processes'] == [{'pid': 123}]

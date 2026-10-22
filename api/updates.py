@@ -2733,7 +2733,7 @@ def _create_update_backup_branch(path: Path, *, prefix: str = _UPDATE_RECOVERY_P
 def _verify_snapshot_bytes(path: Path, commit: str, captured_paths: list[str]) -> tuple[bool, str]:
     """Confirm every captured working-tree path hashes identically in ``commit``."""
     for rel in captured_paths:
-        wt_hash, wt_ok = _run_git_env(['hash-object', '--', rel], path)
+        wt_hash, wt_ok = _run_git_env(['hash-object', '--no-filters', '--', rel], path)
         blob, blob_ok = _run_git_env(['rev-parse', f'{commit}:{rel}'], path)
         if not wt_ok or not blob_ok or not wt_hash or wt_hash != blob:
             return False, (
@@ -2770,6 +2770,19 @@ def _create_worktree_snapshot_commit(path: Path, captured_paths: list[str]) -> d
         out, ok = _run_git_env(['add', '-A', '--'], path, env=env)
         if not ok:
             return {'ok': False, 'error': f'git add -A failed: {out}'}
+        # Git add can normalize CRLF or run clean filters. Recovery promises the
+        # original working-tree bytes, so replace captured blobs with raw data.
+        for rel in captured_paths:
+            entry, entry_ok = _run_git_env(['ls-files', '--stage', '-z', '--', rel], path, env=env)
+            blob, blob_ok = _run_git_env(['hash-object', '-w', '--no-filters', '--', rel], path)
+            mode = entry.split(' ', 1)[0]
+            if not entry_ok or mode not in {'100644', '100755'} or not blob_ok or not _SHA_RE.match(blob):
+                return {'ok': False, 'error': f'cannot capture raw recovery bytes for {rel}'}
+            out, ok = _run_git_env(
+                ['update-index', '--add', '--cacheinfo', mode, blob, rel], path, env=env,
+            )
+            if not ok:
+                return {'ok': False, 'error': f'cannot index raw recovery bytes for {rel}: {out}'}
         tree, ok = _run_git_env(['write-tree'], path, env=env)
         if not ok or not _SHA_RE.match(tree or ''):
             return {'ok': False, 'error': f'write-tree failed: {tree}'}
@@ -3055,7 +3068,8 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
             'ok': False,
             'message': (
                 f'The local {target} repo has unresolved merge conflicts. '
-                'Resolve them, or create a backup branch and reset with the '
+                f'Inspect with: git -C {path} status. '
+                'Resolve conflicts before retrying git pull, or create a backup branch and reset with the '
                 'force-update path after confirming local work is preserved.'
             ),
             'conflict': True,

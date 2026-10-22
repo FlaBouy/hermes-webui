@@ -5,6 +5,7 @@ import logging
 import os
 import shlex
 import subprocess
+import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer, SimpleHTTPRequestHandler
@@ -19,6 +20,12 @@ def _git(repo, *args):
     subprocess.run(
         ['git', *args], cwd=str(repo), check=True,
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    )
+
+
+def _git_bytes(repo, *args):
+    return subprocess.check_output(
+        ['git', *args], cwd=str(repo), creationflags=updates.windows_hide_flags(),
     )
 
 
@@ -501,6 +508,8 @@ def test_force_update_cleans_dirty_stable_checkout_without_changing_head(tmp_pat
     repo, tracked = _dirty_stable_repo(tmp_path)
     head, ok = updates._run_git(['rev-parse', 'HEAD'], repo)
     assert ok
+    dirty_bytes = tracked.read_bytes()
+    untracked_bytes = (repo / "untracked.txt").read_bytes()
     calls = []
     real_run_git = updates._run_git
 
@@ -525,12 +534,9 @@ def test_force_update_cleans_dirty_stable_checkout_without_changing_head(tmp_pat
     reset_refs = [args[2] for args in calls if args[:2] == ['reset', '--hard']]
 
     assert (
-        result == {
-            'ok': True,
-            'message': 'webui force-updated to HEAD',
-            'target': 'webui',
-            'restart_scheduled': True,
-        }
+        result['ok'] is True
+        and result['restart_scheduled'] is True
+        and result['message'].startswith('webui force-updated to HEAD')
         and tracked.read_text(encoding='utf-8') == 'experimental content\n'
         and status_ok and status == ''
         and after_head_ok and after_head == head
@@ -543,6 +549,9 @@ def test_force_update_cleans_dirty_stable_checkout_without_changing_head(tmp_pat
         f'status={status!r}, head={after_head!r}, original_head={head!r}, '
         f'reset_refs={reset_refs!r}, calls={calls!r}'
     )
+    recovery = result['recovery_ref']
+    assert _git_bytes(repo, 'show', f'{recovery}:{tracked.name}') == dirty_bytes
+    assert _git_bytes(repo, 'show', f'{recovery}:untracked.txt') == untracked_bytes
     restart.assert_called_once_with()
 
 
@@ -746,9 +755,13 @@ def test_force_update_dirty_stable_reset_failure_reports_head(tmp_path, monkeypa
     restart = MagicMock()
     monkeypatch.setattr(updates, '_schedule_restart', restart)
 
+    monkeypatch.setattr(updates, '_describe_checkout_sync', lambda *a: {
+        'relationship': 'behind', 'ahead': 0, 'behind': 1,
+    })
     result = updates.apply_force_update('webui', channel='stable')
 
-    assert result == {'ok': False, 'message': 'Force reset to HEAD failed'}
+    assert result['ok'] is False
+    assert result['message'] == 'Force reset to HEAD failed'
     assert calls == [
         ['fetch', 'origin', '--quiet', '--tags', '--force'],
         ['diff-index', '--quiet', 'HEAD', '--'],
@@ -789,6 +802,9 @@ def test_force_update_clean_failure_preserves_reset_boundary(tmp_path, monkeypat
     restart = MagicMock()
     monkeypatch.setattr(updates, '_schedule_restart', restart)
 
+    monkeypatch.setattr(updates, '_describe_checkout_sync', lambda *a: {
+        'relationship': 'behind', 'ahead': 0, 'behind': 1,
+    })
     result = updates.apply_force_update('webui', channel='stable')
 
     assert calls == [
@@ -803,10 +819,12 @@ def test_force_update_clean_failure_preserves_reset_boundary(tmp_path, monkeypat
             'message': 'webui force-updated to origin/main',
             'target': 'webui',
             'restart_scheduled': True,
+            'backup_branch': None,
         }
         restart.assert_called_once_with()
     else:
-        assert result == {'ok': False, 'message': 'Force reset to origin/main failed'}
+        assert result['ok'] is False
+        assert result['message'] == 'Force reset to origin/main failed'
         restart.assert_not_called()
 
 
@@ -2456,7 +2474,8 @@ def test_update_recovery_hints_leave_gitfile_lock_state_unknown(tmp_path, monkey
     [
         ('collision/local.txt', 'collision'),
         ('foo', 'foo/bar.txt'),
-        (':weird.txt', ':weird.txt'),
+        pytest.param(':weird.txt', ':weird.txt', marks=pytest.mark.skipif(
+            sys.platform == 'win32', reason='colon is not a Windows filename character')),
         (' lead.txt', ' lead.txt'),
     ],
 )
@@ -2835,6 +2854,9 @@ def test_apply_update_pull_timeout_returns_error_not_typeerror(tmp_path):
 
     with patch('subprocess.run', side_effect=fake_run), \
          patch.object(updates, 'REPO_ROOT', repo), \
+         patch.object(updates, '_describe_checkout_sync', return_value={
+             'relationship': 'behind', 'ahead': 0, 'behind': 1,
+         }), \
          patch.object(updates, '_select_apply_compare_ref', return_value='origin/master'):
         result = updates.apply_update('webui')
 
@@ -2881,6 +2903,9 @@ def test_apply_update_pull_timeout_does_not_leak_remote_token(tmp_path):
 
     with patch('subprocess.run', side_effect=fake_run), \
          patch.object(updates, 'REPO_ROOT', repo), \
+         patch.object(updates, '_describe_checkout_sync', return_value={
+             'relationship': 'behind', 'ahead': 0, 'behind': 1,
+         }), \
          patch.object(updates, '_select_apply_compare_ref', return_value='origin/master'):
         result = updates.apply_update('webui')
 

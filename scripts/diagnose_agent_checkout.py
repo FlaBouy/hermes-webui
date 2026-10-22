@@ -19,6 +19,10 @@ import sys
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from api.subprocess_utils import sanitize_git_diagnostic, windows_hide_flags  # noqa: E402
 
 
 def _run_git(args: list[str], cwd: Path) -> tuple[str, bool]:
@@ -31,6 +35,7 @@ def _run_git(args: list[str], cwd: Path) -> tuple[str, bool]:
             timeout=15,
             encoding='utf-8',
             errors='replace',
+            creationflags=windows_hide_flags(),
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         return str(exc), False
@@ -58,6 +63,7 @@ def _list_processes(path: Path, *, limit: int = 25) -> list[dict]:
             timeout=5,
             encoding='utf-8',
             errors='replace',
+            creationflags=windows_hide_flags(),
         )
     except (OSError, subprocess.TimeoutExpired):
         return []
@@ -73,7 +79,7 @@ def _list_processes(path: Path, *, limit: int = 25) -> list[dict]:
             pid = int(parts[0])
         except (ValueError, IndexError):
             continue
-        hits.append({'pid': pid, 'command': parts[1] if len(parts) > 1 else ''})
+        hits.append({'pid': pid})
         if len(hits) >= limit:
             break
     return hits
@@ -136,7 +142,7 @@ def _standalone_diagnose(path: Path) -> dict:
         'path': str(path),
         'branch': branch or None,
         'head_sha': head if head_ok else None,
-        'remote_url': remote or None,
+        'remote_url': sanitize_git_diagnostic(remote) if remote else None,
         'compare_ref': compare_ref,
         'compare_sha': compare_sha,
         'relationship': relationship,
@@ -179,8 +185,7 @@ def _print_report(report: dict) -> None:
     procs = report.get('processes') or []
     print(f"processes:   {len(procs)}")
     for proc in procs:
-        cmd = (proc.get('command') or '')[:160]
-        print(f"  pid {proc.get('pid')}: {cmd}")
+        print(f"  pid {proc.get('pid')}")
 
 
 def main(argv: list[str] | None = None) -> int:
