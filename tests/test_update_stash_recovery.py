@@ -8,6 +8,14 @@ import pytest
 import api.updates as updates
 
 
+@pytest.fixture(autouse=True)
+def _isolate_default_update_checkout(tmp_path, monkeypatch):
+    """Mocked updater tests must not inspect the source checkout's ignored files."""
+    repo = tmp_path / 'mock-webui'
+    (repo / '.git').mkdir(parents=True)
+    monkeypatch.setattr(updates, 'REPO_ROOT', repo)
+
+
 def _behind_sync(**overrides):
     base = {
         'path': '/tmp/repo',
@@ -835,6 +843,152 @@ def _recovery_has_bytes(agent, result, rel, expected):
     # The recovery ref itself must still exist after the update attempt.
     _git(agent, 'rev-parse', '--verify', branch)
     return branch
+
+
+@pytest.mark.parametrize('force', [False, True])
+@pytest.mark.parametrize('rel,ignored', [
+    ('.hermes-local', False), ('.github/local.json', False),
+    (' local file.txt', False), ('ignored.bin', True),
+    ('cache/local.bin', True),
+])
+def test_real_repo_review_colliders(tmp_path, monkeypatch, force, rel, ignored):
+    origin, agent = _make_agent_pair(tmp_path)
+    if ignored:
+        (agent / '.git/info/exclude').write_text(rel.split('/')[0] + '\n')
+    _advance_origin(tmp_path, origin, {rel: _UNTRACKED_UPSTREAM}, 'track-collider')
+    # Divergence exercises the normal Agent safe-reset as well as force reset.
+    (agent / 'local-only.txt').write_bytes(b'local commit\n')
+    _git(agent, 'add', 'local-only.txt')
+    _git(agent, 'commit', '-q', '-m', 'local')
+    local = agent / rel
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_bytes(_UNTRACKED_LOCAL)
+    head = _git(agent, 'rev-parse', 'HEAD')
+    index = (agent / '.git/index').read_bytes()
+    _patch_agent_update(monkeypatch, agent)
+    result = (updates.apply_force_update('agent') if force
+              else updates._apply_update_inner('agent'))
+    if ignored:
+        assert result['ok'] is False, result
+        assert _git(agent, 'rev-parse', 'HEAD') == head
+        assert (agent / '.git/index').read_bytes() == index
+        assert local.read_bytes() == _UNTRACKED_LOCAL
+    else:
+        assert result['ok'] is True, result
+        _recovery_has_bytes(agent, result, rel, _UNTRACKED_LOCAL)
+
+
+@pytest.mark.parametrize('force', [False, True])
+@pytest.mark.parametrize('local_rel,target_rel', [
+    ('cache/item', 'cache'), ('cache', 'cache/item'),
+])
+def test_real_repo_ignored_file_directory_colliders(
+    tmp_path, monkeypatch, force, local_rel, target_rel,
+):
+    origin, agent = _make_agent_pair(tmp_path)
+    (agent / '.git/info/exclude').write_text('cache\n')
+    _advance_origin(tmp_path, origin, {target_rel: b'upstream\n'}, 'track-cache')
+    local = agent / local_rel
+    local.parent.mkdir(parents=True, exist_ok=True)
+    local.write_bytes(_UNTRACKED_LOCAL)
+    head = _git(agent, 'rev-parse', 'HEAD')
+    index = (agent / '.git/index').read_bytes()
+    _patch_agent_update(monkeypatch, agent)
+    result = (updates.apply_force_update('agent') if force
+              else updates._apply_update_inner('agent'))
+    assert result['ok'] is False, result
+    assert _git(agent, 'rev-parse', 'HEAD') == head
+    assert (agent / '.git/index').read_bytes() == index
+    assert local.read_bytes() == _UNTRACKED_LOCAL
+
+
+def test_real_repo_snapshot_staged_and_dirty_names(tmp_path):
+    _origin, agent = _make_agent_pair(tmp_path)
+    names = ['.local', ' leading space', 'unicode-\u00e9']
+    if sys.platform != 'win32':
+        names += ['line\nbreak', 'tab\tname', 'quote"name', 'carriage\rreturn']
+    for name in names:
+        (agent / name).write_bytes(b'base\n')
+    _git(agent, 'add', '--', *names)
+    _git(agent, 'commit', '-q', '-m', 'unusual tracked names')
+    for name in names:
+        (agent / name).write_bytes(_DIRTY_BYTES)
+    _git(agent, 'add', '--', names[0])
+    sync = updates._describe_checkout_sync(agent, 'HEAD')
+    snapshot = updates._create_update_recovery_snapshot(agent, sync)
+    assert snapshot['ok'], snapshot
+    for name in names:
+        _recovery_has_bytes(agent, {'recovery_ref': snapshot['branch']}, name, _DIRTY_BYTES)
+
+
+@pytest.mark.parametrize('force', [False, True])
+def test_real_repo_noncolliding_ignored_file_survives(tmp_path, monkeypatch, force):
+    _origin, agent = _prepare_history(tmp_path, 'diverged')
+    (agent / '.git/info/exclude').write_text('cache.bin\n')
+    (agent / 'cache.bin').write_bytes(_UNTRACKED_LOCAL)
+    _patch_agent_update(monkeypatch, agent)
+    result = (updates.apply_force_update('agent') if force
+              else updates._apply_update_inner('agent'))
+    assert result['ok'], result
+    assert (agent / 'cache.bin').read_bytes() == _UNTRACKED_LOCAL
+
+
+@pytest.mark.parametrize('force', [False, True])
+@pytest.mark.parametrize('failure', ['dirty', 'staged', 'untracked', 'empty', 'status'])
+def test_real_repo_enumeration_failure_is_closed(tmp_path, monkeypatch, force, failure):
+    _origin, agent = _prepare_history(tmp_path, 'diverged', dirty_tracked=True)
+    head = _git(agent, 'rev-parse', 'HEAD')
+    index = (agent / '.git/index').read_bytes()
+    real_run = updates._run_git_env
+
+    def fail_diff(args, cwd, **kwargs):
+        if ((failure == 'dirty' and args[0] == 'diff' and '--cached' not in args)
+                or (failure == 'staged' and '--cached' in args)
+                or (failure == 'untracked' and args[0] == 'ls-files' and '--ignored' not in args)
+                or (failure == 'status' and args[0] == 'status' and '-z' in args)):
+            return 'injected enumeration failure', False
+        if failure == 'empty' and args[0] in {'diff', 'ls-files'}:
+            return '', True
+        return real_run(args, cwd, **kwargs)
+
+    monkeypatch.setattr(updates, '_run_git_env', fail_diff)
+    _patch_agent_update(monkeypatch, agent)
+    result = (updates.apply_force_update('agent') if force
+              else updates._apply_update_inner('agent'))
+    assert result['ok'] is False, result
+    assert _git(agent, 'rev-parse', 'HEAD') == head
+    assert (agent / '.git/index').read_bytes() == index
+    assert (agent / 'tracked.txt').read_bytes() == _DIRTY_BYTES
+
+
+def test_diagnose_route_omits_secrets(tmp_path, monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from urllib.parse import urlparse
+    import api.routes as routes
+
+    _origin, agent = _make_agent_pair(tmp_path)
+    _git(agent, 'remote', 'set-url', 'origin',
+         'https://user:USERINFO_SECRET@example.test/repo.git?token=QUERY_SECRET')
+    _patch_agent_update(monkeypatch, agent)
+    monkeypatch.setattr(routes, '_handle_extension_sidecar_proxy', lambda *a: False)
+    monkeypatch.setattr(routes, 'j', lambda handler, payload: payload)
+    real_run = updates.subprocess.run
+
+    def fake_ps(args, **kwargs):
+        if args[0] == 'ps':
+            return SimpleNamespace(returncode=0, stdout=
+                f'123 python {agent}/server.py --api-key ARGV_SECRET\n')
+        return real_run(args, **kwargs)
+
+    monkeypatch.setattr(updates.subprocess, 'run', fake_ps)
+    payload = routes.handle_get(SimpleNamespace(headers={}),
+                                urlparse('/api/updates/diagnose?target=agent'))
+    encoded = json.dumps(payload)
+    assert payload['ok'] is True
+    assert payload['processes'] == [{'pid': 123}]
+    for secret in ('USERINFO_SECRET', 'QUERY_SECRET', 'ARGV_SECRET'):
+        assert secret not in encoded
 
 
 @pytest.mark.parametrize('history', ['behind', 'ahead', 'diverged'])

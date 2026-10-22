@@ -6,6 +6,19 @@ If your symptom isn't listed and the diagnostics don't narrow it down, file a bu
 
 ---
 
+## Update refused because ignored local files would be overwritten
+
+Normal and force updates stop before checkout, clean, or reset when an ignored
+local path conflicts with a file in the selected target tree, including file
+versus directory conflicts. Move those files outside the checkout and retry.
+Unrelated ignored build/cache files remain in place. For non-ignored local
+changes, the updater requires complete path enumeration and a verified recovery
+snapshot; an enumeration or verification failure aborts the update. Recovery
+refs preserve leading dots and whitespace in Git-relative filenames.
+
+`/api/updates/diagnose` redacts credentials and secret query parameters from
+remote URLs and returns matching process IDs without command-line arguments.
+
 ## "AIAgent not available -- check that hermes-agent is on sys.path"
 
 **Symptom.** WebUI starts, shows the chat interface, but every chat request fails immediately with this error in the response or the server log. As of v0.51.6 the error includes a diagnostic block with the running Python interpreter, the relevant `sys.path` entries, and the most-common fix; on older versions the message is bare.

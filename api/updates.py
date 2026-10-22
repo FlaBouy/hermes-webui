@@ -234,22 +234,32 @@ def _run_git_env(args, cwd, timeout=10, env=None):
     try:
         r = subprocess.run(
             [git_executable] + args, cwd=str(cwd), capture_output=True,
-            text=True, timeout=timeout,
-            encoding='utf-8', errors='replace',
+            text='-z' not in args, timeout=timeout,
+            **({} if '-z' in args else {'encoding': 'utf-8', 'errors': 'replace'}),
             env=run_env,
             creationflags=_NO_CONSOLE_WINDOW,
         )
         # On non-UTF-8 locales (e.g. Chinese Windows GBK), a binary git
         # output that fails to decode used to leave r.stdout = None and crash
         # the whole import with AttributeError. Guard against None defensively.
-        stdout = (r.stdout or '').strip()
+        stdout = r.stdout or ''
+        if isinstance(stdout, bytes):
+            stdout = stdout.decode('utf-8')
+        if '-z' not in args:
+            stdout = stdout.strip()
+        if isinstance(r.stderr, bytes):
+            r.stderr = r.stderr.decode('utf-8', 'replace')
         stderr = (r.stderr or '').strip()
         if r.returncode == 0:
             return stdout, True
         return stderr or stdout or f"git exited with status {r.returncode}", False
     except subprocess.TimeoutExpired as exc:
         detail = (getattr(exc, 'stderr', None) or getattr(exc, 'stdout', None) or '').strip()
+        if isinstance(detail, bytes):
+            detail = detail.decode('utf-8', 'replace')
         return detail or f"git {' '.join(args)} timed out after {timeout}s", False
+    except UnicodeError:
+        return 'git path output is not valid UTF-8', False
     except FileNotFoundError:
         return 'git executable not found', False
     except OSError as exc:
@@ -2021,6 +2031,9 @@ def apply_force_update(target: str, channel=None) -> dict:
         # Force-update still moves HEAD, but recovery must reload exact dirty
         # tracked / untracked bytes when we claim a backup/recovery artifact.
         sync = _describe_checkout_sync(path, compare_ref)
+        safety_error = _ignored_update_collision_error(path, compare_ref)
+        if safety_error:
+            return {'ok': False, 'message': safety_error, 'target': target}
         snapshot = None
         backup_branch = None
         if _needs_update_snapshot(sync):
@@ -2039,7 +2052,7 @@ def apply_force_update(target: str, channel=None) -> dict:
             backup_branch = snapshot['branch']
 
         # Discard local modifications and untracked colliders before resetting.
-        # Do not use -x: ignored build/cache artifacts should survive force update.
+        # Ignored colliders were refused above; other ignored artifacts survive.
         _run_git(['checkout', '.'], path)
         # Best-effort clean: a `git clean -fd` failure is NOT fatal. The
         # following `reset --hard` overwrites any tracked-file collisions
@@ -2160,7 +2173,8 @@ def _list_checkout_processes(path: Path, *, limit: int = 25) -> list[dict]:
             pid = int(parts[0])
         except ValueError:
             continue
-        hits.append({'pid': pid, 'command': parts[1] if len(parts) > 1 else ''})
+        # Arbitrary argv values cannot be reliably redacted. Only expose PID.
+        hits.append({'pid': pid})
         if len(hits) >= limit:
             break
     return hits
@@ -2179,14 +2193,15 @@ def _describe_checkout_sync(path: Path, compare_ref: str | None) -> dict:
     head_sha, head_ok = _run_git(['rev-parse', 'HEAD'], path)
     branch_out, branch_ok = _run_git(['rev-parse', '--abbrev-ref', 'HEAD'], path)
     remote_url, _ = _run_git(['remote', 'get-url', 'origin'], path)
-    status_out, status_ok = _run_git(['status', '--porcelain'], path)
+    status_out, status_ok = _run_git(['status', '--porcelain', '-z'], path)
     dirty_tracked_out, dirty_tracked_ok = _run_git(
         ['status', '--porcelain', '--untracked-files=no'], path
     )
     modified: list[str] = []
     untracked: list[str] = []
     if status_ok:
-        for line in status_out.splitlines():
+        records = iter(status_out.split('\0'))
+        for line in records:
             if len(line) < 4:
                 continue
             code, name = line[:2], line[3:]
@@ -2194,16 +2209,19 @@ def _describe_checkout_sync(path: Path, compare_ref: str | None) -> dict:
                 untracked.append(name)
             else:
                 modified.append(name)
+                if 'R' in code or 'C' in code:
+                    next(records, None)  # porcelain -z includes the source name
 
     result = {
         'path': str(path),
         'branch': branch_out if branch_ok else None,
         'head_sha': head_sha if head_ok else None,
-        'remote_url': _normalize_remote_url(remote_url) if remote_url else None,
+        'remote_url': _sanitize_git_diagnostic(_normalize_remote_url(remote_url)) if remote_url else None,
         'compare_ref': compare_ref,
         'ahead': None,
         'behind': None,
         'relationship': 'unknown',
+        'status_ok': bool(status_ok and dirty_tracked_ok),
         'dirty': bool(status_ok and status_out),
         'dirty_tracked': bool(dirty_tracked_ok and dirty_tracked_out),
         'modified_files': modified[:100],
@@ -2258,6 +2276,8 @@ def _is_real_git_checkout(path: Path) -> bool:
 
 def _needs_update_snapshot(sync: dict) -> bool:
     """True when local commits, dirty tracked files, or untracked files exist."""
+    if sync.get('status_ok') is False:
+        return True
     if sync.get('relationship') in {'ahead', 'diverged'}:
         return True
     ahead = sync.get('ahead')
@@ -2271,13 +2291,15 @@ def _needs_update_snapshot(sync: dict) -> bool:
 
 
 def _posix_relpath(path: Path, rel: str) -> str:
-    return Path(rel).as_posix().lstrip('./')
+    return Path(rel.removeprefix('./')).as_posix()
 
 
 def _iter_worktree_files(root: Path, rel: str) -> list[str]:
     """Expand a porcelain path to concrete files (handles untracked directories)."""
     rel = _posix_relpath(root, rel)
     target = root / rel
+    if target.is_symlink():
+        return [rel]
     if target.is_dir():
         return [
             f.relative_to(root).as_posix()
@@ -2291,21 +2313,26 @@ def _iter_worktree_files(root: Path, rel: str) -> list[str]:
 
 def _list_snapshot_paths(path: Path) -> list[str]:
     """Dirty tracked paths plus untracked, non-ignored files."""
-    dirty, dirty_ok = _run_git_env(['diff', '--name-only', 'HEAD'], path)
-    staged, staged_ok = _run_git_env(['diff', '--name-only', '--cached'], path)
+    dirty, dirty_ok = _run_git_env(['diff', '--name-only', '-z', 'HEAD'], path)
+    staged, staged_ok = _run_git_env(['diff', '--name-only', '-z', '--cached'], path)
     untracked, untracked_ok = _run_git_env(
         ['ls-files', '-z', '--others', '--exclude-standard'], path,
     )
     names: list[str] = []
+    if not (dirty_ok and staged_ok and untracked_ok):
+        raise RuntimeError('could not enumerate all recovery paths')
     if dirty_ok and dirty:
-        names.extend(dirty.splitlines())
+        names.extend(p for p in dirty.split('\0') if p)
     if staged_ok and staged:
-        names.extend(staged.splitlines())
-    if untracked_ok and untracked:
-        names.extend(p for p in untracked.split('\0') if p)
+        names.extend(p for p in staged.split('\0') if p)
+    untracked_names = [p for p in untracked.split('\0') if p]
+    names.extend(untracked_names)
     expanded: list[str] = []
     seen: set[str] = set()
     for name in names:
+        if (name in untracked_names and not (path / name).exists()
+                and not (path / name).is_symlink()):
+            raise RuntimeError(f'untracked recovery path disappeared: {name}')
         for rel in _iter_worktree_files(path, name):
             if rel not in seen:
                 seen.add(rel)
@@ -2323,7 +2350,10 @@ def _list_untracked_files(path: Path) -> tuple[list[str], bool]:
     expanded: list[str] = []
     seen: set[str] = set()
     for name in (p for p in out.split('\0') if p):
-        for rel in _iter_worktree_files(path, name):
+        files = _iter_worktree_files(path, name)
+        if not files:
+            return [], False
+        for rel in files:
             if rel not in seen:
                 seen.add(rel)
                 expanded.append(rel)
@@ -2472,22 +2502,26 @@ def _create_update_recovery_snapshot(path: Path, sync: dict | None = None) -> di
     """Create a verified recovery ref capturing local commits and working-tree bytes.
 
     Abort contract: callers must not reset/checkout/clean/pull if this returns
-    ``ok: False``. Ignored files are omitted because the updater never uses
-    ``git clean -x``; they survive force update.
+    ``ok: False``. Ignored target-tree colliders are refused separately.
     """
     sync = sync or {}
+    if sync.get('status_ok') is False:
+        return {'ok': False, 'error': 'could not completely inspect checkout status'}
     captured: list[str] = []
     if _is_real_git_checkout(path) and (
         sync.get('dirty_tracked') or sync.get('dirty') or sync.get('untracked_count')
         or sync.get('untracked_files') or sync.get('modified_files')
     ):
-        captured = _list_snapshot_paths(path)
-
-    if captured:
-        snapshot = _create_worktree_snapshot_commit(path, captured)
-        if snapshot.get('ok'):
-            return snapshot
-        return snapshot
+        try:
+            captured = _list_snapshot_paths(path)
+        except (OSError, RuntimeError) as exc:
+            return {'ok': False, 'error': str(exc)}
+        # A deletion-only tree still needs a snapshot commit, never HEAD-only.
+        if not captured:
+            deleted, ok = _run_git_env(['diff', '--name-only', '-z', '--diff-filter=D', 'HEAD'], path)
+            if not ok or not deleted or sync.get('untracked_count') or sync.get('untracked_files'):
+                return {'ok': False, 'error': 'dirty preflight has no complete recovery paths'}
+        return _create_worktree_snapshot_commit(path, captured)
 
     # HEAD-only ref: local commits with a clean tree, or mocked .git stubs.
     backup = _create_update_backup_branch(path)
@@ -2500,18 +2534,39 @@ def _untracked_colliders(path: Path, compare_ref: str, untracked_files: list[str
     """Untracked working-tree files that ``compare_ref`` already tracks."""
     if not compare_ref or not untracked_files:
         return []
-    tree_out, tree_ok = _run_git(['ls-tree', '-r', '--name-only', compare_ref], path)
+    tree_out, tree_ok = _run_git(['ls-tree', '-r', '-z', '--name-only', compare_ref], path)
     if not tree_ok:
-        return []
-    tracked = {line.strip() for line in tree_out.splitlines() if line.strip()}
+        raise RuntimeError('could not enumerate update target tree')
+    tracked = {name for name in tree_out.split('\0') if name}
     colliders: list[str] = []
     seen: set[str] = set()
     for name in untracked_files:
         for rel in _iter_worktree_files(path, name):
-            if rel in tracked and rel not in seen:
+            if any(rel == tracked_name or rel.startswith(tracked_name + '/')
+                   or tracked_name.startswith(rel + '/')
+                   for tracked_name in tracked) and rel not in seen:
                 seen.add(rel)
                 colliders.append(rel)
     return colliders
+
+
+def _ignored_update_collision_error(path: Path, compare_ref: str) -> str:
+    """Refuse ignored bytes that checkout/reset could overwrite, on both paths."""
+    if not _is_real_git_checkout(path):
+        return ''
+    ignored, ok = _run_git_env(
+        ['ls-files', '-z', '--others', '--ignored', '--exclude-standard'], path,
+    )
+    if not ok:
+        return 'Update aborted before mutation: could not enumerate ignored paths.'
+    try:
+        colliders = _untracked_colliders(path, compare_ref, [p for p in ignored.split('\0') if p])
+    except (OSError, RuntimeError) as exc:
+        return f'Update aborted before mutation: {exc}.'
+    if colliders:
+        return ('Update aborted before mutation: ignored local paths would be overwritten: '
+                + ', '.join(colliders) + '. Move these files aside before retrying.')
+    return ''
 
 
 def _remove_untracked_colliders(path: Path, colliders: list[str]) -> tuple[bool, str]:
@@ -2651,6 +2706,9 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
 
     # Preflight: classify ahead/behind/diverged/dirty before mutating.
     sync = _describe_checkout_sync(path, compare_ref)
+    safety_error = _ignored_update_collision_error(path, compare_ref)
+    if safety_error:
+        return {'ok': False, 'message': safety_error, 'target': target}
     if sync.get('relationship') == 'identical':
         return {
             'ok': True,
@@ -2734,8 +2792,11 @@ def _apply_update_inner(target, channel=DEFAULT_UPDATE_CHANNEL):
         # unlink it from the working tree before the stash push.
         untracked, listed = _list_untracked_files(path)
         if not listed:
-            untracked = list(sync.get('untracked_files') or [])
-        collider_paths = _untracked_colliders(path, compare_ref, untracked)
+            return _attach_recovery({'ok': False, 'message': 'Update aborted: could not enumerate untracked paths.'}, path, snapshot)
+        try:
+            collider_paths = _untracked_colliders(path, compare_ref, untracked)
+        except (OSError, RuntimeError) as exc:
+            return _attach_recovery({'ok': False, 'message': f'Update aborted: {exc}.'}, path, snapshot)
         if collider_paths and not backup_branch:
             return {
                 'ok': False,
