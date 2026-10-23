@@ -799,17 +799,18 @@ def _advance_origin(tmp_path, origin, files, message):
     _git(work, 'push', '-q', 'origin', 'HEAD:main')
 
 
-def _patch_agent_update(monkeypatch, agent, *, gateway=None):
-    monkeypatch.setattr(updates, '_AGENT_DIR', agent)
-    monkeypatch.setattr(updates, 'REPO_ROOT', agent)
+def _patch_agent_update(monkeypatch, agent, *, gateway=None, module=None):
+    module = updates if module is None else module
+    monkeypatch.setattr(module, '_AGENT_DIR', agent)
+    monkeypatch.setattr(module, 'REPO_ROOT', agent)
     monkeypatch.setattr(
-        updates, '_select_apply_compare_ref',
+        module, '_select_apply_compare_ref',
         lambda path, channel='stable', target=None: 'origin/main',
     )
-    monkeypatch.setattr(updates, '_schedule_restart', lambda delay=2.0: None)
+    monkeypatch.setattr(module, '_schedule_restart', lambda delay=2.0: None)
     if gateway is None:
         gateway = lambda: (True, {'status': 'completed'})
-    monkeypatch.setattr(updates, '_ensure_gateway_restart_for_agent_update', gateway)
+    monkeypatch.setattr(module, '_ensure_gateway_restart_for_agent_update', gateway)
 
 
 def _prepare_history(tmp_path, history, *, dirty_tracked=False, untracked_collider=False):
@@ -974,19 +975,31 @@ def test_real_repo_enumeration_failure_is_closed(tmp_path, monkeypatch, force, f
     assert (agent / 'tracked.txt').read_bytes() == _DIRTY_BYTES
 
 
-def test_diagnose_route_omits_secrets(tmp_path, monkeypatch):
+@pytest.mark.parametrize('reimport_updates', [False, True])
+def test_diagnose_route_omits_secrets(tmp_path, monkeypatch, reimport_updates):
+    import importlib
     import json
     from types import SimpleNamespace
     from urllib.parse import urlparse
     import api.routes as routes
 
+    if reimport_updates:
+        import api
+        # Other tests can re-import this module after our collection-time import.
+        # Preserve both import registries so this scenario cannot leak outward.
+        monkeypatch.setattr(api, 'updates', sys.modules['api.updates'])
+        monkeypatch.delitem(sys.modules, 'api.updates')
+        importlib.import_module('api.updates')
+
+    route_updates = importlib.import_module('api.updates')
+
     _origin, agent = _make_agent_pair(tmp_path)
     _git(agent, 'remote', 'set-url', 'origin',
          'https://user:USERINFO_SECRET@example.test/repo.git?token=QUERY_SECRET')
-    _patch_agent_update(monkeypatch, agent)
+    _patch_agent_update(monkeypatch, agent, module=route_updates)
     monkeypatch.setattr(routes, '_handle_extension_sidecar_proxy', lambda *a: False)
     monkeypatch.setattr(routes, 'j', lambda handler, payload: payload)
-    real_run = updates.subprocess.run
+    real_run = route_updates.subprocess.run
 
     def fake_ps(args, **kwargs):
         if args[0] == 'ps':
@@ -994,11 +1007,11 @@ def test_diagnose_route_omits_secrets(tmp_path, monkeypatch):
                 f'123 python {agent}/server.py --api-key ARGV_SECRET\n')
         return real_run(args, **kwargs)
 
-    monkeypatch.setattr(updates.subprocess, 'run', fake_ps)
+    monkeypatch.setattr(route_updates.subprocess, 'run', fake_ps)
     payload = routes.handle_get(SimpleNamespace(headers={}),
                                 urlparse('/api/updates/diagnose?target=agent'))
     encoded = json.dumps(payload)
-    assert payload['ok'] is True
+    assert payload['ok'] is True, payload
     assert payload['processes'] == [{'pid': 123}]
     for secret in ('USERINFO_SECRET', 'QUERY_SECRET', 'ARGV_SECRET'):
         assert secret not in encoded
